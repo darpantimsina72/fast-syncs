@@ -1,0 +1,15 @@
+# ── Thin-client dependencies (server/proxy mode) ─────────────────────
+# In the normal shared setup all AI calls go through your server, so the
+# client needs NO heavy libraries. sync_matcher.py runs on the Python
+# standard library alone (urllib, json, wave, ssl, ...).
+#
+# The two packages below are OPTIONAL quality-of-life helpers for TLS on
+# locked-down corporate machines (SSL-inspection proxies). The script works
+# without them, but they make HTTPS "just work" behind Zscaler/Netskope/etc.
+truststore>=0.9 ; python_version >= "3.10"
+certifi
+
+# ── Running WITHOUT a server (direct mode)? ──────────────────────────
+# If you call the AI providers directly from this machine (no server URL
+# configured), you also need the heavier libraries:
+#     pip install -r requirements-direct.txt

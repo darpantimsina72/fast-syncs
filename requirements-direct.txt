@@ -1,0 +1,12 @@
+# ── Direct-mode dependencies (no server) ─────────────────────────────
+# Only needed when sync_matcher.py calls the AI providers itself instead of
+# routing through your server. Install on top of the thin requirements:
+#     pip install -r requirements.txt -r requirements-direct.txt
+
+# Gemini via Vertex AI service account (preferred direct backend).
+google-genai>=0.3.0
+
+# Audio slicing for any format + mono downmix. Without it the client falls
+# back to the stdlib `wave` module (PCM .wav only) — fine for Reaper renders.
+soundfile>=0.12
+numpy>=1.24

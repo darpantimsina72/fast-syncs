@@ -1,0 +1,67 @@
+# ── Secrets — NEVER commit these ─────────────────────────────
+# NOTE: git does NOT support inline (end-of-line) comments in .gitignore.
+# Every comment must be on its own line, or the pattern silently breaks.
+
+# Local settings file — contains all API keys.
+sync_pipeline_settings.json
+**/sync_pipeline_settings.json
+
+# Google Cloud service-account private keys.
+vertex_key.json
+**/vertex_key.json
+service_account.json
+**/service_account.json
+
+# Generic key/cert material.
+*.pem
+*.key
+
+# Environment files (server real keys + client tokens), in any subdir.
+.env
+**/.env
+
+# ...but DO track example templates.
+!*.env.example
+!**/*.env.example
+
+# ── Local Python environment ─────────────────────────────────
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# ── Generated at runtime ─────────────────────────────────────
+sync_cache.json
+sync_config.json
+sync_results.json
+sync_python_log.txt
+sync_python_pid.txt
+sync_python_done.txt
+.clip_tmp.txt
+
+# ── Audio + project artifacts ────────────────────────────────
+*.wav
+*.mp3
+*.aif
+*.aiff
+*.m4a
+*.flac
+*.ogg
+*.RPP
+*.RPP-bak
+
+# ── Archives / local distribution copies ─────────────────────
+*.zip
+
+# Older parallel copy of the whole project, kept locally only.
+# (folder name has a trailing space, so use a wildcard to match it.)
+# (Remove this line if you decide to ship that variant instead.)
+akash anna's*/
+
+# ── OS / editor cruft ────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+Thumbs.db
+.idea/
+.vscode/

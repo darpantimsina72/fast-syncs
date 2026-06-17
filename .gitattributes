@@ -1,0 +1,34 @@
+# ── Line-ending normalization (critical for cross-platform GitHub use) ──
+# Without this, a Windows clone can get LF-ending .bat files (cmd.exe can
+# mis-parse them) and a checkout can give .sh files CRLF endings (which breaks
+# `#!/usr/bin/env bash`). Pin each type to the endings its interpreter needs.
+
+# Default: normalize text to LF in the repo, auto-detect on checkout.
+* text=auto eol=lf
+
+# Windows batch files MUST be CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Unix shell scripts MUST stay LF, on every OS.
+*.sh    text eol=lf
+
+# Source files — keep LF everywhere (Python/Lua are newline-agnostic; this
+# just keeps diffs clean and avoids accidental CRLF churn).
+*.py    text eol=lf
+*.lua   text eol=lf
+*.json  text eol=lf
+*.txt   text eol=lf
+*.md    text eol=lf
+
+# ── Binary assets (never line-ending-normalize or diff these) ──
+*.wav   binary
+*.mp3   binary
+*.aif   binary
+*.aiff  binary
+*.m4a   binary
+*.flac  binary
+*.ogg   binary
+*.RPP   binary
+*.RPP-bak binary
+*.DS_Store binary
