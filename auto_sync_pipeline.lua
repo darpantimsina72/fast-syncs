@@ -30,14 +30,22 @@ local MATCH_MODE       = "gemini"      -- gemini | hybrid | duration
 --   elevenlabs | gemini
 local ASR_PROVIDER     = "elevenlabs"
 
--- Matching always uses Gemini. Backend chooses how to call it:
---   vertex = Google Cloud service-account JSON (fast, no rate limits)
---   rest   = Gemini API key from aistudio.google.com (free tier exists)
+-- Matching always uses Gemini. Backend chooses HOW to call it:
+--   vertex  = Google Cloud service-account JSON (fast, no rate limits)
+--   rest    = Google AI Studio API key (AIza...), Gemini's native endpoint
+--   gateway = an OpenAI-compatible proxy serving Gemini (e.g. an internal
+--             LiteLLM gateway). Uses {GEMINI_BASE_URL}/v1/chat/completions
+--             with the Gemini key sent as a Bearer token (often "sk-...").
 local GEMINI_BACKEND   = "vertex"
 
 -- Gemini model — edit freely. Look up current names at
 -- https://ai.google.dev/gemini-api/docs/models  (or check Vertex Model Garden).
 local GEMINI_MODEL     = "gemini-2.5-pro"
+
+-- Base URL for the OpenAI-compatible gateway. Only used when
+-- GEMINI_BACKEND = "gateway". Example: https://your-gateway.example.com
+-- Blank = not used (vertex/rest talk to Google directly).
+local GEMINI_BASE_URL  = ""
 
 -- Per-provider keys. Stored locally in sync_pipeline_settings.json (gitignored).
 local ELEVENLABS_KEY   = ""
@@ -96,6 +104,7 @@ local function load_settings()
   v = jval("asr_provider")     if v and v ~= "" then ASR_PROVIDER     = v end
   v = jval("gemini_backend")   if v and v ~= "" then GEMINI_BACKEND   = v end
   v = jval("gemini_model")     if v and v ~= "" then GEMINI_MODEL     = v end
+  v = jval("gemini_base_url")  if v then GEMINI_BASE_URL = v end
 
   -- Per-provider keys
   v = jval("elevenlabs_key")   if v then ELEVENLABS_KEY  = v end
@@ -161,6 +170,7 @@ local function save_settings()
   f:write(string.format('  "asr_provider": "%s",\n',     je(ASR_PROVIDER)))
   f:write(string.format('  "gemini_backend": "%s",\n',   je(GEMINI_BACKEND)))
   f:write(string.format('  "gemini_model": "%s",\n',     je(GEMINI_MODEL)))
+  f:write(string.format('  "gemini_base_url": "%s",\n',  je(GEMINI_BASE_URL)))
   f:write(string.format('  "elevenlabs_key": "%s",\n',   je(ELEVENLABS_KEY)))
   f:write(string.format('  "gemini_key": "%s",\n',       je(GEMINI_KEY)))
   f:write(string.format('  "vertex_key_path": "%s",\n',  je(VERTEX_KEY_PATH)))
@@ -248,18 +258,20 @@ local function _dialog_keys()
   local tm = _mask_key(API_TOKEN)
 
   local ret, csv = reaper.GetUserInputs(
-    "Sync — 2/3  Server & keys", 7,
+    "Sync — 2/3  Server & keys", 8,
     "Server URL (blank = direct/local mode):,"               ..
     "Server access token:,"                                  ..
-    "Gemini backend (vertex / rest):,"                       ..
+    "Gemini backend (vertex / rest / gateway):,"             ..
+    "Gemini gateway URL (only for backend=gateway):,"        ..
     "Gemini model:,"                                         ..
     "Vertex JSON path (blank = use vertex_key.json):,"       ..
-    "Gemini API key (direct mode, backend=rest):,"           ..
+    "Gemini key (rest=AIza / gateway=Bearer):,"              ..
     "ElevenLabs key (direct mode):,"                         ..
     "extrawidth=320,separator=" .. FIELD_SEP,
     API_BASE        .. FIELD_SEP ..
     tm              .. FIELD_SEP ..
     GEMINI_BACKEND  .. FIELD_SEP ..
+    GEMINI_BASE_URL .. FIELD_SEP ..
     GEMINI_MODEL    .. FIELD_SEP ..
     VERTEX_KEY_PATH .. FIELD_SEP ..
     gm              .. FIELD_SEP ..
@@ -276,10 +288,12 @@ local function _dialog_keys()
   API_BASE        = f[1] or ""
   API_TOKEN       = update_key(2, API_TOKEN, tm)
   if f[3] and f[3] ~= "" then GEMINI_BACKEND = f[3] end
-  if f[4] and f[4] ~= "" then GEMINI_MODEL   = f[4] end
-  VERTEX_KEY_PATH = f[5] or ""
-  GEMINI_KEY      = update_key(6, GEMINI_KEY,     gm)
-  ELEVENLABS_KEY  = update_key(7, ELEVENLABS_KEY, em)
+  -- Gateway URL is not secret → set verbatim (blank clears).
+  GEMINI_BASE_URL = f[4] or ""
+  if f[5] and f[5] ~= "" then GEMINI_MODEL   = f[5] end
+  VERTEX_KEY_PATH = f[6] or ""
+  GEMINI_KEY      = update_key(7, GEMINI_KEY,     gm)
+  ELEVENLABS_KEY  = update_key(8, ELEVENLABS_KEY, em)
   return true
 end
 
@@ -940,6 +954,9 @@ local function main()
   log(string.format("  Matcher   : Gemini (%s, model: %s)", GEMINI_BACKEND, GEMINI_MODEL))
   if API_BASE ~= "" then
     log(string.format("  Backend   : server proxy (%s)", API_BASE))
+  elseif GEMINI_BACKEND == "gateway" then
+    log(string.format("  Backend   : gateway (%s)",
+        (GEMINI_BASE_URL ~= "" and GEMINI_BASE_URL or "NO URL SET!")))
   else
     log("  Backend   : direct (keys on this machine)")
   end

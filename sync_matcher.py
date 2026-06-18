@@ -76,6 +76,12 @@ except Exception:
     _HAS_TRUSTSTORE = False
 
 _SSL_CTX = None
+_SSL_INSECURE_CTX = None
+# Once a cert-verify failure proves a TLS-inspection proxy is in the path, we
+# stop verifying for the rest of the session (avoids a failed-then-retried
+# double request on every subsequent call). Off until proven necessary.
+_SSL_FORCE_INSECURE = False
+_SSL_INSECURE_WARNED = False
 
 
 def _ssl_context():
@@ -88,6 +94,8 @@ def _ssl_context():
     because real certificates carry AKI. certifi is added as an extra root
     source on top of the OS store.
     """
+    if _SSL_FORCE_INSECURE:
+        return _insecure_ssl_context()
     global _SSL_CTX
     if _SSL_CTX is not None:
         return _SSL_CTX
@@ -103,9 +111,60 @@ def _ssl_context():
     return ctx
 
 
+def _insecure_ssl_context():
+    """Last-resort context with verification disabled. Only used after a real
+    cert-verify failure (TLS-inspection proxy whose root isn't trusted)."""
+    global _SSL_INSECURE_CTX
+    if _SSL_INSECURE_CTX is None:
+        c = ssl.create_default_context()
+        c.check_hostname = False
+        c.verify_mode = ssl.CERT_NONE
+        _SSL_INSECURE_CTX = c
+    return _SSL_INSECURE_CTX
+
+
+def _is_cert_verify_error(err):
+    """True only for TLS certificate-VERIFICATION failures (not HTTP errors,
+    timeouts, DNS, resets). These are the ones a TLS-inspection proxy causes."""
+    reason = getattr(err, "reason", err)
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return True
+    msg = str(reason).lower()
+    return ("certificate verify failed" in msg
+            or "certificate_verify_failed" in msg
+            or "self-signed certificate" in msg
+            or "self signed certificate" in msg)
+
+
 def _urlopen(req, timeout=120):
-    """urllib.request.urlopen wrapper that injects the proxy-tolerant SSL context."""
-    return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
+    """urllib.request.urlopen wrapper with a verified-first, insecure-fallback
+    TLS strategy for Windows machines behind SSL-inspecting AV/proxies.
+
+    1. Try with the proxy-tolerant verified context (OS store + certifi, AKI
+       strictness relaxed). This succeeds whenever the proxy root is trusted.
+    2. ONLY if that fails with a certificate-VERIFY error (e.g. a self-signed
+       inspection root that isn't installed in the trust store) retry once with
+       verification disabled, print a one-time notice, and disable verification
+       for the rest of the session. Never disables verification up front, and
+       never swallows non-certificate errors (HTTP 4xx/5xx, timeouts) — those
+       propagate so callers handle them as before.
+    """
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
+    except urllib.error.URLError as e:
+        # HTTPError is a URLError subclass but means TLS already succeeded —
+        # _is_cert_verify_error() returns False for it, so it re-raises here.
+        if not _is_cert_verify_error(e):
+            raise
+        global _SSL_FORCE_INSECURE, _SSL_INSECURE_WARNED
+        if not _SSL_INSECURE_WARNED:
+            print("    [SSL] Certificate verification failed — a TLS-inspection "
+                  "proxy/antivirus is likely intercepting HTTPS. Retrying with "
+                  "verification DISABLED for the rest of this run.")
+            _SSL_INSECURE_WARNED = True
+        _SSL_FORCE_INSECURE = True
+        return urllib.request.urlopen(req, timeout=timeout,
+                                      context=_insecure_ssl_context())
 
 
 # ── Optional API proxy mode ──────────────────────────────────────────
@@ -191,6 +250,13 @@ _VERTEX_CLIENT = None
 _GEMINI_BACKEND = os.environ.get("SYNC_GEMINI_BACKEND", "auto").lower()
 _GEMINI_MATCHER_MODEL = os.environ.get("SYNC_GEMINI_MODEL", "gemini-2.5-pro")
 _GEMINI_AUDIO_MODEL   = os.environ.get("SYNC_GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
+
+# OpenAI-compatible gateway for Gemini (e.g. an internal LiteLLM-style proxy).
+# When backend == "gateway" (or "auto" with this set) the matcher talks to
+# {base}/v1/chat/completions with an `Authorization: Bearer <key>` header — the
+# OpenAI Chat Completions contract — instead of Google's native API. The key in
+# this mode is a Bearer token (often "sk-..."), NOT a Google "AIza..." key.
+_GEMINI_BASE_URL = os.environ.get("SYNC_GEMINI_BASE_URL", "").rstrip("/")
 
 def _get_vertex_client():
     """Lazy-init Vertex AI client from vertex_key.json beside this script.
@@ -871,6 +937,60 @@ _OPENAI_KEY    = None
 _ANTHROPIC_KEY = None
 
 
+def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1):
+    """Send the matcher prompt to an OpenAI-compatible gateway serving Gemini.
+
+    POST {base_url}/v1/chat/completions with `Authorization: Bearer <api_key>`.
+    Returns the assistant text, or None on failure. Routes through _urlopen so
+    it inherits the same TLS-inspection handling as every other call. No
+    response_format is forced — not all gateways accept it; the prompt already
+    asks for JSON and the callers strip ``` fences.
+    """
+    if not base_url:
+        print("    [GATEWAY] backend=gateway but no gateway URL set "
+              "(SYNC_GEMINI_BASE_URL) — aborting")
+        return None
+    if not api_key:
+        print("    [GATEWAY] backend=gateway needs a Bearer key "
+              "(your gateway/Gemini key) — aborting")
+        return None
+
+    url = f"{base_url}/v1/chat/completions"
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt_text}],
+        "temperature": temperature,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    try:
+        t0 = time.time()
+        print(f"    [GATEWAY] Sending {len(prompt_text)} chars to {model} "
+              f"via {base_url}…")
+        with _urlopen(req, timeout=180) as resp:
+            result = json.loads(resp.read())
+        text = (result["choices"][0]["message"]["content"] or "").strip()
+        print(f"    [GATEWAY] Got {len(text)} chars in {time.time()-t0:.1f}s")
+        return text or None
+    except urllib.error.HTTPError as e:
+        err = ""
+        try:
+            err = e.read().decode(errors="replace")[:200]
+        except Exception:
+            pass
+        print(f"    [GATEWAY] HTTP {e.code}: {e.reason} — {err}")
+        return None
+    except Exception as e:
+        print(f"    [GATEWAY] Error: {e}")
+        return None
+
+
 def _call_gemini(prompt_text, api_key, model="gemini-2.5-pro",
                  temperature=0.1, cache=None):
     """
@@ -914,6 +1034,24 @@ def _call_gemini(prompt_text, api_key, model="gemini-2.5-pro",
             if cache is not None:
                 cache.set_raw(cache_key, text)
         return text or None
+
+    # ── Path 0: OpenAI-compatible gateway ─────────────────────
+    # Used when backend == "gateway", or "auto" with a gateway URL configured.
+    # Routes Gemini through {base}/v1/chat/completions (Bearer key) instead of
+    # Google's native API or Vertex.
+    if _GEMINI_BACKEND == "gateway" or (_GEMINI_BACKEND == "auto" and _GEMINI_BASE_URL):
+        text = _call_gemini_gateway(prompt_text, api_key, _GEMINI_BASE_URL,
+                                    _GEMINI_MATCHER_MODEL, temperature)
+        if text:
+            _GEMINI_RESPONSE_CACHE[cache_key] = text
+            if cache is not None:
+                cache.set_raw(cache_key, text)
+            return text
+        # Explicit gateway choice must not silently fall through to Google.
+        if _GEMINI_BACKEND == "gateway":
+            print("    [GATEWAY] No response from gateway — aborting "
+                  "(backend=gateway)")
+            return None
 
     # ── Path 1: Vertex AI ─────────────────────────────────────
     # Skipped if backend == "rest"; required if backend == "vertex".
@@ -2288,7 +2426,18 @@ def main():
     # ── Matcher sanity checks ────────────────────────────────
     if args.mode == "gemini":
         if matcher_prov == "gemini":
-            if not gemini_key and not (SCRIPT_DIR / "vertex_key.json").exists():
+            if _GEMINI_BACKEND == "gateway":
+                # Gateway needs a Bearer key + a base URL; vertex_key.json is
+                # irrelevant here.
+                if not gemini_key:
+                    print("ERROR: backend=gateway requires --gemini-key "
+                          "(the gateway Bearer token)")
+                    raise SystemExit(1)
+                if not _GEMINI_BASE_URL:
+                    print("ERROR: backend=gateway requires SYNC_GEMINI_BASE_URL "
+                          "(the gateway base URL)")
+                    raise SystemExit(1)
+            elif not gemini_key and not (SCRIPT_DIR / "vertex_key.json").exists():
                 print("ERROR: matcher=gemini requires --gemini-key OR vertex_key.json")
                 raise SystemExit(1)
         elif matcher_prov == "openai" and not openai_key:
@@ -2299,6 +2448,11 @@ def main():
             raise SystemExit(1)
 
     print(f"  Matcher provider: {matcher_prov}")
+    if matcher_prov == "gemini":
+        if _GEMINI_BACKEND == "gateway":
+            print(f"  Gemini backend  : gateway → {_GEMINI_BASE_URL}")
+        else:
+            print(f"  Gemini backend  : {_GEMINI_BACKEND}")
 
     cache = TranscriptCache(args.cache)
 

@@ -68,6 +68,8 @@ def _build_env(settings: dict) -> dict:
     put("SYNC_GEMINI_KEY",     settings.get("gemini_key"))
     put("SYNC_GEMINI_BACKEND", settings.get("gemini_backend"))
     put("SYNC_GEMINI_MODEL",   settings.get("gemini_model"))
+    # OpenAI-compatible gateway base URL (used when gemini_backend == "gateway").
+    put("SYNC_GEMINI_BASE_URL", settings.get("gemini_base_url"))
 
     # Thin-client / server proxy: when these are set the matcher routes every
     # provider call through the server and needs no local keys at all.

@@ -76,6 +76,26 @@ the ZIP to update.
 Settings are saved to `sync_pipeline_settings.json` next to the script. That
 file holds your keys and is **gitignored** — it never gets committed.
 
+### Choosing the Gemini backend (matching)
+
+The semantic matcher is always Gemini, but you choose **how** it's called via the
+**Gemini backend** field in the settings dialog:
+
+| Backend | When to use | Key format | Needs |
+|---|---|---|---|
+| `vertex` | You have a Google Cloud service account | service-account JSON | `vertex_key.json` next to the script (or a path in the dialog) |
+| `rest` | You have a Google AI Studio key | `AIza...` | the key in the **Gemini key** field |
+| `gateway` | Your org runs an OpenAI-compatible proxy that serves Gemini (e.g. an internal LiteLLM gateway) | Bearer token, often `sk-...` | **Gemini gateway URL** + the Bearer token in the **Gemini key** field |
+
+- **`gateway`** calls `{gateway URL}/v1/chat/completions` with
+  `Authorization: Bearer <key>` — the OpenAI Chat Completions contract — instead
+  of Google's native endpoint.
+- **Match the key to the backend:** an `AIza...` key is Google-native (`rest`);
+  an `sk-...` key is OpenAI-style and belongs to a `gateway` (or real OpenAI).
+  Sending an `sk-...` key to `rest` returns HTTP 400 "API key not valid".
+- The gateway is used for **matching** only. Transcription (ASR) still uses
+  ElevenLabs (default) or Google.
+
 ---
 
 ## Troubleshooting
@@ -85,9 +105,15 @@ file holds your keys and is **gitignored** — it never gets committed.
 - **Track not found.** Track names must match exactly, including capital
   letters (`Dialogue VO`, `Dub`).
 - **HTTPS / certificate errors on a corporate network** (Zscaler, Netskope,
-  Defender, ESET…). The default install includes `truststore`, which routes TLS
-  through the OS certificate store and fixes most SSL-inspection-proxy errors
-  automatically. No action needed.
+  Defender, ESET…), e.g. `CERTIFICATE_VERIFY_FAILED ... Missing Authority Key
+  Identifier`. Handled automatically in three layers: (1) the default install
+  includes `truststore`, which routes TLS through the OS certificate store;
+  (2) the client relaxes the strict Authority-Key-Identifier check that
+  OpenSSL 3.x enforces; (3) if a cert *still* fails to verify (an inspection
+  root that isn't in the trust store), the client prints a one-time `[SSL]`
+  notice and retries with verification disabled for the rest of the run. No
+  action needed. If transcripts come back empty and matches are all zero,
+  it's almost always this — check the log for the `[SSL]` line.
 - **It failed — where are the logs?** Full output is written to
   `sync_python_log.txt` next to the script, and also streamed live into
   REAPER's console while it runs.
