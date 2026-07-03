@@ -29,6 +29,20 @@ if not defined PYEXE (
   exit /b 1
 )
 
+rem Probe that the launcher actually runs Python 3. On stock Windows 10/11,
+rem "python" on PATH is often the Microsoft Store alias stub, which passes
+rem the `where` check above but only opens the Store page and exits with an
+rem error. `py -3` with no Python installed fails the same way.
+%PYEXE% -c "import sys; assert sys.version_info >= (3, 9)" >nul 2>&1
+if errorlevel 1 (
+  echo ERROR: "%PYEXE%" did not run as a working Python 3.9+ ^(3.11+ recommended^).
+  echo It may be the Microsoft Store placeholder alias, not a real install.
+  echo Install Python from https://www.python.org/downloads/ and tick
+  echo "Add python.exe to PATH" during install, then re-run this file.
+  pause
+  exit /b 1
+)
+
 echo [setup] Using: %PYEXE%
 echo [setup] Creating virtualenv in .\venv ...
 %PYEXE% -m venv venv
@@ -61,6 +75,7 @@ if errorlevel 1 ( echo ERROR: dependency install failed. & pause & exit /b 1 )
 if "%DIRECT%"=="1" (
   echo [setup] Installing direct-mode dependencies ...
   "%VPY%" -m pip install --quiet -r requirements-direct.txt
+  if errorlevel 1 ( echo ERROR: direct-mode dependency install failed. & pause & exit /b 1 )
 )
 
 echo.
@@ -70,6 +85,11 @@ if "%DIRECT%"=="1" (
 ) else (
   "%VPY%" -c "import ssl, wave, urllib.request; print('OK (thin client)')"
 )
+if errorlevel 1 ( echo ERROR: verification failed - dependencies did not import. & pause & exit /b 1 )
+
+rem Remember the install mode, so update.bat (and the Lua bootstrapper) keep
+rem direct-mode installs direct across updates and venv rebuilds.
+if "%DIRECT%"=="1" ( type nul > ".direct-mode" ) else ( del ".direct-mode" 2>nul )
 
 echo.
 echo Setup complete. You can now run auto_sync_pipeline.lua in Reaper.

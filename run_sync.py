@@ -34,6 +34,12 @@ import traceback
 from pathlib import Path
 
 
+# Warnings raised before the log file is open. We can't print() them: when
+# REAPER launches this script detached (no console), stdout may be an invalid
+# handle on Windows and print() itself would crash the launcher.
+_EARLY_WARNINGS = []
+
+
 def _load_settings(script_dir: Path) -> dict:
     """Read the flat JSON settings file. Returns {} if missing/unreadable."""
     path = script_dir / "sync_pipeline_settings.json"
@@ -44,7 +50,7 @@ def _load_settings(script_dir: Path) -> dict:
     except FileNotFoundError:
         return {}
     except Exception as e:
-        print(f"[run_sync] WARNING: could not parse settings.json: {e}")
+        _EARLY_WARNINGS.append(f"[run_sync] WARNING: could not parse settings.json: {e}")
         return {}
 
 
@@ -114,6 +120,9 @@ def main() -> int:
 
     # Open the log fresh (truncate) so the Lua poller sees only this run.
     log_file = open(log_path, "w", encoding="utf-8")
+    for w in _EARLY_WARNINGS:
+        log_file.write(w + "\n")
+    log_file.flush()
     exit_code = 1
     try:
         if not matcher.exists():
@@ -132,12 +141,19 @@ def main() -> int:
         log_file.flush()
 
         # Child writes directly to the log fd → live, unbuffered output.
+        # CREATE_NO_WINDOW: if this launcher was started with no console
+        # (REAPER's ExecProcess / a detached start), a console-subsystem
+        # child would otherwise allocate its own visible console window.
+        kwargs = {}
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         proc = subprocess.run(
             cmd,
             cwd=str(script_dir),
             stdout=log_file,
             stderr=subprocess.STDOUT,
             env=env,
+            **kwargs,
         )
         exit_code = proc.returncode
     except Exception:

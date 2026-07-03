@@ -44,7 +44,7 @@ do
 done
 
 if [ -z "$PYTHON_BIN" ]; then
-    echo "ERROR: No usable Python 3.11+ with working pip was found."
+    echo "ERROR: No usable Python 3 (3.9+, 3.11+ recommended) with working pip was found."
     echo "Install Python with:  brew install python@3.13"
     exit 1
 fi
@@ -70,6 +70,10 @@ else
     # Thin client runs on the stdlib; just confirm the script imports cleanly.
     ./venv/bin/python3 -c "import ssl, wave, urllib.request; print('OK (thin client)')"
 fi
+
+# Remember the install mode, so update.sh (and the Lua bootstrapper) keep
+# direct-mode installs direct across updates and venv rebuilds.
+if [ "$DIRECT" = "1" ]; then touch .direct-mode; else rm -f .direct-mode; fi
 
 echo
 echo "Setup complete. You can now run auto_sync_pipeline.lua in Reaper."

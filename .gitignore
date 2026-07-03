@@ -32,6 +32,8 @@ __pycache__/
 *.pyc
 
 # ── Generated at runtime ─────────────────────────────────────
+# Install-mode marker written by setup.bat/setup.sh (--direct).
+.direct-mode
 sync_cache.json
 sync_config.json
 sync_results.json

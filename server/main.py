@@ -35,6 +35,15 @@ from collections import defaultdict
 import requests
 from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException, Request
 
+try:
+    # Route outbound TLS through the OS certificate store (declared in
+    # requirements.txt) — matches the client's behaviour behind corporate
+    # TLS-inspection proxies. Optional: plain certifi verification otherwise.
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
 app = FastAPI(title="Sync Matcher API proxy", version="1.0")
 
 # ── Real provider keys (server-side only) ────────────────────────────

@@ -10,9 +10,11 @@
 --   5. Moves unmatched items to "Un sync" track
 --
 -- Requirements:
---   - Python 3 with google-genai
---   - soundfile  →  pip install -r requirements.txt
---   - sync_matcher.py in the SAME folder as this script
+--   - Python 3.9+ (3.11+ recommended)
+--   - One-time install: setup.bat (Windows) / setup.sh (macOS) builds ./venv.
+--     Thin-client (server) mode needs only the standard library; direct mode
+--     adds google-genai + soundfile (install with:  setup.bat --direct)
+--   - sync_matcher.py + run_sync.py in the SAME folder as this script
 --
 -- How to run:
 --   Actions > Show action list > New action > Load ReaScript
@@ -83,6 +85,23 @@ local function get_settings_path()
   return dir .. "/sync_pipeline_settings.json"
 end
 
+-- Coerce free-text values to what the Python side accepts, so a typo or a
+-- stray capital letter ("Gemini", "VERTEX") can never crash argparse.
+-- Defined BEFORE load_settings so its body can see them (lexical scoping).
+local function _norm_mode(m)
+  m = tostring(m or ""):lower()
+  if m ~= "gemini" and m ~= "hybrid" and m ~= "duration" then m = "gemini" end
+  return m
+end
+
+local function _norm_backend(b)
+  b = tostring(b or ""):lower()
+  if b ~= "vertex" and b ~= "rest" and b ~= "gateway" and b ~= "auto" then
+    b = "vertex"
+  end
+  return b
+end
+
 local function load_settings()
   local path = get_settings_path()
   local f = io.open(path, "r")
@@ -90,9 +109,13 @@ local function load_settings()
   local content = f:read("*a")
   f:close()
 
-  -- Simple JSON parsing for flat key-value pairs
+  -- Simple JSON parsing for flat key-value pairs.
+  -- IMPORTANT: unescape \\ and \" — save_settings() escapes them, so without
+  -- this a Windows path like C:\Users\... doubles its backslashes on every
+  -- save/load cycle (C:\\Users → C:\\\\Users → ...) and slowly corrupts.
   local function jval(key)
     local val = content:match('"' .. key .. '"%s*:%s*"([^"]*)"')
+    if val then val = val:gsub('\\(["\\])', '%1') end
     return val
   end
 
@@ -115,9 +138,14 @@ local function load_settings()
 
   -- Guard: old settings.json may have asr_provider = bhashini/openai (removed).
   -- Python only accepts elevenlabs|gemini now, so coerce anything else.
+  ASR_PROVIDER = ASR_PROVIDER:lower()
   if ASR_PROVIDER ~= "elevenlabs" and ASR_PROVIDER ~= "gemini" then
     ASR_PROVIDER = "elevenlabs"
   end
+  -- Same for mode/backend — a hand-edited or legacy settings.json must never
+  -- feed a value the Python argparse would reject.
+  MATCH_MODE     = _norm_mode(MATCH_MODE)
+  GEMINI_BACKEND = _norm_backend(GEMINI_BACKEND)
 
   -- Multi-line script_text needs special parsing (jval bails at first quote).
   -- Capture between "script_text":" ... " just before the next key line.
@@ -176,6 +204,9 @@ local function save_settings()
   f:write(string.format('  "vertex_key_path": "%s",\n',  je(VERTEX_KEY_PATH)))
   f:write(string.format('  "api_base": "%s",\n',         je(API_BASE)))
   f:write(string.format('  "api_token": "%s",\n',        je(API_TOKEN)))
+  -- Persist the user-pinned interpreter override; without this line a
+  -- hand-edited "python_cmd" would be erased on the next dialog OK.
+  f:write(string.format('  "python_cmd": "%s",\n',       je(PYTHON_CMD)))
   f:write(string.format('  "script_text": "%s"\n',       jstr(SCRIPT_TEXT)))
   f:write('}\n')
   f:close()
@@ -202,8 +233,10 @@ local FIELD_SEP = "|"
 local function _split(csv)
   local fields = {}
   -- Append separator so the final field is captured even if empty.
+  -- Trim whitespace: a pasted URL/key with a trailing space would otherwise
+  -- be saved verbatim and silently break every request.
   for v in (csv .. FIELD_SEP):gmatch("([^" .. FIELD_SEP .. "]*)" .. FIELD_SEP) do
-    fields[#fields + 1] = v
+    fields[#fields + 1] = v:match("^%s*(.-)%s*$")
   end
   return fields
 end
@@ -236,9 +269,9 @@ local function _dialog_basics()
   end
   if fields[1] and fields[1] ~= "" then TRACK_VO_NAME  = fields[1] end
   if fields[2] and fields[2] ~= "" then TRACK_DUB_NAME = fields[2] end
-  if fields[3] and fields[3] ~= "" then DUB_LANGUAGE   = fields[3] end
-  if fields[4] and fields[4] ~= "" then MATCH_MODE     = fields[4] end
-  if fields[5] and fields[5] ~= "" then ASR_PROVIDER   = fields[5] end
+  if fields[3] and fields[3] ~= "" then DUB_LANGUAGE   = fields[3]:lower() end
+  if fields[4] and fields[4] ~= "" then MATCH_MODE     = _norm_mode(fields[4]) end
+  if fields[5] and fields[5] ~= "" then ASR_PROVIDER   = fields[5]:lower() end
   -- Only elevenlabs|gemini are valid now; coerce typos/old values so the
   -- Python argparse (choices=["elevenlabs","gemini"]) never crashes.
   if ASR_PROVIDER ~= "elevenlabs" and ASR_PROVIDER ~= "gemini" then
@@ -287,7 +320,7 @@ local function _dialog_keys()
   -- Server URL is not secret → set it verbatim (blank clears = direct mode).
   API_BASE        = f[1] or ""
   API_TOKEN       = update_key(2, API_TOKEN, tm)
-  if f[3] and f[3] ~= "" then GEMINI_BACKEND = f[3] end
+  if f[3] and f[3] ~= "" then GEMINI_BACKEND = _norm_backend(f[3]) end
   -- Gateway URL is not secret → set verbatim (blank clears).
   GEMINI_BASE_URL = f[4] or ""
   if f[5] and f[5] ~= "" then GEMINI_MODEL   = f[5] end
@@ -422,35 +455,72 @@ local function _is_windows()
   return reaper.GetOS():match("Win") ~= nil
 end
 
--- Returns the first existing python path among the candidates, or nil.
+-- Resolve a Python *command* to a real interpreter path by RUNNING it.
+-- io.open() resolves relative names against REAPER's cwd, never the PATH,
+-- so bare names like "python" can only be validated by execution. This also
+-- rejects the Microsoft Store placeholder alias that stock Windows 10/11
+-- puts on the PATH: it opens fine as a file, but running it with arguments
+-- just prints "Python was not found" and exits non-zero.
+local function probe_python(cmd)
+  if not reaper.ExecProcess then return nil end
+  local ret = reaper.ExecProcess(
+    cmd .. ' -c "import sys;print(sys.executable)"', 15000)
+  if not ret then return nil end
+  -- ExecProcess returns "<exit code>\n<output>".
+  local code, out = ret:match("^(%-?%d+)[\r\n]+(.*)$")
+  if code ~= "0" or not out then return nil end
+  local path = out:match("^%s*([^\r\n]+)")
+  if path then path = path:gsub("%s+$", "") end
+  if path and path ~= "" and file_exists(path) then return path end
+  return nil
+end
+
+-- Returns the first working python path among the candidates, or nil.
 local function find_python()
   local script_dir = get_script_dir()
 
   -- 1. User-pinned override (loaded from settings.json) takes priority.
-  if PYTHON_CMD ~= "" and file_exists(PYTHON_CMD) then return PYTHON_CMD end
+  if PYTHON_CMD ~= "" then
+    if file_exists(PYTHON_CMD) then return PYTHON_CMD end
+    -- A bare command name ("python", "py", "py -3") can't be checked with
+    -- io.open — resolve it against the PATH by executing it. A value with a
+    -- space is a command plus args: pass it raw, not quoted as one token.
+    if not PYTHON_CMD:find("[/\\]") then
+      local probe_cmd = PYTHON_CMD:find("%s") and PYTHON_CMD
+                        or ('"' .. PYTHON_CMD .. '"')
+      local resolved = probe_python(probe_cmd)
+      if resolved then return resolved end
+    end
+  end
 
   local sep = _is_windows() and "\\" or "/"
   local bin = _is_windows() and "Scripts\\python.exe" or "bin/python3"
 
-  -- 2. Local venv next to this script — what setup.sh creates.
+  -- 2. Local venv next to this script — what setup.bat / setup.sh create.
   local local_venv = script_dir .. sep .. "venv" .. sep .. bin
   if file_exists(local_venv) then return local_venv end
 
-  -- 3. Common system installs.
-  local candidates
+  -- 3. Common system installs (fallback when the venv is missing — the thin
+  --    client needs only the standard library, so any Python 3 works).
   if _is_windows() then
-    candidates = { "python.exe", "python3.exe", "py.exe" }
+    -- No fixed install path on Windows: resolve via the PATH by execution.
+    -- "py -3" is the official launcher and exists even when python.exe is
+    -- only the Store stub; sys.executable gives the real interpreter path.
+    for _, c in ipairs({ 'py -3', 'python', 'python3' }) do
+      local resolved = probe_python(c)
+      if resolved then return resolved end
+    end
   else
-    candidates = {
+    local candidates = {
       "/opt/homebrew/bin/python3",         -- Apple Silicon Homebrew
       "/usr/local/bin/python3",            -- Intel Homebrew
       "/Library/Frameworks/Python.framework/Versions/Current/bin/python3",
       "/opt/homebrew/Cellar/python@3.13/3.13.12_1/bin/python3.13",
       "/usr/bin/python3",                  -- system
     }
-  end
-  for _, c in ipairs(candidates) do
-    if file_exists(c) then return c end
+    for _, c in ipairs(candidates) do
+      if file_exists(c) then return c end
+    end
   end
 
   return nil
@@ -481,9 +551,13 @@ local function ensure_setup()
     end
     reaper.MB("Setup will open in a new window. When it says 'Setup complete', " ..
               "close it and run this script again.", "Setup running", 0)
+    -- If this install was made with --direct, rebuild it the same way
+    -- (setup.bat --direct writes the .direct-mode marker).
+    local extra = file_exists(script_dir .. "\\.direct-mode") and " --direct" or ""
     -- start "<title>" cmd /k "<bat>"  → opens a console that stays up so the
     -- user can read progress/errors (setup.bat ends with pause too).
-    os.execute('start "fast-syncs setup" cmd /k "\"' .. setup_bat .. '\""')
+    os.execute('start "fast-syncs setup" cmd /k "\"' .. setup_bat .. '\"' ..
+               extra .. '"')
     return false
   end
 
@@ -496,8 +570,9 @@ local function ensure_setup()
   end
   reaper.MB("Setup is running in Terminal. Once it finishes, click OK to continue.",
             "Setup running", 0)
+  local extra = file_exists(script_dir .. "/.direct-mode") and " --direct" or ""
   os.execute('osascript -e \'tell application "Terminal" to do script "bash \\"' ..
-             setup_sh .. '\\""\'')
+             setup_sh .. '\\"' .. extra .. '"\'')
   -- We can't easily wait for the Terminal session to finish; tell user to retry.
   reaper.MB("After setup completes in the Terminal window, run this script again.",
             "Re-run after setup", 0)
@@ -615,10 +690,13 @@ local function build_python_cmd(config_path)
 
   local cmd
   if _is_windows() then
-    -- start "" /b  → background, no new console window. The empty "" is the
-    -- required window-title argument that `start` always consumes first.
+    -- Plain quoted command line — launched via reaper.ExecProcess(cmd, -2),
+    -- which uses CreateProcess directly (no cmd.exe, no console window).
+    -- The old `os.execute('start "" /b ...')` route spawned a visible
+    -- console that python.exe INHERITED, so a black window sat on screen
+    -- for the entire multi-minute run.
     cmd = string.format(
-      'start "" /b "%s" "%s" "%s" --language %s --mode %s --asr %s',
+      '"%s" "%s" "%s" --language %s --mode %s --asr %s',
       PYTHON_CMD, launcher, script_dir,
       DUB_LANGUAGE, MATCH_MODE, ASR_PROVIDER
     )
@@ -873,6 +951,24 @@ local function poll_python_log()
     end
   end
 
+  -- Watchdog: run_sync.py writes its "[run_sync] launching:" line within a
+  -- couple of seconds of a successful start. If the log is still empty after
+  -- 90 s, the launch failed in a way we couldn't detect (e.g. the old
+  -- `start /b` fallback, or python.exe dying before opening the log) —
+  -- stop polling instead of spinning forever with no feedback.
+  if _poll_last_size == 0 and (os.time() - _poll_start_time) > 90 then
+    reaper.ShowConsoleMsg(
+      "\nERROR: no output from Python after 90 s — launch likely failed.\n")
+    reaper.ShowMessageBox(
+      "Python produced no output for 90 seconds — the launch\n" ..
+      "probably failed.\n\n" ..
+      "Things to check:\n" ..
+      "  - the venv exists (re-run setup if it was deleted)\n" ..
+      "  - the log file: " .. tostring(_poll_log_path),
+      "Auto Sync — launch failed", 0)
+    return
+  end
+
   -- Not done yet — schedule next poll
   reaper.defer(poll_python_log)
 end
@@ -898,7 +994,9 @@ local function main()
     py = find_python()
     if not py then
       reaper.MB("Could not find a Python interpreter even after setup.\n" ..
-                "Please install Python 3.11+ and re-run setup.sh.",
+                (_is_windows()
+                  and "Please install Python 3.11+ (python.org) and re-run setup.bat."
+                  or  "Please install Python 3.11+ and re-run setup.sh."),
                 "Python not found", 0)
       return
     end
@@ -984,6 +1082,14 @@ local function main()
   -- Delete old done marker
   os.remove(done_path)
 
+  -- Truncate the old log too. The poller starts reading at offset 0, so a
+  -- leftover log from the previous run would be re-printed wholesale and the
+  -- fresh run's live output would stay hidden until the file outgrew the
+  -- stale size. (run_sync.py truncates it as well, but only ~1-3 s after
+  -- launch — the poller fires every defer cycle in that window.)
+  local lf = io.open(log_path, "w")
+  if lf then lf:close() end
+
   local asr_info = "ASR: " .. ASR_PROVIDER
   if ASR_PROVIDER == "gemini" then
     asr_info = asr_info .. " (Gemini audio)"
@@ -1012,8 +1118,31 @@ local function main()
   _poll_last_size    = 0
   _poll_start_time   = os.time()
 
-  -- Launch Python in background
-  os.execute(cmd)
+  -- Launch Python in background.
+  -- Windows: ExecProcess(-2) = fire-and-forget via CreateProcess — no
+  -- console window at all. Fallback keeps the old start/b route for very
+  -- old REAPER builds that lack ExecProcess.
+  -- macOS: shell launch with trailing & (needed for the redirect syntax).
+  if _is_windows() then
+    if reaper.ExecProcess then
+      -- ExecProcess returns nil when CreateProcess itself fails (bad
+      -- interpreter path, blocked exe) — fail loudly instead of letting the
+      -- poller spin forever waiting for output that will never come.
+      local ret = reaper.ExecProcess(cmd, -2)
+      if ret == nil then
+        reaper.ShowMessageBox(
+          "Could not launch Python.\n\nCommand:\n" .. cmd ..
+          "\n\nCheck that the interpreter path exists\n" ..
+          "(re-run setup.bat if the venv was deleted).",
+          "Auto Sync — launch failed", 0)
+        return
+      end
+    else
+      os.execute('start "" /b ' .. cmd)
+    end
+  else
+    os.execute(cmd)
+  end
 
   -- Start polling loop (runs via reaper.defer, non-blocking)
   reaper.defer(poll_python_log)

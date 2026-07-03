@@ -14,8 +14,8 @@ Works on **Windows** and **macOS**. The instructions below are Windows-first.
 
 | File | What it does |
 |---|---|
-| `auto_sync_pipeline.lua` | The REAPER ReaScript you run. The only file you load in REAPER. |
-| `Sync_Item.lua` | Helper ReaScript: align the clip under the mouse to the selected clip. |
+| `auto_sync_pipeline.lua` | The main ReaScript you load and run in REAPER. |
+| `Sync_Item.lua` | Optional helper ReaScript: align the clip under the mouse to the selected clip. Load it in REAPER the same way if you want it. |
 | `sync_matcher.py` | The Python worker (transcribe + AI match). Started for you — don't run it by hand. |
 | `run_sync.py` | Cross-platform launcher the Lua script calls. |
 | `setup.bat` / `setup.sh` | One-time installer (creates the Python virtualenv). |
@@ -33,12 +33,16 @@ Works on **Windows** and **macOS**. The instructions below are Windows-first.
 3. **Double-click `setup.bat`.** It creates a `venv` folder and installs the
    dependencies. Wait for `Setup complete`, then close the window.
    - Default install is the lightweight **thin client** (runs through a server).
-   - Calling the AI providers directly from this PC? Run from a terminal
-     instead: `setup.bat --direct`
+   - Calling the AI providers directly from this PC? Open a terminal in the
+     unzipped folder (Windows 11: right-click the folder background → *Open in
+     Terminal*; Windows 10: Shift+right-click → *Open PowerShell window here*)
+     and run: `.\setup.bat --direct`
 4. **Load the script in REAPER**: *Actions → Show action list → New action →
    Load ReaScript…* → pick `auto_sync_pipeline.lua` → **Run**.
    - First run shows a 3-step settings dialog (tracks, keys/server, script text).
    - If the `venv` is missing, the script offers to run `setup.bat` for you.
+   - Optional: load `Sync_Item.lua` the same way for the one-clip manual
+     align helper.
 
 ## Install on macOS
 
@@ -57,8 +61,14 @@ Then load `auto_sync_pipeline.lua` in REAPER the same way as above.
 - **macOS:** `bash update.sh`
 
 Both `git pull` the latest version (if it's a git clone) and refresh the Python
-dependencies in `venv`. If you downloaded a ZIP instead of cloning, re-download
-the ZIP to update.
+dependencies in `venv` (including the direct-mode extras, if you installed with
+`--direct`). If you downloaded a ZIP instead of cloning, re-download the ZIP —
+and note a fresh unzip does **not** carry over your saved settings or the
+`venv`: either unzip **over** the old folder, or copy
+`sync_pipeline_settings.json` from the old folder and run the update script
+once to rebuild the `venv`. A `--direct` install rebuilt from a fresh unzip
+also loses its `.direct-mode` marker — run `.\setup.bat --direct` /
+`bash setup.sh --direct` again instead of the update script.
 
 ---
 
@@ -70,8 +80,8 @@ the ZIP to update.
   stays tiny (standard library only).
 - **Direct mode.** Leave the Server URL blank and provide your own keys
   (ElevenLabs and/or Gemini, or a Vertex `vertex_key.json` next to the script).
-  Run `setup.bat --direct` / `setup.sh --direct` so the heavier libraries
-  (`google-genai`, `soundfile`) are installed.
+  Run `.\setup.bat --direct` (Windows) / `bash setup.sh --direct` (macOS) so
+  the heavier libraries (`google-genai`, `soundfile`) are installed.
 
 Settings are saved to `sync_pipeline_settings.json` next to the script. That
 file holds your keys and is **gitignored** — it never gets committed.
@@ -93,8 +103,12 @@ The semantic matcher is always Gemini, but you choose **how** it's called via th
 - **Match the key to the backend:** an `AIza...` key is Google-native (`rest`);
   an `sk-...` key is OpenAI-style and belongs to a `gateway` (or real OpenAI).
   Sending an `sk-...` key to `rest` returns HTTP 400 "API key not valid".
-- The gateway is used for **matching** only. Transcription (ASR) still uses
-  ElevenLabs (default) or Google.
+- The gateway is used for **matching** (and hybrid-mode translation) only.
+  Transcription (ASR) still uses ElevenLabs (default) or Google. If you pick
+  *Transcribe with = gemini* together with the `gateway` backend, you still
+  need Google-native credentials for the transcription step
+  (`vertex_key.json` or an `AIza...` key) — the script stops with a clear
+  error otherwise.
 
 ---
 
@@ -123,5 +137,5 @@ The semantic matcher is always Gemini, but you choose **how** it's called via th
 ## Requirements
 
 - REAPER (any recent version)
-- Python 3.11 or newer
+- Python 3.9 or newer (3.11+ recommended)
 - For direct mode only: outbound HTTPS to your chosen AI provider

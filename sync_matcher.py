@@ -720,6 +720,18 @@ def translate_gemini(text, source_lang, api_key, model="gemini-3-flash-preview")
         f"Translate the following {source_lang} text to English. "
         f"Return ONLY the English translation, nothing else.\n\n{text}"
     )
+
+    # Gateway backend: the key is an OpenAI-style Bearer token, which Google's
+    # native endpoint rejects with HTTP 400 — so route translation through the
+    # gateway too, same as matching.
+    if _GEMINI_BACKEND == "gateway" or (_GEMINI_BACKEND == "auto" and _GEMINI_BASE_URL):
+        out = _call_gemini_gateway(prompt, api_key, _GEMINI_BASE_URL,
+                                   _GEMINI_MATCHER_MODEL, temperature=0.1)
+        if out is not None:
+            return out
+        if _GEMINI_BACKEND == "gateway":
+            return ""   # explicit gateway choice — never fall through to Google
+
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": 256, "temperature": 0.1},
@@ -2421,6 +2433,23 @@ def main():
             raise SystemExit(1)
         if args.asr == "gemini" and not gemini_key and not (SCRIPT_DIR / "vertex_key.json").exists():
             print("ERROR: --asr gemini requires --gemini-key <key> OR vertex_key.json")
+            raise SystemExit(1)
+        # The OpenAI-compatible gateway serves MATCHING only — audio
+        # transcription still needs Google-native access (Vertex JSON or an
+        # AIza... key). Without this guard a gateway Bearer key (sk-...)
+        # would be sent to Google's endpoint, fail HTTP 400 on every clip,
+        # and produce empty transcripts / zero matches with no clear error.
+        if (args.asr == "gemini" and _GEMINI_BACKEND == "gateway"
+                and not _USE_PROXY
+                and not (SCRIPT_DIR / "vertex_key.json").exists()
+                and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                and not (gemini_key or "").startswith("AIza")):
+            print("ERROR: ASR=gemini cannot run through the OpenAI-compatible "
+                  "gateway (it serves matching only).\n"
+                  "Fix one of these:\n"
+                  "  - switch 'Transcribe with' to elevenlabs, or\n"
+                  "  - add vertex_key.json / a Google AIza... key for "
+                  "transcription")
             raise SystemExit(1)
 
     # ── Matcher sanity checks ────────────────────────────────
