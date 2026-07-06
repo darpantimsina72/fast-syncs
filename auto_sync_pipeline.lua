@@ -10,6 +10,8 @@
 --   5. Moves unmatched items to "Un sync" track
 --
 -- Requirements:
+--   - ReaImGui extension (free, install via ReaPack). The UI is a ReaImGui
+--     window; if it's missing the script shows one-time install steps and exits.
 --   - Python 3.9+ (3.11+ recommended)
 --   - One-time install: setup.bat (Windows) / setup.sh (macOS) builds ./venv.
 --     Thin-client (server) mode needs only the standard library; direct mode
@@ -26,7 +28,7 @@ local TRACK_VO_NAME    = "Dialogue VO"
 local TRACK_DUB_NAME   = "Dub"
 local TRACK_UNSYNC     = "Un sync"
 local DUB_LANGUAGE     = "ne"
-local MATCH_MODE       = "gemini"      -- gemini | hybrid | duration
+local MATCH_MODE       = "gemini"      -- locked: Gemini semantic matching only
 
 -- Transcription provider — which service turns audio → text:
 --   elevenlabs | gemini
@@ -89,9 +91,10 @@ end
 -- stray capital letter ("Gemini", "VERTEX") can never crash argparse.
 -- Defined BEFORE load_settings so its body can see them (lexical scoping).
 local function _norm_mode(m)
-  m = tostring(m or ""):lower()
-  if m ~= "gemini" and m ~= "hybrid" and m ~= "duration" then m = "gemini" end
-  return m
+  -- Gemini semantic matching is the ONLY supported mode. Legacy settings
+  -- files may still say hybrid/duration — coerce them. If Gemini fails the
+  -- Python side hard-errors (exit 1) instead of falling back.
+  return "gemini"
 end
 
 local function _norm_backend(b)
@@ -217,8 +220,12 @@ load_settings()
 
 
 -- ═══════════════════════════════════════════════════════════
--- SETTINGS DIALOG
+-- GUI (ReaImGui) — state + shared helpers
 -- ═══════════════════════════════════════════════════════════
+-- The front-end is a single ReaImGui window that walks through four phases:
+--   setup → running → success → failure
+-- ReaImGui is REQUIRED. If it is not installed, main() shows a one-time
+-- install prompt (with the ReaPack steps) and exits without doing anything.
 
 local function _mask_key(key)
   if not key or key == "" then return "" end
@@ -226,144 +233,283 @@ local function _mask_key(key)
   return key:sub(1, 4) .. string.rep("*", #key - 8) .. key:sub(-4)
 end
 
--- We use "|" as the field separator so users can paste a script that
--- contains commas without breaking parsing. extrawidth widens the dialog.
-local FIELD_SEP = "|"
+-- ── UI state machine ──────────────────────────────────────
+local _ui_ctx          = nil
+local _ui_phase        = "setup"   -- setup | running | success | failure
+local _ui_banner       = nil       -- { kind = "error"|"info"|"warn", text }
+local _ui_setup_card   = nil       -- transient info card over the setup form
+local _ui_window_open  = true
+local _ui_step_label   = "Preparing…"
+local _ui_step_idx     = 0         -- 0..3
+local _ui_font         = nil       -- Unicode/Indic-capable font for log lines
+local _ui_result       = nil       -- success summary text
+local _ui_failure      = nil       -- { error_tail, log_path }
+local _log_buffer      = {}        -- ring of last ~500 log lines for display
+local _log_autoscroll  = true
+local _ui_show_keys    = false     -- toggle plaintext key display
 
-local function _split(csv)
-  local fields = {}
-  -- Append separator so the final field is captured even if empty.
-  -- Trim whitespace: a pasted URL/key with a trailing space would otherwise
-  -- be saved verbatim and silently break every request.
-  for v in (csv .. FIELD_SEP):gmatch("([^" .. FIELD_SEP .. "]*)" .. FIELD_SEP) do
-    fields[#fields + 1] = v:match("^%s*(.-)%s*$")
-  end
-  return fields
+-- Progress tracking (drives the progress bar + per-step detail)
+local _ui_progress     = 0.0
+local _ui_en_total     = 0
+local _ui_dub_total    = 0
+local _ui_en_done      = 0
+local _ui_dub_done     = 0
+local _poll_step_phase = 0         -- 1=EN transcribe, 2=DUB, 3=Gemini, 4=apply
+local _ui_cancelled    = false
+local _ui_results_rows = {}        -- per-clip rows for the success table
+
+-- Poll state — shared by the running-phase renderer and the poller. Declared
+-- here (before the UI renderers) so both capture the same upvalues.
+local _poll_log_path     = nil
+local _poll_done_path    = nil
+local _poll_results_path = nil
+local _poll_dub_items    = nil
+local _poll_last_size    = 0
+local _poll_start_time   = 0
+
+-- Version-safe BeginDisabled / EndDisabled (older ReaImGui lacks them).
+local function _ui_begin_disabled(ctx, cond)
+  if reaper.ImGui_BeginDisabled then reaper.ImGui_BeginDisabled(ctx, cond) end
+end
+local function _ui_end_disabled(ctx)
+  if reaper.ImGui_EndDisabled then reaper.ImGui_EndDisabled(ctx) end
 end
 
--- One-line preview of the saved script for the dialog placeholder.
-local function _script_preview(text)
-  if not text or text == "" then return "(empty — paste below, use || between paragraphs)" end
-  local first = text:gsub("[\r\n]+", " "):sub(1, 80)
-  return string.format("(%d chars saved) %s%s", #text, first,
-                       (#text > 80) and "…" or "")
+local function log_append(line)
+  if not line or line == "" then return end
+  _log_buffer[#_log_buffer + 1] = line
+  if #_log_buffer > 500 then table.remove(_log_buffer, 1) end
 end
 
--- ── Dialog 1: tracks, language, mode, transcription provider ──
-local function _dialog_basics()
-  local ret, csv = reaper.GetUserInputs(
-    "Sync — 1/3  Tracks & Mode", 5,
-    "VO track:,"                                       ..
-    "Dub track:,"                                      ..
-    "Language (hi ne ta te bn mr gu kn ml):,"          ..
-    "Mode (gemini hybrid duration):,"                  ..
-    "Transcribe with (elevenlabs gemini):,"            ..
-    "extrawidth=260",
-    TRACK_VO_NAME .. "," .. TRACK_DUB_NAME .. "," .. DUB_LANGUAGE .. "," ..
-    MATCH_MODE    .. "," .. ASR_PROVIDER
-  )
-  if not ret then return false end
-  local fields = {}
-  for v in (csv .. ","):gmatch("([^,]*),") do
-    fields[#fields+1] = v:match("^%s*(.-)%s*$")
+local function ui_set_banner(kind, text) _ui_banner = { kind = kind, text = text } end
+local function ui_clear_banner() _ui_banner = nil end
+
+-- Version-safe child-window border flag. ReaImGui renamed this across
+-- releases (ChildFlags_Border → ChildFlags_Borders).
+local function _child_border_flag()
+  if reaper.ImGui_ChildFlags_Borders then return reaper.ImGui_ChildFlags_Borders() end
+  if reaper.ImGui_ChildFlags_Border  then return reaper.ImGui_ChildFlags_Border()  end
+  return 0
+end
+
+-- Robust ReaImGui detection. Some installs expose the symbol but the
+-- extension isn't fully loaded — pcall a real CreateContext to be sure.
+local function imgui_available()
+  if reaper.APIExists and reaper.APIExists('ImGui_CreateContext') then
+    return true
   end
-  if fields[1] and fields[1] ~= "" then TRACK_VO_NAME  = fields[1] end
-  if fields[2] and fields[2] ~= "" then TRACK_DUB_NAME = fields[2] end
-  if fields[3] and fields[3] ~= "" then DUB_LANGUAGE   = fields[3]:lower() end
-  if fields[4] and fields[4] ~= "" then MATCH_MODE     = _norm_mode(fields[4]) end
-  if fields[5] and fields[5] ~= "" then ASR_PROVIDER   = fields[5]:lower() end
-  -- Only elevenlabs|gemini are valid now; coerce typos/old values so the
-  -- Python argparse (choices=["elevenlabs","gemini"]) never crashes.
-  if ASR_PROVIDER ~= "elevenlabs" and ASR_PROVIDER ~= "gemini" then
-    ASR_PROVIDER = "elevenlabs"
+  if reaper.ImGui_CreateContext ~= nil then
+    local ok, ctx = pcall(reaper.ImGui_CreateContext, 'probe')
+    if ok and ctx then
+      if reaper.ImGui_DestroyContext then pcall(reaper.ImGui_DestroyContext, ctx) end
+      return true
+    end
+  end
+  return false
+end
+
+-- Each language code → its Unicode script, to pick the right Noto font.
+local _LANG_TO_SCRIPT = {
+  hi = "Devanagari", ne = "Devanagari", mr = "Devanagari",
+  bn = "Bengali", ta = "Tamil", te = "Telugu",
+  kn = "Kannada", ml = "Malayalam", gu = "Gujarati",
+}
+
+-- Attach a font that covers the configured DUB_LANGUAGE script so Indic log
+-- lines render with proper glyphs. Falls back to the default font.
+local function _attach_unicode_font(ctx)
+  if not reaper.ImGui_CreateFont then return nil end
+  local script = _LANG_TO_SCRIPT[DUB_LANGUAGE or ""] or "Devanagari"
+  local paths = {}
+  if reaper.GetOS():match("Win") then
+    local local_fonts = (os.getenv("LOCALAPPDATA") or "")
+                         :gsub("\\", "/") .. "/Microsoft/Windows/Fonts"
+    paths[#paths+1] = local_fonts .. "/NotoSerif" .. script .. "-Regular.ttf"
+    paths[#paths+1] = "C:/Windows/Fonts/NotoSerif" .. script .. "-Regular.ttf"
+    paths[#paths+1] = local_fonts .. "/NotoSans"  .. script .. "-Regular.ttf"
+    paths[#paths+1] = "C:/Windows/Fonts/NotoSans"  .. script .. "-Regular.ttf"
+    paths[#paths+1] = "C:/Windows/Fonts/Nirmala.ttf"   -- all-Indic system font
+    paths[#paths+1] = "C:/Windows/Fonts/NirmalaB.ttf"
+    paths[#paths+1] = "C:/Windows/Fonts/segoeui.ttf"
+  else
+    paths = {
+      '/Library/Fonts/NotoSerif'..script..'-Regular.ttf',
+      '/Library/Fonts/NotoSans'..script..'-Regular.ttf',
+      '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+      '/Library/Fonts/Arial Unicode.ttf',
+    }
+  end
+  for _, p in ipairs(paths) do
+    local fh = io.open(p, 'rb')
+    if fh then
+      fh:close()
+      local ok, font = pcall(reaper.ImGui_CreateFont, p, 16)
+      if ok and font then
+        if pcall(reaper.ImGui_Attach, ctx, font) then
+          log_append("[font] loaded " .. p)
+          return font
+        end
+      end
+    end
+  end
+  log_append("[font] no Indic font found; default font will be used")
+  return nil
+end
+
+-- Open a file/URL with the OS default handler.
+local function open_path(path)
+  if reaper.CF_ShellExecute then reaper.CF_ShellExecute(path)
+  elseif reaper.GetOS():match('Win') then os.execute('start "" "' .. path .. '"')
+  elseif reaper.GetOS():match('OSX') or reaper.GetOS():match('macOS') then
+    os.execute('open "' .. path .. '"')
+  else os.execute('xdg-open "' .. path .. '"') end
+end
+local function open_url(url) open_path(url) end
+
+-- Try to install ReaImGui via ReaPack's Lua API (when ReaPack is present).
+-- ReaPack has no public "silently install one package" call — the closest we
+-- can do without pulling the entire ReaTeam repo is: add the repo, refresh its
+-- index, then open Browse Packages pre-filtered to ReaImGui so the user only
+-- has to click Install → Apply → restart. Returns true if that flow ran.
+local REAIMGUI_REPO_URL = "https://github.com/ReaTeam/Extensions/raw/master/index.xml"
+local function try_reapack_install()
+  if not (reaper.APIExists and reaper.APIExists('ReaPack_AddSetRepository')) then
+    return false
+  end
+  -- Add (or re-enable) the ReaTeam Extensions repo. Signature:
+  --   ReaPack_AddSetRepository(name, url, enable, autoInstall)  -> bool, error
+  -- autoInstall: 0=manual, 1=when synchronizing, 2=obey user setting.
+  -- Per the ReaPack API docs: "usually set to 2". Anything else (e.g. -1)
+  -- fails with "invalid value for autoInstall".
+  local ok, err = reaper.ReaPack_AddSetRepository(
+    'ReaTeam Extensions', REAIMGUI_REPO_URL, true, 2)
+  if not ok then
+    reaper.ShowMessageBox(
+      "Could not add the ReaImGui repository automatically:\n" ..
+      tostring(err) .. "\n\nFalling back to manual steps.",
+      "ReaPack", 0)
+    return false
+  end
+  -- Persist the repo change and refresh its index so the package shows up.
+  if reaper.APIExists('ReaPack_ProcessQueue') then
+    pcall(reaper.ReaPack_ProcessQueue, true)
+  end
+  -- Open the package browser filtered to ReaImGui for the final click.
+  if reaper.APIExists('ReaPack_BrowsePackages') then
+    pcall(reaper.ReaPack_BrowsePackages, 'ReaImGui')
+  end
+  reaper.ShowMessageBox(
+    "The ReaImGui repository was added and the package browser opened.\n\n" ..
+    "Finish the install:\n" ..
+    "  1. Right-click 'ReaImGui: ReaScript binding for Dear ImGui'.\n" ..
+    "  2. Choose Install, then click Apply.\n" ..
+    "  3. Restart REAPER and run this script again.",
+    "Almost done", 0)
+  return true
+end
+
+-- Pick the ReaPack release asset matching this REAPER build. GetAppVersion()
+-- returns e.g. "7.27/macOS-arm64", "7.27/OSX64", "7.27/x64", "6.82/win64",
+-- "7.27/linux-x86_64". Returns nil for builds we can't map.
+local function _reapack_asset()
+  local v = (reaper.GetAppVersion() or ""):lower()
+  local os_str = reaper.GetOS()
+  if os_str:match("Win") then
+    if v:match("arm64") then return "reaper_reapack-arm64ec.dll" end
+    if v:match("x64") or v:match("win64") then return "reaper_reapack-x64.dll" end
+    return "reaper_reapack-x86.dll"
+  elseif os_str:match("OSX") or os_str:match("macOS") then
+    if v:match("arm64") then return "reaper_reapack-arm64.dylib" end
+    return "reaper_reapack-x86_64.dylib"
+  else -- Linux
+    if v:match("aarch64") then return "reaper_reapack-aarch64.so" end
+    if v:match("armv7") then return "reaper_reapack-armv7l.so" end
+    if v:match("i686") then return "reaper_reapack-i686.so" end
+    return "reaper_reapack-x86_64.so"
+  end
+end
+
+-- ReaPack itself is missing: download its extension binary straight into
+-- REAPER's UserPlugins folder with curl (bundled on Windows 10+/macOS).
+-- After a REAPER restart, ReaPack is live and try_reapack_install() can take
+-- over. Returns true if the download succeeded.
+local function try_reapack_bootstrap()
+  local asset = _reapack_asset()
+  if not asset or not reaper.ExecProcess then return false end
+  local res = reaper.GetResourcePath()
+  local sep = package.config:sub(1, 1)
+  local dir = res .. sep .. "UserPlugins"
+  reaper.RecursiveCreateDirectory(dir, 0)
+  local dest = dir .. sep .. asset
+  local url  = "https://github.com/cfillion/reapack/releases/latest/download/" .. asset
+  -- Full path on macOS/Linux — ExecProcess may not search a login-shell PATH.
+  local curl = reaper.GetOS():match("Win") and "curl.exe" or "/usr/bin/curl"
+  local ret = reaper.ExecProcess(
+    curl .. ' -fsSL --retry 2 -o "' .. dest .. '" "' .. url .. '"', 120000)
+  local code = ret and ret:match("^(%-?%d+)")
+  -- Sanity: exit 0 and a plausibly-sized binary (assets are ~2 MB).
+  local f = io.open(dest, "rb")
+  local size = 0
+  if f then size = f:seek("end") or 0; f:close() end
+  if code ~= "0" or size < 500000 then
+    os.remove(dest)
+    return false
   end
   return true
 end
 
--- ── Dialog 2: Gemini matcher + API keys ──
--- Reaper's GetUserInputs always treats labels as comma-separated. The
--- separator= flag changes only the VALUE separator. So labels here use
--- commas (and must not contain any), and values use "|" (FIELD_SEP) so
--- API keys with commas would still parse cleanly.
-local function _dialog_keys()
-  local em = _mask_key(ELEVENLABS_KEY)
-  local gm = _mask_key(GEMINI_KEY)
-  local tm = _mask_key(API_TOKEN)
-
-  local ret, csv = reaper.GetUserInputs(
-    "Sync — 2/3  Server & keys", 8,
-    "Server URL (blank = direct/local mode):,"               ..
-    "Server access token:,"                                  ..
-    "Gemini backend (vertex / rest / gateway):,"             ..
-    "Gemini gateway URL (only for backend=gateway):,"        ..
-    "Gemini model:,"                                         ..
-    "Vertex JSON path (blank = use vertex_key.json):,"       ..
-    "Gemini key (rest=AIza / gateway=Bearer):,"              ..
-    "ElevenLabs key (direct mode):,"                         ..
-    "extrawidth=320,separator=" .. FIELD_SEP,
-    API_BASE        .. FIELD_SEP ..
-    tm              .. FIELD_SEP ..
-    GEMINI_BACKEND  .. FIELD_SEP ..
-    GEMINI_BASE_URL .. FIELD_SEP ..
-    GEMINI_MODEL    .. FIELD_SEP ..
-    VERTEX_KEY_PATH .. FIELD_SEP ..
-    gm              .. FIELD_SEP ..
-    em
-  )
-  if not ret then return false end
-  local f = _split(csv)
-  local function update_key(idx, current, masked)
-    local typed = f[idx] or ""
-    if typed ~= "" and typed ~= masked then return typed end
-    return current
-  end
-  -- Server URL is not secret → set it verbatim (blank clears = direct mode).
-  API_BASE        = f[1] or ""
-  API_TOKEN       = update_key(2, API_TOKEN, tm)
-  if f[3] and f[3] ~= "" then GEMINI_BACKEND = _norm_backend(f[3]) end
-  -- Gateway URL is not secret → set verbatim (blank clears).
-  GEMINI_BASE_URL = f[4] or ""
-  if f[5] and f[5] ~= "" then GEMINI_MODEL   = f[5] end
-  VERTEX_KEY_PATH = f[6] or ""
-  GEMINI_KEY      = update_key(7, GEMINI_KEY,     gm)
-  ELEVENLABS_KEY  = update_key(8, ELEVENLABS_KEY, em)
-  return true
+-- Combo helper: items as a table, returns (changed, new_value).
+local function _ui_combo(ctx, label, current, items)
+  local idx = 0
+  for i, v in ipairs(items) do if v == current then idx = i - 1 break end end
+  local rv, new_idx = reaper.ImGui_Combo(ctx, label, idx, table.concat(items, "\0") .. "\0")
+  if rv then return true, items[new_idx + 1] end
+  return false, current
 end
 
--- ── Dialog 3: paste the dubbing script ──
--- Reaper's input field is single-line; pasting multi-line text on macOS
--- collapses newlines into spaces. To keep paragraph boundaries the user
--- can write "||" between paragraphs (we convert those to real \n on save).
-local function _dialog_script()
-  local placeholder = _script_preview(SCRIPT_TEXT)
-  -- Show existing content joined with "||" so user can edit in place.
-  local current_oneline = SCRIPT_TEXT:gsub("\n", "||"):gsub("\r", "")
-  local ret, csv = reaper.GetUserInputs(
-    "Sync — 3/3  Dubbing script (paste here, use || between paragraphs)",
-    1,
-    "Script (leave blank to keep existing — current: " .. placeholder .. "):,"
-      .. "extrawidth=520,separator=" .. FIELD_SEP,
-    current_oneline
-  )
-  if not ret then return false end
-  local typed = csv or ""
-  -- If the user wiped the field deliberately, keep what was already saved.
-  -- (Reaper reports an empty string both for "unchanged" and "cleared",
-  -- so we treat empty as "no change" rather than "delete".)
-  if typed ~= "" then
-    -- Convert paragraph markers and any literal newlines to real \n.
-    typed = typed:gsub("||", "\n"):gsub("\r\n?", "\n")
-    SCRIPT_TEXT = typed
+-- Colored banner across the top of the window.
+local function _ui_render_banner(ctx)
+  if not _ui_banner then return end
+  local color
+  if     _ui_banner.kind == "error" then color = 0xFF5555FF
+  elseif _ui_banner.kind == "warn"  then color = 0xFFCC55FF
+  else                                   color = 0x55AAFFFF end
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), 0x22222266)
+  if reaper.ImGui_BeginChild(ctx, '##banner', -1, 48, _child_border_flag()) then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), color)
+    reaper.ImGui_TextWrapped(ctx, _ui_banner.text)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_EndChild(ctx)
   end
-  return true
+  reaper.ImGui_PopStyleColor(ctx)
+  if reaper.ImGui_SmallButton(ctx, 'Dismiss##bn') then _ui_banner = nil end
+  reaper.ImGui_Separator(ctx)
 end
 
-local function show_settings_dialog()
-  if not _dialog_basics() then return false end
-  if not _dialog_keys()   then return false end
-  if not _dialog_script() then return false end
-  save_settings()
-  return true
+local function _spinner_glyph()
+  local frames = { '|','/','-','\\' }
+  return frames[math.floor(os.clock() * 8) % #frames + 1]
+end
+
+-- Cancel a running sync by killing the worker PID that run_sync.py published.
+-- Dir is resolved inline (get_script_dir is defined later in the file).
+local function cancel_python()
+  if _ui_cancelled then return end
+  _ui_cancelled = true
+  local info = debug.getinfo(1, 'S')
+  local src  = info.source:match('@(.+)') or ''
+  local dir  = src:match('(.+)[/\\]') or '.'
+  local f = io.open(dir .. '/sync_python_pid.txt', 'r')
+  if not f then return end
+  local pid = (f:read('*a') or ''):match('(%d+)')
+  f:close()
+  if not pid then return end
+  if reaper.GetOS():match('Win') then
+    -- /T kills the whole tree (run_sync.py's child matcher included).
+    os.execute(string.format('taskkill /F /T /PID %s > nul 2>&1', pid))
+  else
+    os.execute(string.format('kill -9 %s 2>/dev/null', pid))
+  end
 end
 
 
@@ -373,6 +519,7 @@ end
 
 local function log(msg)
   reaper.ShowConsoleMsg(msg .. "\n")
+  log_append(msg)   -- mirror into the GUI Logs tab
 end
 
 local function find_track_by_name(name)
@@ -577,6 +724,36 @@ local function ensure_setup()
   reaper.MB("After setup completes in the Terminal window, run this script again.",
             "Re-run after setup", 0)
   return false
+end
+
+-- Launch update.bat / update.sh in a terminal window (same pattern as
+-- ensure_setup). Pulls the latest version (git) or downloads the latest
+-- ZIP from GitHub, then refreshes the venv. User re-runs the script after.
+local function run_updater()
+  local script_dir = get_script_dir()
+  if _is_windows() then
+    local bat = script_dir .. "\\update.bat"
+    if not file_exists(bat) then
+      reaper.MB("update.bat is missing from:\n  " .. script_dir ..
+                "\n\nRe-download the project from GitHub to update.",
+                "Updater not found", 0)
+      return
+    end
+    os.execute('start "fast-syncs update" cmd /k "\"' .. bat .. '\""')
+  else
+    local sh = script_dir .. "/update.sh"
+    if not file_exists(sh) then
+      reaper.MB("update.sh is missing from:\n  " .. script_dir ..
+                "\n\nRe-download the project from GitHub to update.",
+                "Updater not found", 0)
+      return
+    end
+    os.execute('osascript -e \'tell application "Terminal" to do script "bash \\"' ..
+               sh .. '\\""\'')
+  end
+  reaper.MB("The updater is running in a separate window.\n\n" ..
+            "When it says 'Update complete', close this window and run the " ..
+            "script again to load the new version.", "Updating", 0)
 end
 
 
@@ -826,21 +1003,470 @@ end
 
 
 -- ═══════════════════════════════════════════════════════════
--- LIVE LOG TAIL — polls log file and prints new lines to console
+-- UI RENDERERS — one window, four phases (setup/running/success/failure)
 -- ═══════════════════════════════════════════════════════════
 
--- These are set by main() and read by the polling loop
-local _poll_log_path    = nil
-local _poll_done_path   = nil
-local _poll_results_path = nil
-local _poll_dub_items   = nil
-local _poll_last_size   = 0
-local _poll_start_time  = 0
+-- ─── Setup phase ──────────────────────────────────────────
+local function ui_phase_setup(ctx, on_start, on_cancel)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(),    10.0, 10.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(),   6.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(),    8.0, 6.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_GrabRounding(),    6.0)
+
+  -- Hero header: gradient accent bar + title + tagline
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  if reaper.ImGui_GetWindowDrawList and reaper.ImGui_DrawList_AddRectFilledMultiColor then
+    local dl = reaper.ImGui_GetWindowDrawList(ctx)
+    local cx, cy = reaper.ImGui_GetCursorScreenPos(ctx)
+    local cw = reaper.ImGui_GetContentRegionAvail(ctx)
+    pcall(reaper.ImGui_DrawList_AddRectFilledMultiColor, dl,
+      cx, cy, cx + cw, cy + 3,
+      0x55AAFFFF, 0x9966FFFF, 0x9966FFFF, 0x55AAFFFF)
+  end
+  reaper.ImGui_Dummy(ctx, 0, 6)
+
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFFFFFFF)
+  if _ui_font then pcall(reaper.ImGui_PushFont, ctx, _ui_font, 22) end
+  reaper.ImGui_Text(ctx, 'Auto Sync Pipeline')
+  if _ui_font then pcall(reaper.ImGui_PopFont, ctx) end
+  reaper.ImGui_PopStyleColor(ctx)
+
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  reaper.ImGui_Text(ctx, 'Collect  →  AI Match  →  Place items on the timeline')
+  reaper.ImGui_PopStyleColor(ctx)
+
+  reaper.ImGui_Dummy(ctx, 0, 8)
+  _ui_render_banner(ctx)
+
+  if _ui_setup_card then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ChildBg(), 0x223344AA)
+    if reaper.ImGui_BeginChild(ctx, '##setupcard', -1, 120, _child_border_flag()) then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFEE88FF)
+      reaper.ImGui_TextWrapped(ctx, _ui_setup_card)
+      reaper.ImGui_PopStyleColor(ctx)
+      reaper.ImGui_EndChild(ctx)
+    end
+    reaper.ImGui_PopStyleColor(ctx)
+    if reaper.ImGui_Button(ctx, 'OK, dismiss') then _ui_setup_card = nil end
+    reaper.ImGui_Dummy(ctx, 0, 4)
+  end
+
+  local function _f_exists(p)
+    local h = io.open(p, 'r')
+    if h then h:close(); return true end
+    return false
+  end
+  local _info = debug.getinfo(1, 'S')
+  local _src  = _info.source:match('@(.+)') or ''
+  local _sdir = _src:match('(.+)[/\\]') or '.'
+  local has_vertex_file = _f_exists(_sdir .. '/vertex_key.json') or
+                          (VERTEX_KEY_PATH ~= '' and _f_exists(VERTEX_KEY_PATH))
+  local server_mode = (API_BASE or '') ~= ''
+
+  local function _status_dot(filled, optional)
+    local ww = reaper.ImGui_GetWindowWidth(ctx)
+    reaper.ImGui_SameLine(ctx, ww - 38)
+    local col, sym
+    if filled then col, sym = 0x55DD77FF, '●'
+    elseif optional then col, sym = 0x666677FF, '○'
+    else col, sym = 0xFFAA55FF, '●' end
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), col)
+    reaper.ImGui_Text(ctx, sym)
+    reaper.ImGui_PopStyleColor(ctx)
+  end
+
+  local pw_flags = (_ui_show_keys and 0) or
+                   (reaper.ImGui_InputTextFlags_Password and reaper.ImGui_InputTextFlags_Password() or 0)
+
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Header(),        0x2A3344FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_HeaderHovered(), 0x3A4A66FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_HeaderActive(),  0x4A5A77FF)
+
+  -- ── Section: Tracks & Mode ────────────────────────────
+  local tracks_filled = (TRACK_VO_NAME ~= '' and TRACK_DUB_NAME ~= '')
+  local tracks_open = reaper.ImGui_CollapsingHeader(ctx, '  Tracks & Mode')
+  _status_dot(tracks_filled, false)
+  if tracks_open then
+    reaper.ImGui_Indent(ctx, 12)
+    local rv
+    rv, TRACK_VO_NAME  = reaper.ImGui_InputText(ctx, 'VO track',  TRACK_VO_NAME  or '')
+    rv, TRACK_DUB_NAME = reaper.ImGui_InputText(ctx, 'Dub track', TRACK_DUB_NAME or '')
+    _, DUB_LANGUAGE = _ui_combo(ctx, 'Language',   DUB_LANGUAGE,
+        { 'hi','ne','ta','te','bn','mr','gu','kn','ml' })
+    -- Match mode is locked: Gemini semantic matching only. On failure the
+    -- run errors out — there is deliberately no hybrid/duration fallback.
+    MATCH_MODE = "gemini"
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+    reaper.ImGui_Text(ctx, 'Match mode: gemini (semantic — only mode; fails hard, no fallback)')
+    reaper.ImGui_PopStyleColor(ctx)
+    -- ASR trimmed to what this backend supports (see sync_matcher.py).
+    _, ASR_PROVIDER = _ui_combo(ctx, 'Transcribe with', ASR_PROVIDER,
+        { 'elevenlabs','gemini' })
+    reaper.ImGui_Unindent(ctx, 12)
+    reaper.ImGui_Dummy(ctx, 0, 4)
+  end
+
+  -- ── Section: Server (thin client) ─────────────────────
+  local server_open = reaper.ImGui_CollapsingHeader(ctx, '  Server (thin client — optional)')
+  _status_dot(server_mode, true)
+  if server_open then
+    reaper.ImGui_Indent(ctx, 12)
+    local rv
+    rv, API_BASE  = reaper.ImGui_InputText(ctx, 'Server URL',  API_BASE  or '')
+    rv, API_TOKEN = reaper.ImGui_InputText(ctx, 'Access token', API_TOKEN or '', pw_flags)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+    reaper.ImGui_TextWrapped(ctx, 'Set a Server URL to route every AI call through your proxy — the real keys stay server-side and nothing secret lives on this machine. Leave blank for direct mode with your own keys below.')
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_Unindent(ctx, 12)
+    reaper.ImGui_Dummy(ctx, 0, 4)
+  end
+
+  -- ── Section: Gemini matcher ───────────────────────────
+  local gemini_filled = (GEMINI_MODEL or '') ~= ''
+  local gemini_open = reaper.ImGui_CollapsingHeader(ctx, '  Gemini matcher')
+  _status_dot(gemini_filled, false)
+  if gemini_open then
+    reaper.ImGui_Indent(ctx, 12)
+    local rv
+    _, GEMINI_BACKEND   = _ui_combo(ctx, 'Backend', GEMINI_BACKEND, { 'vertex','rest','gateway' })
+    rv, GEMINI_MODEL    = reaper.ImGui_InputText(ctx, 'Model',            GEMINI_MODEL    or '')
+    if GEMINI_BACKEND == 'gateway' then
+      rv, GEMINI_BASE_URL = reaper.ImGui_InputText(ctx, 'Gateway URL',    GEMINI_BASE_URL or '')
+    end
+    rv, VERTEX_KEY_PATH = reaper.ImGui_InputText(ctx, 'Vertex JSON path', VERTEX_KEY_PATH or '')
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+    reaper.ImGui_TextWrapped(ctx, 'vertex = Google service account (vertex_key.json). rest = AI Studio key (AIza…). gateway = OpenAI-compatible proxy (Bearer key + Gateway URL).')
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_Unindent(ctx, 12)
+    reaper.ImGui_Dummy(ctx, 0, 4)
+  end
+
+  -- ── Section: API keys ─────────────────────────────────
+  local keys_filled = server_mode or has_vertex_file or (GEMINI_KEY or '') ~= ''
+  if not server_mode and ASR_PROVIDER == 'elevenlabs' then
+    keys_filled = keys_filled and (ELEVENLABS_KEY or '') ~= ''
+  end
+  local keys_open = reaper.ImGui_CollapsingHeader(ctx, '  API keys')
+  _status_dot(keys_filled, server_mode)
+  if keys_open then
+    reaper.ImGui_Indent(ctx, 12)
+    local rv
+    rv, GEMINI_KEY = reaper.ImGui_InputText(ctx, 'Gemini key', GEMINI_KEY or '', pw_flags)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+    if server_mode then
+      reaper.ImGui_TextWrapped(ctx, 'Server mode is on — provider keys are optional here (the server holds them).')
+    elseif GEMINI_BACKEND == 'gateway' then
+      reaper.ImGui_TextWrapped(ctx, 'Gateway Bearer token (often sk-…). Goes in this field.')
+    elseif has_vertex_file then
+      reaper.ImGui_TextWrapped(ctx, '✓ vertex_key.json found — Gemini key is optional.')
+    else
+      reaper.ImGui_TextWrapped(ctx, 'AI matcher. Required unless vertex_key.json is present.')
+    end
+    reaper.ImGui_PopStyleColor(ctx)
+
+    if ASR_PROVIDER == 'elevenlabs' then
+      rv, ELEVENLABS_KEY = reaper.ImGui_InputText(ctx, 'ElevenLabs key', ELEVENLABS_KEY or '', pw_flags)
+    else  -- gemini ASR
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+      reaper.ImGui_TextWrapped(ctx, 'Gemini ASR reuses the Gemini key above (or vertex_key.json).')
+      reaper.ImGui_PopStyleColor(ctx)
+    end
+
+    rv, _ui_show_keys = reaper.ImGui_Checkbox(ctx, 'Show keys', _ui_show_keys)
+    reaper.ImGui_Unindent(ctx, 12)
+    reaper.ImGui_Dummy(ctx, 0, 4)
+  end
+
+  -- ── Section: Dubbing script (optional) ────────────────
+  local script_filled = (SCRIPT_TEXT or '') ~= ''
+  local script_open = reaper.ImGui_CollapsingHeader(ctx, '  Dubbing script (optional)')
+  _status_dot(script_filled, true)
+  if script_open then
+    reaper.ImGui_Indent(ctx, 12)
+    local rv
+    rv, SCRIPT_TEXT = reaper.ImGui_InputTextMultiline(
+      ctx, '##script', SCRIPT_TEXT or '', -1, 140)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+    if SCRIPT_TEXT and SCRIPT_TEXT ~= '' then
+      reaper.ImGui_Text(ctx, string.format('%d chars · paragraphs preserved', #SCRIPT_TEXT))
+    else
+      reaper.ImGui_Text(ctx, 'Paste dubbing script here (improves Gemini matching).')
+    end
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_Unindent(ctx, 12)
+    reaper.ImGui_Dummy(ctx, 0, 4)
+  end
+
+  reaper.ImGui_PopStyleColor(ctx, 3)
+  reaper.ImGui_Dummy(ctx, 0, 10)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 4)
+
+  -- ── Validate before enabling Start ────────────────────
+  local missing = {}
+  if TRACK_VO_NAME  == '' then missing[#missing+1] = 'VO track name'  end
+  if TRACK_DUB_NAME == '' then missing[#missing+1] = 'Dub track name' end
+  if not server_mode then
+    if GEMINI_BACKEND == 'gateway' then
+      if (GEMINI_BASE_URL or '') == '' then missing[#missing+1] = 'Gemini gateway URL' end
+      if (GEMINI_KEY or '')      == '' then missing[#missing+1] = 'Gemini key (gateway Bearer token)' end
+    elseif not has_vertex_file and (GEMINI_KEY or '') == '' then
+      missing[#missing+1] = 'Gemini key (or vertex_key.json)'
+    end
+    if ASR_PROVIDER == 'elevenlabs' and (ELEVENLABS_KEY or '') == '' then
+      missing[#missing+1] = 'ElevenLabs key'
+    end
+  end
+
+  local _disabled = (#missing > 0)
+  _ui_begin_disabled(ctx, _disabled)
+  local t = os.clock()
+  local pulse = 0.5 + 0.5 * math.sin(t * 3.0)
+  local r = math.floor(0x22 + pulse * 0x18)
+  local g = math.floor(0x88 + pulse * 0x30)
+  local b = math.floor(0x33 + pulse * 0x18)
+  local idle_col = (r * 0x1000000) + (g * 0x10000) + (b * 0x100) + 0xFF
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        idle_col)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x44CC55FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x119911FF)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 12.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 16.0, 10.0)
+  if reaper.ImGui_Button(ctx, '▶  Start Sync', 220, 44) then on_start() end
+  reaper.ImGui_PopStyleVar(ctx, 2)
+  reaper.ImGui_PopStyleColor(ctx, 3)
+  _ui_end_disabled(ctx)
+
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 12.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 16.0, 10.0)
+  if reaper.ImGui_Button(ctx, 'Cancel', 120, 44) then on_cancel() end
+  reaper.ImGui_PopStyleVar(ctx, 2)
+
+  if _disabled then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+    reaper.ImGui_TextWrapped(ctx, 'Missing: ' .. table.concat(missing, ', '))
+    reaper.ImGui_PopStyleColor(ctx)
+  end
+
+  -- Footer summary chips
+  reaper.ImGui_Dummy(ctx, 0, 8)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
+  local sep = '   ·   '
+  local backend_label = server_mode and ('server:' .. API_BASE) or (GEMINI_BACKEND or '?')
+  local chips = string.format('%s%s%s%s%s%s%s',
+    DUB_LANGUAGE or '?', sep, GEMINI_MODEL or '?', sep,
+    backend_label, sep, ASR_PROVIDER or '?')
+  reaper.ImGui_Text(ctx, chips)
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, 'Update...') then run_updater() end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      'Get the latest version (runs update.bat / update.sh in a terminal).')
+  end
+
+  reaper.ImGui_PopStyleVar(ctx, 4)
+end
+
+-- ─── Running phase (progress bar + Progress/Logs tabs) ────
+local function ui_phase_running(ctx, elapsed_s)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55AAFFFF)
+  reaper.ImGui_Text(ctx, _spinner_glyph() .. '  Running...')
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_SameLine(ctx)
+
+  local time_str = string.format('  %02d:%02d elapsed',
+    math.floor(elapsed_s / 60), elapsed_s % 60)
+  if _ui_progress > 0.05 and _ui_progress < 0.99 then
+    local eta_s = math.floor(elapsed_s * (1.0 - _ui_progress) / _ui_progress)
+    time_str = time_str .. string.format('  ·  ETA ~%02d:%02d',
+      math.floor(eta_s / 60), eta_s % 60)
+  end
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xAAAAAAFF)
+  reaper.ImGui_Text(ctx, time_str)
+  reaper.ImGui_PopStyleColor(ctx)
+
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x883333FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0xAA4444FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x661111FF)
+  if reaper.ImGui_Button(ctx, 'Cancel', 80, 0) then cancel_python() end
+  reaper.ImGui_PopStyleColor(ctx, 3)
+
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_PlotHistogram(), 0x3388FFFF)
+  reaper.ImGui_ProgressBar(ctx, _ui_progress, -1, 22,
+    string.format('%.0f%%', _ui_progress * 100))
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 4)
+
+  if reaper.ImGui_BeginTabBar(ctx, '##runtabs') then
+    if reaper.ImGui_BeginTabItem(ctx, 'Progress') then
+      reaper.ImGui_Dummy(ctx, 0, 6)
+      local steps = {
+        'Step 1/3 -- Writing config',
+        'Step 2/3 -- AI matching (Python)',
+        'Step 3/3 -- Applying to timeline',
+      }
+      for i, label in ipairs(steps) do
+        local done   = (_ui_step_idx > i)
+        local active = (_ui_step_idx == i)
+        local color  = done and 0x55DD55FF or (active and 0xFFCC55FF or 0x666666FF)
+        local mark   = done and '[done]' or (active and '[-->]' or '[ ]')
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), color)
+        reaper.ImGui_Text(ctx, mark .. '  ' .. label)
+        reaper.ImGui_PopStyleColor(ctx)
+      end
+      if _ui_step_idx == 2 then
+        reaper.ImGui_Dummy(ctx, 0, 8)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xAAAAAAFF)
+        if _poll_step_phase == 1 and _ui_en_total > 0 then
+          reaper.ImGui_Text(ctx, string.format('    Transcribing EN clips : %d / %d', _ui_en_done, _ui_en_total))
+        elseif _poll_step_phase == 2 and _ui_dub_total > 0 then
+          reaper.ImGui_Text(ctx, string.format('    Transcribing DUB clips: %d / %d', _ui_dub_done, _ui_dub_total))
+        elseif _poll_step_phase == 3 then
+          reaper.ImGui_Text(ctx, '    Waiting for AI matcher response...')
+        elseif _poll_step_phase == 4 then
+          reaper.ImGui_Text(ctx, '    Placing clips on timeline...')
+        end
+        reaper.ImGui_PopStyleColor(ctx)
+      end
+      reaper.ImGui_EndTabItem(ctx)
+    end
+
+    if reaper.ImGui_BeginTabItem(ctx, 'Logs') then
+      if reaper.ImGui_BeginChild(ctx, '##loglines', -1, -30, _child_border_flag()) then
+        if _ui_font then pcall(reaper.ImGui_PushFont, ctx, _ui_font, 16) end
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xBBBBBBFF)
+        local start = math.max(1, #_log_buffer - 200)
+        for i = start, #_log_buffer do
+          reaper.ImGui_Text(ctx, _log_buffer[i])
+        end
+        reaper.ImGui_PopStyleColor(ctx)
+        if _ui_font then pcall(reaper.ImGui_PopFont, ctx) end
+        if _log_autoscroll then reaper.ImGui_SetScrollHereY(ctx, 1.0) end
+        reaper.ImGui_EndChild(ctx)
+      end
+      local rv
+      rv, _log_autoscroll = reaper.ImGui_Checkbox(ctx, 'Auto-scroll', _log_autoscroll)
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, 'Open log in editor') then
+        if _poll_log_path then open_path(_poll_log_path) end
+      end
+      reaper.ImGui_EndTabItem(ctx)
+    end
+    reaper.ImGui_EndTabBar(ctx)
+  end
+end
+
+-- ─── Success phase ────────────────────────────────────────
+local function ui_phase_success(ctx, on_close)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55DD55FF)
+  reaper.ImGui_Text(ctx, '✓  Successful')
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 8)
+
+  if _ui_result then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xDDDDDDFF)
+    reaper.ImGui_Text(ctx, _ui_result)
+    reaper.ImGui_PopStyleColor(ctx)
+  end
+
+  if #_ui_results_rows > 0 then
+    reaper.ImGui_Dummy(ctx, 0, 8)
+    local hdr = string.format('Per-clip results (%d)', #_ui_results_rows)
+    if reaper.ImGui_CollapsingHeader(ctx, hdr) then
+      local tflags = 0
+      if reaper.ImGui_TableFlags_Borders   then tflags = tflags | reaper.ImGui_TableFlags_Borders() end
+      if reaper.ImGui_TableFlags_RowBg     then tflags = tflags | reaper.ImGui_TableFlags_RowBg()    end
+      if reaper.ImGui_TableFlags_ScrollY   then tflags = tflags | reaper.ImGui_TableFlags_ScrollY()  end
+      if reaper.ImGui_TableFlags_Resizable then tflags = tflags | reaper.ImGui_TableFlags_Resizable() end
+      if reaper.ImGui_BeginTable(ctx, '##results', 3, tflags, 0, 240) then
+        reaper.ImGui_TableSetupColumn(ctx, 'Dub #')
+        reaper.ImGui_TableSetupColumn(ctx, 'Status')
+        reaper.ImGui_TableSetupColumn(ctx, 'New pos (s)')
+        reaper.ImGui_TableHeadersRow(ctx)
+        for _, r in ipairs(_ui_results_rows) do
+          reaper.ImGui_TableNextRow(ctx)
+          reaper.ImGui_TableSetColumnIndex(ctx, 0)
+          reaper.ImGui_Text(ctx, tostring(r.dub_id or '?'))
+          reaper.ImGui_TableSetColumnIndex(ctx, 1)
+          local color = 0xAAAAAAFF
+          if r.status == 'matched'      then color = 0x55DD55FF
+          elseif r.status == 'unmatched' then color = 0xFFAA55FF
+          elseif r.status == 'missing_file' then color = 0xFF5555FF end
+          reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), color)
+          reaper.ImGui_Text(ctx, r.status or '-')
+          reaper.ImGui_PopStyleColor(ctx)
+          reaper.ImGui_TableSetColumnIndex(ctx, 2)
+          reaper.ImGui_Text(ctx, r.new_position and string.format('%.3f', r.new_position) or '-')
+        end
+        reaper.ImGui_EndTable(ctx)
+      end
+    end
+  end
+
+  reaper.ImGui_Dummy(ctx, 0, 12)
+  reaper.ImGui_Separator(ctx)
+  if reaper.ImGui_Button(ctx, 'Close', 120, 32) then on_close() end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, 'Run again', 120, 32) then
+    _ui_phase = 'setup'; _log_buffer = {}; _ui_result = nil
+    _ui_step_idx = 0; _ui_progress = 0.0
+    _ui_en_total = 0; _ui_dub_total = 0; _ui_en_done = 0; _ui_dub_done = 0
+    _poll_step_phase = 0; _ui_cancelled = false; _ui_results_rows = {}
+  end
+end
+
+-- ─── Failure phase ────────────────────────────────────────
+local function ui_phase_failure(ctx, on_close)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF5555FF)
+  reaper.ImGui_Text(ctx, '✗  Failed')
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 8)
+
+  if _ui_failure then
+    reaper.ImGui_Text(ctx, 'Error output (tail):')
+    if reaper.ImGui_BeginChild(ctx, '##errtail', -1, 240, _child_border_flag()) then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAAAAFF)
+      reaper.ImGui_Text(ctx, _ui_failure.error_tail or '(no output)')
+      reaper.ImGui_PopStyleColor(ctx)
+      reaper.ImGui_EndChild(ctx)
+    end
+    reaper.ImGui_Dummy(ctx, 0, 6)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xAAAAAAFF)
+    reaper.ImGui_TextWrapped(ctx,
+      'Common fixes:\n  re-run setup.bat / setup.sh (rebuilds the venv)\n  for direct mode: setup.bat --direct')
+    reaper.ImGui_Text(ctx, 'Full log: ' .. (_ui_failure.log_path or ''))
+    reaper.ImGui_PopStyleColor(ctx)
+  end
+
+  reaper.ImGui_Dummy(ctx, 0, 12)
+  reaper.ImGui_Separator(ctx)
+  if reaper.ImGui_Button(ctx, 'Close', 120, 32) then on_close() end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, 'Back to setup', 140, 32) then
+    _ui_phase = 'setup'; _ui_failure = nil; _ui_progress = 0.0
+    _ui_en_total = 0; _ui_dub_total = 0; _ui_en_done = 0; _ui_dub_done = 0
+    _poll_step_phase = 0; _ui_cancelled = false; _ui_results_rows = {}
+  end
+end
+
+
+-- ═══════════════════════════════════════════════════════════
+-- LIVE LOG TAIL + RESULT HANDLING
+-- ═══════════════════════════════════════════════════════════
 
 local function on_python_done(success)
   if not success then return end
 
-  reaper.ShowConsoleMsg("\n[STEP 3] Applying results to timeline...\n")
+  _ui_step_idx     = 3
+  _poll_step_phase = 4
+  _ui_progress     = 0.92
+  _ui_step_label   = "Applying to timeline..."
+  log("\n[STEP 3] Applying results to timeline...")
 
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
@@ -851,7 +1477,9 @@ local function on_python_done(success)
   reaper.UpdateArrange()
   reaper.Undo_EndBlock("Auto Sync Pipeline", -1)
 
-  -- Summary popup
+  _ui_progress = 1.0
+
+  -- Summary shown on the success phase of the GUI.
   local s = read_summary(_poll_results_path)
   local elapsed = os.time() - _poll_start_time
   local msg
@@ -865,8 +1493,8 @@ local function on_python_done(success)
       "Model   : %s\n"                            ..
       "Language: %s\n"                            ..
       "Backend : %s\n\n"                          ..
-      "Tip: use Sync_Item.lua to manually\n"      ..
-      "fix any remaining unmatched items.",
+      "Tip: use Sync_Item.lua to manually fix\n"  ..
+      "any remaining unmatched items.",
       elapsed, s.total_en, s.matched, s.total_dub,
       s.unmatched, TRACK_UNSYNC,
       s.model, s.language, s.backend)
@@ -877,35 +1505,67 @@ local function on_python_done(success)
       elapsed, moved, unmatched, TRACK_UNSYNC)
   end
 
-  reaper.ShowMessageBox(msg, "Auto Sync — Complete", 0)
+  _ui_result = msg
+  _ui_phase  = "success"
 end
 
-local function poll_python_log()
-  -- Read new content from log file
+-- Poll the log/done files. Driven by the ImGui frame loop (NOT reaper.defer)
+-- so log appends + spinner stay in sync with rendering. Updates UI state and
+-- flips _ui_phase to success/failure when the run ends.
+local function poll_python_step()
+  -- Read new log content → console + UI buffer, and advance progress.
   local f = io.open(_poll_log_path, "r")
   if f then
     local content = f:read("*a")
     f:close()
     if content and #content > _poll_last_size then
       local new_text = content:sub(_poll_last_size + 1)
-      -- Print each new line to Reaper console
       for line in new_text:gmatch("([^\n]*)\n?") do
         if line and line ~= "" then
           reaper.ShowConsoleMsg("  " .. line .. "\n")
+          log_append("  " .. line)
+          if line:find("STEP 1", 1, true) then
+            _ui_step_idx = math.max(_ui_step_idx, 1); _poll_step_phase = 1
+            _ui_progress = math.max(_ui_progress, 0.08)
+          end
+          if line:find("STEP 2", 1, true) then
+            _ui_step_idx = math.max(_ui_step_idx, 2); _poll_step_phase = 2
+            _ui_progress = math.max(_ui_progress, 0.40)
+          end
+          if line:find("STEP 3", 1, true) then
+            _poll_step_phase = 3; _ui_progress = math.max(_ui_progress, 0.75)
+          end
+          if line:find("STEP 4", 1, true) then
+            _poll_step_phase = 4; _ui_progress = math.max(_ui_progress, 0.88)
+          end
+          if line:match("%[%s*%d+%]%s+\"") then
+            if _poll_step_phase == 1 then
+              _ui_en_done = _ui_en_done + 1
+              if _ui_en_total > 0 then
+                _ui_progress = math.max(_ui_progress,
+                  0.08 + (_ui_en_done / _ui_en_total) * 0.32)
+              end
+            elseif _poll_step_phase == 2 then
+              _ui_dub_done = _ui_dub_done + 1
+              if _ui_dub_total > 0 then
+                _ui_progress = math.max(_ui_progress,
+                  0.40 + (_ui_dub_done / _ui_dub_total) * 0.35)
+              end
+            end
+          end
         end
       end
       _poll_last_size = #content
     end
   end
 
-  -- Check if Python is done (done file exists with exit code)
+  -- Done? (done file present with exit code)
   local df = io.open(_poll_done_path, "r")
   if df then
     local exit_code_str = df:read("*a")
     df:close()
     if exit_code_str and exit_code_str:match("%d") then
       local exit_code = tonumber(exit_code_str:match("(%d+)"))
-      -- Flush any remaining log content
       local f2 = io.open(_poll_log_path, "r")
       if f2 then
         local final = f2:read("*a")
@@ -914,17 +1574,15 @@ local function poll_python_log()
           for line in final:sub(_poll_last_size + 1):gmatch("([^\n]*)\n?") do
             if line and line ~= "" then
               reaper.ShowConsoleMsg("  " .. line .. "\n")
+              log_append("  " .. line)
             end
           end
         end
       end
 
       local elapsed = os.time() - _poll_start_time
-      reaper.ShowConsoleMsg(string.format(
-        "\n──── Python finished in %ds (exit code %d) ────\n",
+      log(string.format("\n──── Python finished in %ds (exit code %d) ────",
         elapsed, exit_code or -1))
-
-      -- Clean up done file
       os.remove(_poll_done_path)
 
       if (exit_code == 0) and file_exists(_poll_results_path) then
@@ -932,114 +1590,92 @@ local function poll_python_log()
       else
         local python_log = read_file(_poll_log_path) or "(no output)"
         local short_log = python_log
-        if #short_log > 800 then
-          short_log = "...\n" .. short_log:sub(-800)
+        if #short_log > 1200 then short_log = "...\n" .. short_log:sub(-1200) end
+        if _ui_cancelled then
+          _ui_failure = { error_tail = "Cancelled by user.\n\n" .. short_log,
+                          log_path = _poll_log_path }
+        else
+          _ui_failure = { error_tail = short_log, log_path = _poll_log_path }
         end
-        reaper.ShowMessageBox(
-          "The Python matcher failed.\n\n" ..
-          "Error output (see console for full log):\n" ..
-          "──────────────────\n" ..
-          short_log ..
-          "\n──────────────────\n\n" ..
-          "Common fixes:\n" ..
-          "  pip install -r requirements.txt\n" ..
-          "  pip install soundfile\n\n" ..
-          "Full log saved at:\n" .. _poll_log_path,
-          "Python Error", 0)
+        _ui_phase = "failure"
       end
-      return  -- stop polling
+      return
     end
   end
 
   -- Watchdog: run_sync.py writes its "[run_sync] launching:" line within a
   -- couple of seconds of a successful start. If the log is still empty after
-  -- 90 s, the launch failed in a way we couldn't detect (e.g. the old
-  -- `start /b` fallback, or python.exe dying before opening the log) —
-  -- stop polling instead of spinning forever with no feedback.
+  -- 90 s, the launch failed in a way we couldn't detect — surface it instead
+  -- of spinning the spinner forever.
   if _poll_last_size == 0 and (os.time() - _poll_start_time) > 90 then
-    reaper.ShowConsoleMsg(
-      "\nERROR: no output from Python after 90 s — launch likely failed.\n")
-    reaper.ShowMessageBox(
-      "Python produced no output for 90 seconds — the launch\n" ..
-      "probably failed.\n\n" ..
-      "Things to check:\n" ..
-      "  - the venv exists (re-run setup if it was deleted)\n" ..
-      "  - the log file: " .. tostring(_poll_log_path),
-      "Auto Sync — launch failed", 0)
+    log("\nERROR: no output from Python after 90 s — launch likely failed.")
+    _ui_failure = {
+      error_tail = "Python produced no output for 90 seconds — the launch " ..
+                   "probably failed.\n\nThings to check:\n" ..
+                   "  - the venv exists (re-run setup if it was deleted)\n" ..
+                   "  - the interpreter path is valid",
+      log_path = _poll_log_path,
+    }
+    _ui_phase = "failure"
     return
   end
-
-  -- Not done yet — schedule next poll
-  reaper.defer(poll_python_log)
 end
 
 
 -- ═══════════════════════════════════════════════════════════
--- MAIN
+-- ORCHESTRATION — validate inputs and launch the Python matcher
 -- ═══════════════════════════════════════════════════════════
-
-local function main()
-
-  -- Open and clear the Reaper console so live output is visible immediately
-  reaper.ShowConsoleMsg("")   -- this brings the console window to front
+-- Called when the user clicks "Start Sync". Returns true if Python was
+-- launched and the UI should switch to the running phase; false (with a
+-- banner set) to stay on the setup form.
+local function start_sync_run()
+  ui_clear_banner()
+  save_settings()
   reaper.ClearConsole()
+  _log_buffer = {}
 
-  -- ── 0. Settings dialog ───────────────────────────────────
-  if not show_settings_dialog() then return end
-
-  -- ── 0a. Auto-detect Python ───────────────────────────────
+  -- ── Auto-detect Python ────────────────────────────────
   local py = find_python()
   if not py then
-    if not ensure_setup() then return end
+    if not ensure_setup() then return false end
     py = find_python()
     if not py then
-      reaper.MB("Could not find a Python interpreter even after setup.\n" ..
-                (_is_windows()
-                  and "Please install Python 3.11+ (python.org) and re-run setup.bat."
-                  or  "Please install Python 3.11+ and re-run setup.sh."),
-                "Python not found", 0)
-      return
+      ui_set_banner("error",
+        "Could not find a Python interpreter even after setup. " ..
+        (_is_windows()
+          and "Install Python 3.11+ (python.org) and re-run setup.bat."
+          or  "Install Python 3.11+ and re-run setup.sh."))
+      return false
     end
   end
   PYTHON_CMD = py
   log(string.format("  Python    : %s", PYTHON_CMD))
 
-  -- ── 1. Find tracks ────────────────────────────────────────
+  -- ── Find tracks ───────────────────────────────────────
   local track_vo  = find_track_by_name(TRACK_VO_NAME)
   local track_dub = find_track_by_name(TRACK_DUB_NAME)
-
   if not track_vo then
-    reaper.ShowMessageBox(
-      'Track "' .. TRACK_VO_NAME .. '" not found.\n\n' ..
-      'Check the track name matches exactly\n(capital letters matter).',
-      "Track not found", 0)
-    return
+    ui_set_banner("error", 'Track "' .. TRACK_VO_NAME ..
+      '" not found. Check the name matches exactly (capital letters matter).')
+    return false
   end
   if not track_dub then
-    reaper.ShowMessageBox(
-      'Track "' .. TRACK_DUB_NAME .. '" not found.\n\n' ..
-      'Check the track name matches exactly\n(capital letters matter).',
-      "Track not found", 0)
-    return
+    ui_set_banner("error", 'Track "' .. TRACK_DUB_NAME ..
+      '" not found. Check the name matches exactly (capital letters matter).')
+    return false
   end
 
-  -- ── 2. Get items ──────────────────────────────────────────
   local vo_items  = get_items_sorted(track_vo)
   local dub_items = get_items_sorted(track_dub)
-
   if #vo_items == 0 then
-    reaper.ShowMessageBox(
-      'No items on track "' .. TRACK_VO_NAME .. '".\n\n' ..
-      'Import English audio and use Dynamic Split first.',
-      "No items", 0)
-    return
+    ui_set_banner("error", 'No items on track "' .. TRACK_VO_NAME ..
+      '". Import English audio and use Dynamic Split first.')
+    return false
   end
   if #dub_items == 0 then
-    reaper.ShowMessageBox(
-      'No items on track "' .. TRACK_DUB_NAME .. '".\n\n' ..
-      'Import dubbed audio and use Dynamic Split first.',
-      "No items", 0)
-    return
+    ui_set_banner("error", 'No items on track "' .. TRACK_DUB_NAME ..
+      '". Import dubbed audio and use Dynamic Split first.')
+    return false
   end
 
   log("\n" .. string.rep("=", 60))
@@ -1062,33 +1698,31 @@ local function main()
     log(string.format("  Script    : loaded (%d chars)", #SCRIPT_TEXT))
   end
 
-  -- ── 3. Prepare paths ─────────────────────────────────────
-  local script_dir  = get_script_dir()
+  local script_dir   = get_script_dir()
   local results_path = script_dir .. "/sync_results.json"
-
-  -- Delete old results so we don't accidentally use stale data
   os.remove(results_path)
 
-  -- ── 4. Write config JSON ──────────────────────────────────
+  _ui_step_idx = 1
   log("\n[STEP 1] Writing config JSON...")
   local config_path = write_config(vo_items, dub_items, results_path)
-  if not config_path then return end
+  if not config_path then
+    ui_set_banner("error", "Could not write sync_config.json next to the script.")
+    return false
+  end
   log("  Written: " .. config_path)
 
-  -- ── 5. Build and launch Python (non-blocking) ────────────
   local cmd, log_path, done_path = build_python_cmd(config_path)
-  if not cmd then return end
-
-  -- Delete old done marker
+  if not cmd then
+    ui_set_banner("error", "sync_matcher.py or run_sync.py is missing next to this script.")
+    return false
+  end
   os.remove(done_path)
 
-  -- Truncate the old log too. The poller starts reading at offset 0, so a
-  -- leftover log from the previous run would be re-printed wholesale and the
-  -- fresh run's live output would stay hidden until the file outgrew the
-  -- stale size. (run_sync.py truncates it as well, but only ~1-3 s after
-  -- launch — the poller fires every defer cycle in that window.)
+  -- Truncate the stale log so the poller reads only this run's output.
   local lf = io.open(log_path, "w")
   if lf then lf:close() end
+  -- Clear any stale PID so a Cancel can't signal a recycled, unrelated PID.
+  os.remove(script_dir .. "/sync_python_pid.txt")
 
   local asr_info = "ASR: " .. ASR_PROVIDER
   if ASR_PROVIDER == "gemini" then
@@ -1103,6 +1737,7 @@ local function main()
     end
   end
 
+  _ui_step_idx = 2
   log("\n[STEP 2] Launching AI matcher in background...")
   log("  Mode     : " .. MATCH_MODE)
   log("  " .. asr_info)
@@ -1110,7 +1745,6 @@ local function main()
   log("  Log file : " .. log_path)
   log("\n──── Live Python output ────────────────────────────────")
 
-  -- Set up polling state
   _poll_log_path     = log_path
   _poll_done_path    = done_path
   _poll_results_path = results_path
@@ -1118,24 +1752,28 @@ local function main()
   _poll_last_size    = 0
   _poll_start_time   = os.time()
 
-  -- Launch Python in background.
-  -- Windows: ExecProcess(-2) = fire-and-forget via CreateProcess — no
-  -- console window at all. Fallback keeps the old start/b route for very
-  -- old REAPER builds that lack ExecProcess.
-  -- macOS: shell launch with trailing & (needed for the redirect syntax).
+  -- Progress tracking for the running phase.
+  _ui_progress     = 0.05
+  _ui_en_total     = #vo_items
+  _ui_dub_total    = #dub_items
+  _ui_en_done      = 0
+  _ui_dub_done     = 0
+  _poll_step_phase = 0
+  _ui_cancelled    = false
+  _ui_results_rows = {}
+
+  -- Launch (non-blocking).
+  --  Windows: ExecProcess(-2) = fire-and-forget CreateProcess (no console
+  --  window). Falls back to start /b on very old REAPER builds.
+  --  macOS: shell launch with trailing & (needed for the redirect syntax).
   if _is_windows() then
     if reaper.ExecProcess then
-      -- ExecProcess returns nil when CreateProcess itself fails (bad
-      -- interpreter path, blocked exe) — fail loudly instead of letting the
-      -- poller spin forever waiting for output that will never come.
       local ret = reaper.ExecProcess(cmd, -2)
       if ret == nil then
-        reaper.ShowMessageBox(
-          "Could not launch Python.\n\nCommand:\n" .. cmd ..
-          "\n\nCheck that the interpreter path exists\n" ..
-          "(re-run setup.bat if the venv was deleted).",
-          "Auto Sync — launch failed", 0)
-        return
+        ui_set_banner("error",
+          "Could not launch Python. Check the interpreter path " ..
+          "(re-run setup.bat if the venv was deleted).")
+        return false
       end
     else
       os.execute('start "" /b ' .. cmd)
@@ -1144,8 +1782,126 @@ local function main()
     os.execute(cmd)
   end
 
-  -- Start polling loop (runs via reaper.defer, non-blocking)
-  reaper.defer(poll_python_log)
+  _ui_phase = "running"
+  return true
+end
+
+
+-- ═══════════════════════════════════════════════════════════
+-- MAIN — single ReaImGui frame loop drives all phases
+-- ═══════════════════════════════════════════════════════════
+
+local function main()
+  -- ReaImGui is required. Show a one-time install prompt and exit if missing.
+  if not imgui_available() then
+    -- If ReaPack is installed, offer to add the repo + open the browser for the
+    -- user automatically (removes most of the manual steps).
+    if reaper.APIExists and reaper.APIExists('ReaPack_AddSetRepository') then
+      -- Yes / No / Cancel  (type 3): Yes = auto, No = manual steps, Cancel = quit.
+      local choice = reaper.ShowMessageBox(
+        "This script needs ReaImGui (free).\n\n" ..
+        "ReaPack was detected. Install ReaImGui automatically?\n" ..
+        "(This adds the repository and opens the package browser so you\n" ..
+        "just click Install → Apply, then restart REAPER.)\n\n" ..
+        "Yes  = do it automatically\n" ..
+        "No   = show me the manual steps instead\n" ..
+        "Cancel = quit",
+        "ReaImGui not installed", 3)
+      if choice == 6 then       -- Yes
+        try_reapack_install()
+        return
+      elseif choice == 2 then   -- Cancel
+        return
+      end
+      -- choice == 7 (No): fall through to the manual instructions below.
+    else
+      -- No ReaPack either — offer to download the ReaPack extension itself
+      -- into UserPlugins, so after one restart the automatic ReaImGui flow
+      -- above can run.
+      local choice = reaper.ShowMessageBox(
+        "This script needs ReaImGui, which installs through ReaPack —\n" ..
+        "and ReaPack is not installed yet either.\n\n" ..
+        "Install ReaPack automatically now?\n" ..
+        "(Downloads the official extension into REAPER's UserPlugins\n" ..
+        "folder. Then: restart REAPER, run this script again, and it\n" ..
+        "will offer to install ReaImGui for you.)\n\n" ..
+        "Yes  = do it automatically\n" ..
+        "No   = show me the manual steps instead\n" ..
+        "Cancel = quit",
+        "ReaImGui + ReaPack not installed", 3)
+      if choice == 6 then       -- Yes
+        if try_reapack_bootstrap() then
+          reaper.ShowMessageBox(
+            "ReaPack was installed.\n\n" ..
+            "  1. Restart REAPER.\n" ..
+            "  2. Run this script again — it will offer to install\n" ..
+            "     ReaImGui automatically.",
+            "Restart REAPER", 0)
+        else
+          reaper.ShowMessageBox(
+            "Automatic download failed (offline, or an unusual REAPER\n" ..
+            "build). Install ReaPack manually from https://reapack.com\n" ..
+            "— opening that page now — then run this script again.",
+            "Download failed", 0)
+          open_url("https://reapack.com/user-guide#installation")
+        end
+        return
+      elseif choice == 2 then   -- Cancel
+        return
+      end
+      -- No: fall through to the manual instructions below.
+    end
+
+    local choice = reaper.ShowMessageBox(
+      "This script needs ReaImGui (free).\n\n" ..
+      "Quickest install (REAPER must restart after):\n" ..
+      "  1. Extensions - ReaPack - Import repositories...\n" ..
+      "  2. Paste:\n" ..
+      "     " .. REAIMGUI_REPO_URL .. "\n" ..
+      "  3. Extensions - ReaPack - Browse packages - search\n" ..
+      "     'ReaImGui' - right-click - Install - Apply.\n" ..
+      "  4. Restart REAPER and run this script again.\n\n" ..
+      "Open the ReaImGui homepage in your browser now?",
+      "ReaImGui not installed", 4)
+    if choice == 6 then
+      open_url("https://github.com/cfillion/reaimgui#installation")
+    end
+    return
+  end
+
+  reaper.ClearConsole()
+  _ui_ctx  = reaper.ImGui_CreateContext('Auto Sync Pipeline')
+  _ui_font = _attach_unicode_font(_ui_ctx)
+
+  local function close_window() _ui_window_open = false end
+
+  local function frame()
+    reaper.ImGui_SetNextWindowSize(_ui_ctx, 680, 720, reaper.ImGui_Cond_FirstUseEver())
+    local visible, open = reaper.ImGui_Begin(_ui_ctx, 'Auto Sync Pipeline',
+      true, reaper.ImGui_WindowFlags_NoCollapse())
+    if visible then
+      if _ui_phase == "setup" then
+        ui_phase_setup(_ui_ctx, function() start_sync_run() end, close_window)
+      elseif _ui_phase == "running" then
+        poll_python_step()   -- refresh log/progress before rendering
+        local elapsed = os.time() - _poll_start_time
+        ui_phase_running(_ui_ctx, elapsed)
+      elseif _ui_phase == "success" then
+        ui_phase_success(_ui_ctx, close_window)
+      elseif _ui_phase == "failure" then
+        ui_phase_failure(_ui_ctx, close_window)
+      end
+    end
+    reaper.ImGui_End(_ui_ctx)   -- always paired with Begin()
+    _ui_window_open = _ui_window_open and open
+    if _ui_window_open then
+      reaper.defer(frame)
+    end
+    -- If the window closes mid-run the Python keeps running in the background
+    -- (it still writes the log + done files); we simply stop polling.
+  end
+
+  reaper.defer(frame)
 end
 
 reaper.defer(main)

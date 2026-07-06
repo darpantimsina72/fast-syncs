@@ -12,14 +12,45 @@
 # ──────────────────────────────────────────────────────────────
 set -e
 
+ZIP_URL="https://codeload.github.com/darpantimsina72/fast-syncs/zip/refs/heads/main"
+
+# ZIP installs (no .git): download the latest ZIP and overlay it onto this
+# folder. Settings, venv and .direct-mode aren't in the ZIP, so they survive.
+# Runs inside main() (fully parsed), so rewriting update.sh mid-run is safe.
+zip_update() {
+    echo "[update] Not a git checkout — downloading the latest version from GitHub…"
+    local tmp="${TMPDIR:-/tmp}/fast-syncs-zip"
+    rm -rf "$tmp" && mkdir -p "$tmp"
+    if ! curl -fsSL -o "$tmp/repo.zip" "$ZIP_URL"; then
+        echo "[update] Could not download the update (offline, or the GitHub"
+        echo "         repository is private / moved). Update manually instead:"
+        echo "         re-download the ZIP and unzip it OVER this folder"
+        echo "         (your settings and venv are kept)."
+        return 0
+    fi
+    if ! unzip -oq "$tmp/repo.zip" -d "$tmp"; then
+        echo "[update] Could not unpack the update — update manually (re-download the ZIP)."
+        return 0
+    fi
+    # The ZIP contains one folder (fast-syncs-<branch>); copy its contents here.
+    local src
+    src=$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+    if [ -z "$src" ]; then
+        echo "[update] Unexpected ZIP layout — update manually (re-download the ZIP)."
+        return 0
+    fi
+    cp -R "$src/." .
+    echo "[update] Files updated to the latest version."
+}
+
 main() {
     cd "$(dirname "$0")"
 
-    echo "[update] Pulling latest changes…"
     if [ -d .git ] && command -v git >/dev/null 2>&1; then
+        echo "[update] Pulling latest changes…"
         git pull --ff-only
     else
-        echo "[update] Not a git checkout — skipping pull. Re-download the ZIP to update."
+        zip_update
     fi
 
     if [ -d venv ]; then
@@ -40,7 +71,7 @@ main() {
     fi
 
     echo
-    echo "Update complete."
+    echo "Update complete. Re-run the script in REAPER to use the new version."
 }
 
 main "$@"; exit $?

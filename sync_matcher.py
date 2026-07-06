@@ -796,6 +796,27 @@ def _matcher_cache_key(provider, prompt_text):
     return f"{provider}__{h}"
 
 
+def _invalidate_matcher_cache(prompt_text, cache):
+    """Purge the cached matcher response for this prompt from BOTH the
+    in-memory dict and the persistent disk cache.
+
+    _call_gemini caches raw response text before anyone validates it as JSON.
+    If the response turns out to be garbage (an error object, an HTML page
+    from a misconfigured gateway, a truncated reply), leaving it cached means
+    every future run replays the same failure from sync_cache.json. Callers
+    that fail to parse a response MUST call this before erroring out."""
+    prov = (_MATCHER_PROVIDER or "gemini").lower()
+    if prov not in ("openai", "anthropic"):
+        prov = "gemini"
+    key = _matcher_cache_key(prov, prompt_text)
+    _GEMINI_RESPONSE_CACHE.pop(key, None)
+    if cache is not None:
+        try:
+            cache.delete_raw(key)
+        except Exception:
+            pass
+
+
 # ─── Default model names (override via env if you want) ──────────────
 _OPENAI_MATCHER_MODEL    = os.environ.get("SYNC_OPENAI_MODEL",    "gpt-4o")
 _ANTHROPIC_MATCHER_MODEL = os.environ.get("SYNC_ANTHROPIC_MODEL", "claude-sonnet-4-5")
@@ -1082,9 +1103,17 @@ def _call_gemini(prompt_text, api_key, model="gemini-2.5-pro",
                 if cache is not None:
                     cache.set_raw(cache_key, text)
                 return text
-            print("    [VERTEX] Empty response — falling back to REST")
+            print("    [VERTEX] Empty response")
         except Exception as e:
-            print(f"    [VERTEX] Error: {e} — falling back to REST")
+            print(f"    [VERTEX] Error: {e}")
+        # An explicitly chosen backend is strict: vertex errors must surface,
+        # not silently reroute to Google's REST endpoint with a different key.
+        # (Only legacy backend=auto keeps the vertex→REST chain.)
+        if _GEMINI_BACKEND == "vertex":
+            print("    [VERTEX] backend=vertex is strict — not falling back "
+                  "to REST")
+            return None
+        print(f"    [VERTEX] backend={_GEMINI_BACKEND} — falling back to REST")
     elif _GEMINI_BACKEND == "vertex":
         # User explicitly asked for Vertex but it isn't available — don't
         # silently fall through to REST.
@@ -1285,6 +1314,7 @@ def _call_gemini_sections(en_items, dub_items, dub_language, gemini_key,
                 parsed = None
 
     if not isinstance(parsed, dict):
+        _invalidate_matcher_cache(prompt, cache)
         return None
 
     sections = parsed.get("sections") or []
@@ -1292,6 +1322,7 @@ def _call_gemini_sections(en_items, dub_items, dub_language, gemini_key,
     unmatched_en  = parsed.get("unmatched_en")  or []
 
     if not isinstance(sections, list):
+        _invalidate_matcher_cache(prompt, cache)
         return None
 
     # Coerce ids to ints, drop malformed entries
@@ -1308,6 +1339,18 @@ def _call_gemini_sections(en_items, dub_items, dub_language, gemini_key,
                      if isinstance(x, (int, float, str)) and str(x).lstrip("-").isdigit()]
     unmatched_en  = [int(x) for x in unmatched_en
                      if isinstance(x, (int, float, str)) and str(x).lstrip("-").isdigit()]
+
+    if not clean_sections:
+        # A dict with zero usable sections — '{}', an {"error": ...} object
+        # from a gateway/proxy, or entries under wrong keys — is a FAILED
+        # response, NOT "every clip is unmatched". Treating it as success
+        # used to skip the batched retry and emit an all-unmatched result
+        # with exit code 0. Purge the cached response and report failure so
+        # the caller retries (and hard-errors if that fails too).
+        _invalidate_matcher_cache(prompt, cache)
+        print("  [ERROR] Sectioned response contained no usable sections — "
+              "treating as a failed call")
+        return None
 
     return clean_sections, unmatched_dub, unmatched_en
 
@@ -1714,6 +1757,29 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
 
     print(f"  ✓ Done in {time.time() - _t2:.1f}s")
 
+    # ── ASR sanity gate ──────────────────────────────────────
+    # transcribe() returns "" on every failure (bad key, HTTP 401, network,
+    # SSL, missing audio). Feeding all-empty transcripts to Gemini "succeeds":
+    # the model dutifully reports everything unmatched and the run exits 0.
+    # A wholesale ASR outage must be a hard error instead.
+    def _empty_count(items):
+        return sum(1 for i in items if not (i.get("transcript") or "").strip())
+    en_empty, dub_empty = _empty_count(en_items), _empty_count(dub_items)
+    if (en_items and en_empty == len(en_items)) or \
+       (dub_items and dub_empty == len(dub_items)):
+        print(f"\n  [ERROR] Transcription produced NO text "
+              f"(EN empty: {en_empty}/{len(en_items)}, "
+              f"DUB empty: {dub_empty}/{len(dub_items)}).")
+        print("          The ASR provider failed wholesale — matching would "
+              "be meaningless. NOT proceeding.")
+        print("          Check the [ASR] errors above: key valid? network/SSL "
+              "OK? audio files readable?")
+        raise SystemExit(1)
+    if en_empty > len(en_items) // 2 or dub_empty > len(dub_items) // 2:
+        print(f"  [WARN] Many empty transcripts (EN {en_empty}/{len(en_items)}, "
+              f"DUB {dub_empty}/{len(dub_items)}) — match quality will suffer; "
+              "check ASR errors above")
+
     # Resolve dubbing script (optional — boosts Gemini's grouping accuracy)
     script_text = _load_script_text(script_text, script_path)
 
@@ -1744,12 +1810,23 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
             print("  [WARN] Sectioned call failed — falling back to batched pairs")
 
     if sections is None:
-        # ── Step 3b: Fallback — batched flat-pair prompt ──────────────
+        # ── Step 3b: Retry — batched flat-pair prompt (still Gemini) ──
         sections, unmatched_dub_ids = _gemini_batched_pairs(
             en_items, dub_items, dub_language, gemini_key, cache=cache)
         if sections is None:
-            print("  [ERROR] All Gemini paths failed — falling back to duration mode")
-            return _fallback_duration_match(en_items, dub_items)
+            # Gemini matching is the ONLY matching method. A failure here must
+            # surface as a hard error — never silently produce results from a
+            # different algorithm (the old duration fallback misplaced clips
+            # with no warning the user could see).
+            print("  [ERROR] Gemini matching failed — sectioned AND batched "
+                  "attempts both returned nothing.")
+            print("          NOT falling back to any other matching method.")
+            print("          Check the log above for the cause. Common ones:")
+            print("            - gateway base URL unreachable / wrong "
+                  "(SYNC_GEMINI_BASE_URL)")
+            print("            - invalid or expired key for the chosen backend")
+            print("            - wrong model name for this backend")
+            raise SystemExit(1)
 
     print(f"\n  Total sections: {len(sections)}  ✓ {time.time() - _t3:.1f}s")
 
@@ -1814,21 +1891,14 @@ def _gemini_batched_pairs(en_items, dub_items, dub_language, gemini_key, cache=N
                 return result
         except json.JSONDecodeError:
             pass
-        # Salvage truncated response
-        last_close = cleaned.rfind("}")
-        if last_close > 0:
-            salvaged = cleaned[:last_close + 1]
-            if not salvaged.startswith("["):
-                salvaged = "[" + salvaged
-            if not salvaged.endswith("]"):
-                salvaged = salvaged + "]"
-            try:
-                result = json.loads(salvaged)
-                if isinstance(result, list):
-                    print(f"  [RECOVERED] Salvaged {len(result)} pairs from truncated response")
-                    return result
-            except json.JSONDecodeError:
-                pass
+        # NOTE: no truncation "salvage" here. The old code chopped a truncated
+        # reply at the last '}' and treated the surviving prefix as the full
+        # answer — every clip after the cut silently became "unmatched" with
+        # exit code 0. A truncated reply is a FAILED reply: return None so the
+        # caller purges the cached response and aborts loudly.
+        if cleaned.rfind("}") > 0:
+            print("  [ERROR] Response is not a valid JSON array "
+                  "(likely truncated) — treating as a failed call")
         return None
 
     # Split EN clips into batches. Send ALL unmatched DUBs to every batch —
@@ -1857,8 +1927,16 @@ def _gemini_batched_pairs(en_items, dub_items, dub_language, gemini_key, cache=N
         batch_matches = _parse_gemini_response(raw)
 
         if batch_matches is None:
-            print(f"  [WARN] Batch {b+1} failed — those clips will be unmatched")
-            continue
+            # All-or-nothing: a failed batch used to be skipped with a WARN,
+            # silently dumping every clip in it into "unmatched" while the
+            # run still exited 0. Purge the cached response (if any) and fail
+            # the whole matching call — the caller hard-errors, the user sees
+            # the real cause instead of a mysteriously half-synced timeline.
+            if raw:
+                _invalidate_matcher_cache(prompt, cache)
+            print(f"  [ERROR] Batch {b+1}/{n_batches} failed — aborting "
+                  "(Gemini matching is all-or-nothing, no partial results)")
+            return None, None
 
         # Deduplicate: keep only the first occurrence of each dub_id
         # (Gemini occasionally returns the same dub_id twice)
@@ -1912,59 +1990,6 @@ def _gemini_batched_pairs(en_items, dub_items, dub_language, gemini_key, cache=N
     return sections, unmatched_dub_ids
 
 
-def _fallback_duration_match(en_items, dub_items):
-    """Simple duration+position fallback when Gemini fails."""
-    print("  [FALLBACK] Using duration + position matching")
-    WINDOW_SEC = 15.0
-    results = []
-    last_en_idx = -1
-
-    for dub in dub_items:
-        dub_pos = dub["position"]
-        dub_dur = dub["duration"]
-
-        best_idx   = None
-        best_score = -1.0
-        for i, en in enumerate(en_items):
-            if i <= last_en_idx:
-                continue
-            if abs(dub_pos - en["position"]) > WINDOW_SEC:
-                continue
-            dur = duration_similarity(dub_dur, en["duration"])
-            pos = max(0.0, 1.0 - abs(dub_pos - en["position"]) / WINDOW_SEC)
-            score = dur * 0.60 + pos * 0.40
-            if score > best_score:
-                best_score = score
-                best_idx   = i
-
-        if best_idx is not None and best_score >= 0.05:
-            en = en_items[best_idx]
-            new_pos = en["position"]
-            last_en_idx = best_idx
-            results.append({
-                "dub_id"            : dub["id"],
-                "en_id"             : en["id"],
-                "match"             : best_idx,
-                "score"             : round(best_score, 4),
-                "new_position"      : round(new_pos, 6),
-                "silence_correction": 0.0,
-                "dub_duration"      : round(dub_dur, 6),
-                "status"            : "matched",
-            })
-        else:
-            results.append({
-                "dub_id"      : dub["id"],
-                "match"       : None,
-                "score"       : 0,
-                "dub_duration": round(dub_dur, 6),
-                "status"      : "unmatched",
-            })
-
-    return results
-
-
-# ═══════════════════════════════════════════════════════════
-# Cache — persists transcription results across runs
 # ═══════════════════════════════════════════════════════════
 
 class TranscriptCache:
@@ -2009,6 +2034,14 @@ class TranscriptCache:
         with self._lock:
             self._data[key] = value
             self._dirty = True
+
+    def delete_raw(self, key):
+        """Drop a cached entry (used to purge responses that failed parsing,
+        so a bad response can't deterministically replay on every run)."""
+        with self._lock:
+            if key in self._data:
+                del self._data[key]
+                self._dirty = True
 
     def flush(self):
         """Write accumulated cache entries to disk (call once at end)."""
@@ -2355,12 +2388,12 @@ def main():
     parser.add_argument("--language", default="ne",
                         help="Dub language code (hi/ne/ta/te/bn/mr/gu/kn/ml/pa/ur)")
     parser.add_argument("--mode", default="gemini",
-                        choices=["gemini", "hybrid", "duration"],
+                        choices=["gemini"],
                         help=(
-                            "gemini   = transcribe all clips then Gemini matches semantically\n"
-                            "           (best accuracy, requires --gemini-key + --elevenlabs-key)\n"
-                            "hybrid   = ElevenLabs + Gemini translate + duration + position\n"
-                            "duration = pure duration + position only (fastest, no API calls)"
+                            "gemini = transcribe all clips then Gemini matches "
+                            "semantically. This is the ONLY mode: on failure the "
+                            "run exits non-zero — there is deliberately no "
+                            "hybrid/duration fallback."
                         ))
     parser.add_argument("--asr", default="elevenlabs",
                         choices=["elevenlabs", "gemini"],
@@ -2504,6 +2537,16 @@ def main():
     n_matched = sum(1 for r in results if r["status"] == "matched")
     n_unmatched = sum(1 for r in results if r["status"] == "unmatched")
 
+    # Record what actually produced the matches — not just the ASR label.
+    # (Both "model" and "backend" used to hold the ASR string, so the output
+    # carried no trace of which matcher/backend ran.)
+    if matcher_prov == "gemini":
+        matcher_backend = ("proxy" if _USE_PROXY else _GEMINI_BACKEND)
+        matcher_model   = _GEMINI_MATCHER_MODEL
+    else:
+        matcher_backend = matcher_prov
+        matcher_model   = matcher_prov
+
     output = {
         "results": results,
         "summary": {
@@ -2511,9 +2554,10 @@ def main():
             "total_dub": len(dub_items),
             "matched": n_matched,
             "unmatched": n_unmatched,
-            "model": asr_label,
+            "model": matcher_model,
             "language": args.language,
-            "backend": asr_label,
+            "backend": matcher_backend,
+            "asr": asr_label,
         },
     }
 
@@ -2532,6 +2576,18 @@ def main():
     print(f"  Total time: {_mins}m {_secs}s")
     print(f"  Output: {output_path}")
     print(f"{'=' * 60}\n")
+
+    # Zero matches in gemini mode means the run FAILED, whatever the exit
+    # path above thought: an all-unmatched timeline is never a success the
+    # user asked for. Results were written for debugging, but exit non-zero
+    # so the front-end shows the failure instead of applying it silently.
+    if args.mode == "gemini" and dub_items and n_matched == 0:
+        print("  [ERROR] 0 clips matched — treating the run as FAILED.")
+        print("          Results were written for inspection, but they will "
+              "not be applied.")
+        print("          Scroll up for the first [ERROR]/[WARN] — usually "
+              "ASR key/network, wrong tracks, or a matcher backend problem.")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

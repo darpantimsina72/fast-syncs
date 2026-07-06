@@ -106,12 +106,20 @@ def main() -> int:
     config     = script_dir / "sync_config.json"
     log_path   = script_dir / "sync_python_log.txt"
     done_path  = script_dir / "sync_python_done.txt"
+    pid_path   = script_dir / "sync_python_pid.txt"
 
     settings = _load_settings(script_dir)
 
     # Resolve selections: CLI flag > settings.json > built-in default.
     language = args.language or settings.get("language")   or "ne"
     mode     = args.mode     or settings.get("match_mode") or "gemini"
+    # Gemini semantic matching is the only supported mode — a legacy
+    # settings.json (or stray CLI flag) must not resurrect hybrid/duration.
+    if mode != "gemini":
+        _EARLY_WARNINGS.append(
+            f"[run_sync] WARNING: match mode '{mode}' is no longer supported "
+            "— forcing 'gemini'")
+        mode = "gemini"
     asr      = args.asr      or settings.get("asr_provider") or "elevenlabs"
     if asr not in ("elevenlabs", "gemini"):
         asr = "elevenlabs"
@@ -147,7 +155,13 @@ def main() -> int:
         kwargs = {}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        proc = subprocess.run(
+        else:
+            # New session so the whole worker tree can be signalled at once if
+            # the UI's Cancel button kills the process group.
+            kwargs["start_new_session"] = True
+        # Popen (not run) so we can publish the worker PID immediately — the
+        # Reaper UI's Cancel button reads sync_python_pid.txt to stop the run.
+        proc = subprocess.Popen(
             cmd,
             cwd=str(script_dir),
             stdout=log_file,
@@ -155,6 +169,12 @@ def main() -> int:
             env=env,
             **kwargs,
         )
+        try:
+            with open(pid_path, "w", encoding="utf-8") as pf:
+                pf.write(str(proc.pid))
+        except Exception:
+            pass
+        proc.wait()
         exit_code = proc.returncode
     except Exception:
         try:
@@ -174,6 +194,12 @@ def main() -> int:
             with open(done_path, "w", encoding="utf-8") as df:
                 df.write(str(exit_code))
         except Exception:
+            pass
+        # The worker is gone — drop the stale PID file so a later Cancel can't
+        # signal an unrelated, recycled PID.
+        try:
+            os.remove(pid_path)
+        except OSError:
             pass
 
     return exit_code
