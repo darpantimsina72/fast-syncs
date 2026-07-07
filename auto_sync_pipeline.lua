@@ -63,8 +63,21 @@ local VERTEX_KEY_PATH  = ""
 -- routed through your server, which holds the real provider keys — so the
 -- ElevenLabs/Gemini keys above can stay blank on shared machines. API_TOKEN
 -- is the per-user access token you issued. Blank API_BASE = direct/local mode.
+-- API_BASE is the EFFECTIVE value handed to Python; it is derived from
+-- CONN_MODE + SERVER_URL by _apply_conn_mode(), never edited directly.
 local API_BASE         = ""
 local API_TOKEN        = ""
+
+-- Connection mode — the single top-level choice the dialog presents:
+--   "server"  : route everything through your proxy (SERVER_URL + API_TOKEN)
+--   "studio"  : direct, Google AI Studio key (AIza…)      -> gemini_backend rest
+--   "vertex"  : direct, Google service account JSON        -> gemini_backend vertex
+--   "gateway" : direct, OpenAI-compatible LiteLLM base URL -> gemini_backend gateway
+-- SERVER_URL is remembered separately from API_BASE so toggling modes never
+-- loses the typed proxy URL. _apply_conn_mode() maps CONN_MODE onto the
+-- underlying API_BASE / GEMINI_BACKEND that the rest of the code + Python read.
+local CONN_MODE        = "vertex"
+local SERVER_URL       = ""
 
 -- Dubbing script content. Pasted directly into the dialog. Reaper's input
 -- box collapses newlines on macOS, so use "||" between paragraphs — the
@@ -105,6 +118,29 @@ local function _norm_backend(b)
   return b
 end
 
+local function _norm_conn_mode(m)
+  m = tostring(m or ""):lower()
+  if m ~= "server" and m ~= "studio" and m ~= "vertex" and m ~= "gateway" then
+    return nil   -- caller derives from legacy fields
+  end
+  return m
+end
+
+-- Map the single CONN_MODE choice onto the underlying values the rest of the
+-- code and the Python worker actually read (API_BASE gates proxy mode;
+-- GEMINI_BACKEND selects how Gemini is called). Idempotent — safe to call every
+-- UI frame and again right before a run/save.
+local function _apply_conn_mode()
+  if CONN_MODE == "server" then
+    API_BASE = SERVER_URL          -- non-empty URL turns the proxy on
+  else
+    API_BASE = ""                  -- direct: never route through a proxy
+    if     CONN_MODE == "studio"  then GEMINI_BACKEND = "rest"
+    elseif CONN_MODE == "vertex"  then GEMINI_BACKEND = "vertex"
+    elseif CONN_MODE == "gateway" then GEMINI_BACKEND = "gateway" end
+  end
+end
+
 local function load_settings()
   local path = get_settings_path()
   local f = io.open(path, "r")
@@ -138,6 +174,11 @@ local function load_settings()
   v = jval("vertex_key_path")  if v then VERTEX_KEY_PATH = v end
   v = jval("api_base")         if v then API_BASE        = v end
   v = jval("api_token")        if v then API_TOKEN       = v end
+  -- SERVER_URL remembers the proxy URL across mode toggles; fall back to the
+  -- legacy api_base value so older settings files still load their server.
+  v = jval("server_url")
+  if v and v ~= "" then SERVER_URL = v
+  elseif API_BASE ~= "" then SERVER_URL = API_BASE end
 
   -- Guard: old settings.json may have asr_provider = bhashini/openai (removed).
   -- Python only accepts elevenlabs|gemini now, so coerce anything else.
@@ -149,6 +190,16 @@ local function load_settings()
   -- feed a value the Python argparse would reject.
   MATCH_MODE     = _norm_mode(MATCH_MODE)
   GEMINI_BACKEND = _norm_backend(GEMINI_BACKEND)
+
+  -- Connection mode: use the saved value, else derive from legacy fields so
+  -- existing installs land on the right mode without re-picking it.
+  CONN_MODE = _norm_conn_mode(jval("conn_mode"))
+  if not CONN_MODE then
+    if API_BASE ~= "" then CONN_MODE = "server"
+    elseif GEMINI_BACKEND == "rest"    then CONN_MODE = "studio"
+    elseif GEMINI_BACKEND == "gateway" then CONN_MODE = "gateway"
+    else CONN_MODE = "vertex" end
+  end
 
   -- Multi-line script_text needs special parsing (jval bails at first quote).
   -- Capture between "script_text":" ... " just before the next key line.
@@ -167,6 +218,9 @@ local function load_settings()
   end
 
   v = jval("python_cmd")       if v and v ~= "" then PYTHON_CMD = v end
+
+  -- Reconcile API_BASE / GEMINI_BACKEND to the chosen connection mode.
+  _apply_conn_mode()
 end
 
 local function save_settings()
@@ -207,6 +261,8 @@ local function save_settings()
   f:write(string.format('  "vertex_key_path": "%s",\n',  je(VERTEX_KEY_PATH)))
   f:write(string.format('  "api_base": "%s",\n',         je(API_BASE)))
   f:write(string.format('  "api_token": "%s",\n',        je(API_TOKEN)))
+  f:write(string.format('  "conn_mode": "%s",\n',        je(CONN_MODE)))
+  f:write(string.format('  "server_url": "%s",\n',       je(SERVER_URL)))
   -- Persist the user-pinned interpreter override; without this line a
   -- hand-edited "python_cmd" would be erased on the next dialog OK.
   f:write(string.format('  "python_cmd": "%s",\n',       je(PYTHON_CMD)))
@@ -1079,7 +1135,7 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
   local _sdir = _src:match('(.+)[/\\]') or '.'
   local has_vertex_file = _f_exists(_sdir .. '/vertex_key.json') or
                           (VERTEX_KEY_PATH ~= '' and _f_exists(VERTEX_KEY_PATH))
-  local server_mode = (API_BASE or '') ~= ''
+  local server_mode = (CONN_MODE == 'server')
 
   local function _status_dot(filled, optional)
     local ww = reaper.ImGui_GetWindowWidth(ctx)
@@ -1124,70 +1180,96 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
     reaper.ImGui_Dummy(ctx, 0, 4)
   end
 
-  -- ── Section: Server (thin client) ─────────────────────
-  local server_open = reaper.ImGui_CollapsingHeader(ctx, '  Server (thin client — optional)')
-  _status_dot(server_mode, true)
-  if server_open then
-    reaper.ImGui_Indent(ctx, 12)
-    local rv
-    rv, API_BASE  = reaper.ImGui_InputText(ctx, 'Server URL',  API_BASE  or '')
-    rv, API_TOKEN = reaper.ImGui_InputText(ctx, 'Access token', API_TOKEN or '', pw_flags)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-    reaper.ImGui_TextWrapped(ctx, 'Set a Server URL to route every AI call through your proxy — the real keys stay server-side and nothing secret lives on this machine. Leave blank for direct mode with your own keys below.')
-    reaper.ImGui_PopStyleColor(ctx)
-    reaper.ImGui_Unindent(ctx, 12)
-    reaper.ImGui_Dummy(ctx, 0, 4)
+  -- ── Section: Connection — the one place you pick how AI calls happen ──
+  local CONN_LABELS = {
+    'Server — route through my proxy',
+    'Google AI Studio key (AIza…)',
+    'Vertex — Google service-account JSON',
+    'LiteLLM gateway (OpenAI-compatible URL)',
+  }
+  local CONN_VALUES = { 'server', 'studio', 'vertex', 'gateway' }
+  local function _conn_idx(val)
+    for i, v in ipairs(CONN_VALUES) do if v == val then return i end end
+    return 3   -- default: vertex
   end
 
-  -- ── Section: Gemini matcher ───────────────────────────
-  local gemini_filled = (GEMINI_MODEL or '') ~= ''
-  local gemini_open = reaper.ImGui_CollapsingHeader(ctx, '  Gemini matcher')
-  _status_dot(gemini_filled, false)
-  if gemini_open then
+  -- Is the chosen mode fully configured? Drives the status dot + Start gate.
+  local conn_ok
+  if     CONN_MODE == 'server'  then conn_ok = (SERVER_URL ~= '' and API_TOKEN ~= '')
+  elseif CONN_MODE == 'studio'  then conn_ok = (GEMINI_KEY ~= '')
+  elseif CONN_MODE == 'vertex'  then conn_ok = (has_vertex_file or VERTEX_KEY_PATH ~= '')
+  elseif CONN_MODE == 'gateway' then conn_ok = (GEMINI_BASE_URL ~= '' and GEMINI_KEY ~= '')
+  else conn_ok = false end
+  -- Transcription via ElevenLabs needs its own key (audio can't use the text
+  -- matcher/gateway). In server mode the proxy supplies it.
+  if not server_mode and ASR_PROVIDER == 'elevenlabs' and (ELEVENLABS_KEY or '') == '' then
+    conn_ok = false
+  end
+
+  -- Open this section by default the first time — it's the primary setup.
+  if reaper.ImGui_SetNextItemOpen then
+    reaper.ImGui_SetNextItemOpen(ctx, true,
+      reaper.ImGui_Cond_Once and reaper.ImGui_Cond_Once() or 0)
+  end
+  local conn_open = reaper.ImGui_CollapsingHeader(ctx, '  Connection')
+  _status_dot(conn_ok, false)
+  if conn_open then
     reaper.ImGui_Indent(ctx, 12)
     local rv
-    _, GEMINI_BACKEND   = _ui_combo(ctx, 'Backend', GEMINI_BACKEND, { 'vertex','rest','gateway' })
-    rv, GEMINI_MODEL    = reaper.ImGui_InputText(ctx, 'Model',            GEMINI_MODEL    or '')
-    if GEMINI_BACKEND == 'gateway' then
-      rv, GEMINI_BASE_URL = reaper.ImGui_InputText(ctx, 'Gateway URL',    GEMINI_BASE_URL or '')
+    local cur_label = CONN_LABELS[_conn_idx(CONN_MODE)]
+    local changed, new_label = _ui_combo(ctx, 'Mode', cur_label, CONN_LABELS)
+    if changed then
+      for i, lbl in ipairs(CONN_LABELS) do
+        if lbl == new_label then CONN_MODE = CONN_VALUES[i]; break end
+      end
     end
-    rv, VERTEX_KEY_PATH = reaper.ImGui_InputText(ctx, 'Vertex JSON path', VERTEX_KEY_PATH or '')
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-    reaper.ImGui_TextWrapped(ctx, 'vertex = Google service account (vertex_key.json). rest = AI Studio key (AIza…). gateway = OpenAI-compatible proxy (Bearer key + Gateway URL).')
-    reaper.ImGui_PopStyleColor(ctx)
-    reaper.ImGui_Unindent(ctx, 12)
-    reaper.ImGui_Dummy(ctx, 0, 4)
-  end
+    _apply_conn_mode()   -- sync API_BASE / GEMINI_BACKEND to the mode
 
-  -- ── Section: API keys ─────────────────────────────────
-  local keys_filled = server_mode or has_vertex_file or (GEMINI_KEY or '') ~= ''
-  if not server_mode and ASR_PROVIDER == 'elevenlabs' then
-    keys_filled = keys_filled and (ELEVENLABS_KEY or '') ~= ''
-  end
-  local keys_open = reaper.ImGui_CollapsingHeader(ctx, '  API keys')
-  _status_dot(keys_filled, server_mode)
-  if keys_open then
-    reaper.ImGui_Indent(ctx, 12)
-    local rv
-    rv, GEMINI_KEY = reaper.ImGui_InputText(ctx, 'Gemini key', GEMINI_KEY or '', pw_flags)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-    if server_mode then
-      reaper.ImGui_TextWrapped(ctx, 'Server mode is on — provider keys are optional here (the server holds them).')
-    elseif GEMINI_BACKEND == 'gateway' then
-      reaper.ImGui_TextWrapped(ctx, 'Gateway Bearer token (often sk-…). Goes in this field.')
-    elseif has_vertex_file then
-      reaper.ImGui_TextWrapped(ctx, '✓ vertex_key.json found — Gemini key is optional.')
-    else
-      reaper.ImGui_TextWrapped(ctx, 'AI matcher. Required unless vertex_key.json is present.')
-    end
-    reaper.ImGui_PopStyleColor(ctx)
-
-    if ASR_PROVIDER == 'elevenlabs' then
-      rv, ELEVENLABS_KEY = reaper.ImGui_InputText(ctx, 'ElevenLabs key', ELEVENLABS_KEY or '', pw_flags)
-    else  -- gemini ASR
+    if CONN_MODE == 'server' then
+      rv, SERVER_URL = reaper.ImGui_InputText(ctx, 'Server URL',   SERVER_URL or '')
+      rv, API_TOKEN  = reaper.ImGui_InputText(ctx, 'Access token', API_TOKEN  or '', pw_flags)
       reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-      reaper.ImGui_TextWrapped(ctx, 'Gemini ASR reuses the Gemini key above (or vertex_key.json).')
+      reaper.ImGui_TextWrapped(ctx, 'Every AI call goes through your server, which holds the real provider keys. Nothing secret lives on this machine — just the access token you were given. Best choice for people you share this with.')
       reaper.ImGui_PopStyleColor(ctx)
+    else
+      -- Direct modes share the Gemini model field.
+      rv, GEMINI_MODEL = reaper.ImGui_InputText(ctx, 'Gemini model', GEMINI_MODEL or '')
+
+      if CONN_MODE == 'studio' then
+        rv, GEMINI_KEY = reaper.ImGui_InputText(ctx, 'Gemini key (AIza…)', GEMINI_KEY or '', pw_flags)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+        reaper.ImGui_TextWrapped(ctx, 'Google AI Studio key — starts with "AIza". Get one at aistudio.google.com/apikey.')
+        reaper.ImGui_PopStyleColor(ctx)
+
+      elseif CONN_MODE == 'vertex' then
+        rv, VERTEX_KEY_PATH = reaper.ImGui_InputText(ctx, 'Vertex JSON path', VERTEX_KEY_PATH or '')
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+        if has_vertex_file then
+          reaper.ImGui_TextWrapped(ctx, '✓ vertex_key.json found next to the script — nothing else needed here.')
+        else
+          reaper.ImGui_TextWrapped(ctx, 'Path to your Google service-account JSON — or just drop a file named vertex_key.json next to this script and leave this blank.')
+        end
+        reaper.ImGui_PopStyleColor(ctx)
+
+      elseif CONN_MODE == 'gateway' then
+        rv, GEMINI_BASE_URL = reaper.ImGui_InputText(ctx, 'Gateway URL',          GEMINI_BASE_URL or '')
+        rv, GEMINI_KEY      = reaper.ImGui_InputText(ctx, 'Gateway key (Bearer)', GEMINI_KEY or '', pw_flags)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+        reaper.ImGui_TextWrapped(ctx, 'OpenAI-compatible base URL — the same value you would paste into n8n\'s OpenAI node. The client calls {URL}/v1/chat/completions with your Bearer key. Example (LiteLLM on a LAN): http://172.18.1.17:14005')
+        reaper.ImGui_PopStyleColor(ctx)
+      end
+
+      -- Transcription key (audio → text can't use the text matcher/gateway).
+      if ASR_PROVIDER == 'elevenlabs' then
+        rv, ELEVENLABS_KEY = reaper.ImGui_InputText(ctx, 'ElevenLabs key', ELEVENLABS_KEY or '', pw_flags)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+        reaper.ImGui_TextWrapped(ctx, 'Used for transcription only (audio → text). Transcription never routes through the gateway/Vertex matcher — set "Transcribe with" in Tracks & Mode to change this.')
+        reaper.ImGui_PopStyleColor(ctx)
+      else
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+        reaper.ImGui_TextWrapped(ctx, 'Transcription = Gemini audio; it reuses the credentials above and needs Google-native access (an AI Studio key or vertex_key.json — a gateway alone cannot transcribe).')
+        reaper.ImGui_PopStyleColor(ctx)
+      end
     end
 
     rv, _ui_show_keys = reaper.ImGui_Checkbox(ctx, 'Show keys', _ui_show_keys)
@@ -1220,16 +1302,23 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_Dummy(ctx, 0, 4)
 
-  -- ── Validate before enabling Start ────────────────────
+  -- ── Validate before enabling Start (mirrors conn_ok, per mode) ────
   local missing = {}
   if TRACK_VO_NAME  == '' then missing[#missing+1] = 'VO track name'  end
   if TRACK_DUB_NAME == '' then missing[#missing+1] = 'Dub track name' end
-  if not server_mode then
-    if GEMINI_BACKEND == 'gateway' then
-      if (GEMINI_BASE_URL or '') == '' then missing[#missing+1] = 'Gemini gateway URL' end
-      if (GEMINI_KEY or '')      == '' then missing[#missing+1] = 'Gemini key (gateway Bearer token)' end
-    elseif not has_vertex_file and (GEMINI_KEY or '') == '' then
-      missing[#missing+1] = 'Gemini key (or vertex_key.json)'
+  if CONN_MODE == 'server' then
+    if (SERVER_URL or '') == '' then missing[#missing+1] = 'Server URL' end
+    if (API_TOKEN or '')  == '' then missing[#missing+1] = 'Access token' end
+  else
+    if CONN_MODE == 'gateway' then
+      if (GEMINI_BASE_URL or '') == '' then missing[#missing+1] = 'Gateway URL' end
+      if (GEMINI_KEY or '')      == '' then missing[#missing+1] = 'Gateway key (Bearer token)' end
+    elseif CONN_MODE == 'vertex' then
+      if not has_vertex_file and (VERTEX_KEY_PATH or '') == '' then
+        missing[#missing+1] = 'Vertex JSON path (or vertex_key.json next to the script)'
+      end
+    else -- studio
+      if (GEMINI_KEY or '') == '' then missing[#missing+1] = 'Gemini key (AIza…)' end
     end
     if ASR_PROVIDER == 'elevenlabs' and (ELEVENLABS_KEY or '') == '' then
       missing[#missing+1] = 'ElevenLabs key'
@@ -1270,7 +1359,12 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
   reaper.ImGui_Dummy(ctx, 0, 8)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
   local sep = '   ·   '
-  local backend_label = server_mode and ('server:' .. API_BASE) or (GEMINI_BACKEND or '?')
+  local backend_label
+  if     CONN_MODE == 'server'  then backend_label = 'server: ' .. (SERVER_URL ~= '' and SERVER_URL or '?')
+  elseif CONN_MODE == 'studio'  then backend_label = 'AI Studio'
+  elseif CONN_MODE == 'vertex'  then backend_label = 'Vertex'
+  elseif CONN_MODE == 'gateway' then backend_label = 'gateway: ' .. (GEMINI_BASE_URL ~= '' and GEMINI_BASE_URL or '?')
+  else backend_label = '?' end
   local chips = string.format('%s%s%s%s%s%s%s',
     DUB_LANGUAGE or '?', sep, GEMINI_MODEL or '?', sep,
     backend_label, sep, ASR_PROVIDER or '?')
@@ -1648,6 +1742,7 @@ end
 -- banner set) to stay on the setup form.
 local function start_sync_run()
   ui_clear_banner()
+  _apply_conn_mode()   -- ensure API_BASE / GEMINI_BACKEND match the chosen mode
   save_settings()
   reaper.ClearConsole()
   _log_buffer = {}

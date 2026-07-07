@@ -97,46 +97,57 @@ settings and `venv` carry over.
 
 ---
 
-## Two ways to run
+## Connection mode — pick one
 
-- **Thin client (default).** Set a **Server URL** + **access token** in the
-  settings dialog. All AI calls route through your server, which holds the real
-  provider keys — nothing secret lives on the editor's machine, and the install
-  stays tiny (standard library only).
-- **Direct mode.** Leave the Server URL blank and provide your own keys
-  (ElevenLabs and/or Gemini, or a Vertex `vertex_key.json` next to the script).
-  Run `.\setup.bat --direct` (Windows) / `bash setup.sh --direct` (macOS) so
-  the heavier libraries (`google-genai`, `soundfile`) are installed.
+The **Connection** section of the settings window has a single **Mode**
+dropdown. Pick one; only the fields that mode needs are shown.
+
+| Mode | What it does | You provide | Best for |
+|---|---|---|---|
+| **Server — route through my proxy** | Every AI call goes to your server, which holds the real keys. Nothing secret lives on the editor's machine; the install stays tiny (standard library only). | **Server URL** + **Access token** | People you share this with |
+| **Google AI Studio key** | Calls Gemini directly with a Google AI Studio key. | **Gemini key** (`AIza…`) | Quick personal setup |
+| **Vertex — service-account JSON** | Calls Gemini through Google Cloud Vertex AI. | **Vertex JSON path**, or drop `vertex_key.json` next to the script | Google Cloud users |
+| **LiteLLM gateway** | Calls an **OpenAI-compatible** base URL — the same value you'd paste into n8n's OpenAI node. Hits `{URL}/v1/chat/completions` with your Bearer key. | **Gateway URL** + **Gateway key** (Bearer, often `sk-…`) | Your own LiteLLM proxy |
+
+The three direct modes (AI Studio / Vertex / gateway) need the heavier
+libraries — run `.\setup.bat --direct` (Windows) / `bash setup.sh --direct`
+(macOS) once so `google-genai` + `soundfile` are installed. Server mode stays
+tiny and needs only the default install.
 
 Settings are saved to `sync_pipeline_settings.json` next to the script. That
-file holds your keys and is **gitignored** — it never gets committed.
+file holds your keys/token and is **gitignored** — it never gets committed.
 
-### Choosing the Gemini backend (matching)
+### Using your LiteLLM gateway
 
-The semantic matcher is always Gemini — there is no other matching mode, and
-**no silent fallback**: if the chosen backend fails (bad key, unreachable
-gateway, empty response), the run stops with a visible error instead of
-quietly producing a half-synced timeline. You choose **how** Gemini is called
-via the **Gemini backend** field in the settings dialog:
+The **LiteLLM gateway** mode is an OpenAI-compatible client — exactly like the
+OpenAI node in n8n. Put your base URL in **Gateway URL** and your Bearer token
+in **Gateway key**. Example base URL for a LiteLLM instance on a LAN:
 
-| Backend | When to use | Key format | Needs |
-|---|---|---|---|
-| `vertex` | You have a Google Cloud service account | service-account JSON | `vertex_key.json` next to the script (or a path in the dialog) |
-| `rest` | You have a Google AI Studio key | `AIza...` | the key in the **Gemini key** field |
-| `gateway` | Your org runs an OpenAI-compatible proxy that serves Gemini (e.g. an internal LiteLLM gateway) | Bearer token, often `sk-...` | **Gemini gateway URL** + the Bearer token in the **Gemini key** field |
+```
+http://172.18.1.17:14005
+```
 
-- **`gateway`** calls `{gateway URL}/v1/chat/completions` with
-  `Authorization: Bearer <key>` — the OpenAI Chat Completions contract — instead
-  of Google's native endpoint.
-- **Match the key to the backend:** an `AIza...` key is Google-native (`rest`);
-  an `sk-...` key is OpenAI-style and belongs to a `gateway` (or real OpenAI).
-  Sending an `sk-...` key to `rest` returns HTTP 400 "API key not valid".
-- The gateway is used for **matching** only.
-  Transcription (ASR) still uses ElevenLabs (default) or Google. If you pick
-  *Transcribe with = gemini* together with the `gateway` backend, you still
-  need Google-native credentials for the transcription step
-  (`vertex_key.json` or an `AIza...` key) — the script stops with a clear
-  error otherwise.
+Plain `http://` on a local IP is fine (no TLS needed). The field is blank by
+default — a LAN address only works from inside that network, so people you
+share this with should use **Server** mode or their own key instead.
+
+### Two things to know about matching vs. transcription
+
+The pipeline runs **two** AI steps, and only one of them uses the mode above:
+
+- **Matching** (aligning dub lines to English) is always Gemini, via the mode
+  you picked. **No silent fallback** — if it fails (bad key, unreachable
+  gateway, empty reply) the run stops with a visible error instead of a
+  half-synced timeline.
+- **Transcription** (audio → text) is a *separate* step set by **Transcribe
+  with** in *Tracks & Mode*. It uses **ElevenLabs** (needs the ElevenLabs key)
+  or **Google Gemini** — it can **not** go through the LiteLLM gateway (a
+  chat-completions gateway can't take audio). So in gateway mode you still
+  need an ElevenLabs key (or Google-native creds if you pick Gemini ASR).
+
+**Match the key to the mode:** an `AIza…` key is Google-native (AI Studio);
+an `sk-…` key is OpenAI-style and belongs to a gateway. Sending an `sk-…` key
+to AI Studio returns HTTP 400 "API key not valid".
 
 ---
 
