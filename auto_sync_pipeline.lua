@@ -180,12 +180,10 @@ local function load_settings()
   if v and v ~= "" then SERVER_URL = v
   elseif API_BASE ~= "" then SERVER_URL = API_BASE end
 
-  -- Guard: old settings.json may have asr_provider = bhashini/openai (removed).
-  -- Python only accepts elevenlabs|gemini now, so coerce anything else.
-  ASR_PROVIDER = ASR_PROVIDER:lower()
-  if ASR_PROVIDER ~= "elevenlabs" and ASR_PROVIDER ~= "gemini" then
-    ASR_PROVIDER = "elevenlabs"
-  end
+  -- Transcription is locked to ElevenLabs. Coerce any legacy value
+  -- (gemini/bhashini/openai) so nothing else can leak in from an old or
+  -- hand-edited settings.json.
+  ASR_PROVIDER = "elevenlabs"
   -- Same for mode/backend — a hand-edited or legacy settings.json must never
   -- feed a value the Python argparse would reject.
   MATCH_MODE     = _norm_mode(MATCH_MODE)
@@ -1167,15 +1165,15 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
     rv, TRACK_DUB_NAME = reaper.ImGui_InputText(ctx, 'Dub track', TRACK_DUB_NAME or '')
     _, DUB_LANGUAGE = _ui_combo(ctx, 'Language',   DUB_LANGUAGE,
         { 'hi','ne','ta','te','bn','mr','gu','kn','ml' })
-    -- Match mode is locked: Gemini semantic matching only. On failure the
-    -- run errors out — there is deliberately no hybrid/duration fallback.
-    MATCH_MODE = "gemini"
+    -- Both AI steps are locked by design:
+    --   Transcription (audio → text) = ElevenLabs, always.
+    --   Matching (align dub to English) = Gemini semantic, fails hard (no
+    --   duration/hybrid fallback).
+    MATCH_MODE   = "gemini"
+    ASR_PROVIDER = "elevenlabs"
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-    reaper.ImGui_Text(ctx, 'Match mode: gemini (semantic — only mode; fails hard, no fallback)')
+    reaper.ImGui_Text(ctx, 'Transcribe: ElevenLabs   ·   Match: Gemini (semantic, no fallback)')
     reaper.ImGui_PopStyleColor(ctx)
-    -- ASR trimmed to what this backend supports (see sync_matcher.py).
-    _, ASR_PROVIDER = _ui_combo(ctx, 'Transcribe with', ASR_PROVIDER,
-        { 'elevenlabs','gemini' })
     reaper.ImGui_Unindent(ctx, 12)
     reaper.ImGui_Dummy(ctx, 0, 4)
   end
@@ -1259,17 +1257,12 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
         reaper.ImGui_PopStyleColor(ctx)
       end
 
-      -- Transcription key (audio → text can't use the text matcher/gateway).
-      if ASR_PROVIDER == 'elevenlabs' then
-        rv, ELEVENLABS_KEY = reaper.ImGui_InputText(ctx, 'ElevenLabs key', ELEVENLABS_KEY or '', pw_flags)
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-        reaper.ImGui_TextWrapped(ctx, 'Used for transcription only (audio → text). Transcription never routes through the gateway/Vertex matcher — set "Transcribe with" in Tracks & Mode to change this.')
-        reaper.ImGui_PopStyleColor(ctx)
-      else
-        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-        reaper.ImGui_TextWrapped(ctx, 'Transcription = Gemini audio; it reuses the credentials above and needs Google-native access (an AI Studio key or vertex_key.json — a gateway alone cannot transcribe).')
-        reaper.ImGui_PopStyleColor(ctx)
-      end
+      -- Transcription is always ElevenLabs (audio → text); the Gemini matcher
+      -- above never touches audio, so this key is always required in direct modes.
+      rv, ELEVENLABS_KEY = reaper.ImGui_InputText(ctx, 'ElevenLabs key', ELEVENLABS_KEY or '', pw_flags)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+      reaper.ImGui_TextWrapped(ctx, 'Transcription (audio → text) always uses ElevenLabs. Gemini is used only for matching — it never sees the audio.')
+      reaper.ImGui_PopStyleColor(ctx)
     end
 
     rv, _ui_show_keys = reaper.ImGui_Checkbox(ctx, 'Show keys', _ui_show_keys)
@@ -1837,10 +1830,9 @@ local function start_sync_run()
   -- Clear any stale PID so a Cancel can't signal a recycled, unrelated PID.
   os.remove(script_dir .. "/sync_python_pid.txt")
 
-  local asr_info = "ASR: " .. ASR_PROVIDER
-  if ASR_PROVIDER == "gemini" then
-    asr_info = asr_info .. " (Gemini audio)"
-  elseif ASR_PROVIDER == "elevenlabs" then
+  local asr_info = "ASR: elevenlabs"
+  do
+    -- Transcription is always ElevenLabs; matching is always Gemini.
     if MATCH_MODE == "gemini" then
       asr_info = asr_info .. " (ElevenLabs + Gemini semantic match)"
     elseif GEMINI_KEY and GEMINI_KEY ~= "" then

@@ -135,15 +135,13 @@ share this with should use **Server** mode or their own key instead.
 
 The pipeline runs **two** AI steps, and only one of them uses the mode above:
 
+- **Transcription** (audio → text) is **always ElevenLabs** — it is locked, not
+  configurable. Every direct mode therefore needs an **ElevenLabs key** (in
+  Server mode your proxy supplies it). Gemini never sees the audio.
 - **Matching** (aligning dub lines to English) is always Gemini, via the mode
   you picked. **No silent fallback** — if it fails (bad key, unreachable
   gateway, empty reply) the run stops with a visible error instead of a
   half-synced timeline.
-- **Transcription** (audio → text) is a *separate* step set by **Transcribe
-  with** in *Tracks & Mode*. It uses **ElevenLabs** (needs the ElevenLabs key)
-  or **Google Gemini** — it can **not** go through the LiteLLM gateway (a
-  chat-completions gateway can't take audio). So in gateway mode you still
-  need an ElevenLabs key (or Google-native creds if you pick Gemini ASR).
 
 **Match the key to the mode:** an `AIza…` key is Google-native (AI Studio);
 an `sk-…` key is OpenAI-style and belongs to a gateway. Sending an `sk-…` key
