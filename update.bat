@@ -20,7 +20,10 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-"%TEMP%\fast-syncs-update.bat" --from-temp "%~dp0"
+rem Pass the project dir with a trailing "." (not a bare "%~dp0", which ends
+rem in a backslash — "C:\path\" can confuse quote parsing). "C:\path\." is
+rem unambiguous and cd resolves it to the folder.
+"%TEMP%\fast-syncs-update.bat" --from-temp "%~dp0."
 exit /b
 
 :run

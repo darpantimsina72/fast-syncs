@@ -292,18 +292,22 @@ local function _child_border_flag()
   return 0
 end
 
--- Robust ReaImGui detection. Some installs expose the symbol but the
--- extension isn't fully loaded — pcall a real CreateContext to be sure.
+-- Robust ReaImGui detection. Some installs register the symbol before the
+-- extension is fully loaded, so APIExists alone can be a false positive that
+-- then crashes the unprotected ImGui_CreateContext in main(). Probe with a
+-- real CreateContext whenever the function is callable, and trust that.
 local function imgui_available()
-  if reaper.APIExists and reaper.APIExists('ImGui_CreateContext') then
-    return true
-  end
   if reaper.ImGui_CreateContext ~= nil then
     local ok, ctx = pcall(reaper.ImGui_CreateContext, 'probe')
     if ok and ctx then
       if reaper.ImGui_DestroyContext then pcall(reaper.ImGui_DestroyContext, ctx) end
       return true
     end
+    return false   -- symbol present but not actually usable yet
+  end
+  -- Not even a callable symbol; last-resort registry check.
+  if reaper.APIExists and reaper.APIExists('ImGui_CreateContext') then
+    return true
   end
   return false
 end
@@ -408,25 +412,39 @@ local function try_reapack_install()
   return true
 end
 
--- Pick the ReaPack release asset matching this REAPER build. GetAppVersion()
--- returns e.g. "7.27/macOS-arm64", "7.27/OSX64", "7.27/x64", "6.82/win64",
--- "7.27/linux-x86_64". Returns nil for builds we can't map.
+-- Pick the ReaPack release asset matching this REAPER build. reaper.GetOS()
+-- is the authoritative architecture signal — it returns exactly one of
+-- "Win64"/"Win32"/"macOS-arm64"/"OSX64"/"OSX"(or "OSX32")/"linux-x86_64"/
+-- "linux-aarch64"/"linux-armv7l"/"linux-i686". We branch on that, not on the
+-- looser GetAppVersion() string. Returns nil for anything we can't map, so the
+-- caller shows manual steps instead of downloading a binary that won't load.
 local function _reapack_asset()
+  local os_str = reaper.GetOS() or ""
   local v = (reaper.GetAppVersion() or ""):lower()
-  local os_str = reaper.GetOS()
-  if os_str:match("Win") then
+  if os_str == "Win64" then
+    -- Native Windows-on-ARM REAPER carries arm64 in the version string; the
+    -- overwhelming majority of Win64 users are x64 (and x64 also runs under
+    -- Windows' x64-on-ARM emulation), so x64.dll is the safe default.
     if v:match("arm64") then return "reaper_reapack-arm64ec.dll" end
-    if v:match("x64") or v:match("win64") then return "reaper_reapack-x64.dll" end
+    return "reaper_reapack-x64.dll"
+  elseif os_str == "Win32" then
     return "reaper_reapack-x86.dll"
-  elseif os_str:match("OSX") or os_str:match("macOS") then
-    if v:match("arm64") then return "reaper_reapack-arm64.dylib" end
+  elseif os_str == "macOS-arm64" then
+    return "reaper_reapack-arm64.dylib"
+  elseif os_str == "OSX64" then
     return "reaper_reapack-x86_64.dylib"
-  else -- Linux
-    if v:match("aarch64") then return "reaper_reapack-aarch64.so" end
-    if v:match("armv7") then return "reaper_reapack-armv7l.so" end
-    if v:match("i686") then return "reaper_reapack-i686.so" end
+  elseif os_str:match("^OSX") then      -- 32-bit macOS (OSX / OSX32)
+    return "reaper_reapack-i386.dylib"
+  elseif os_str == "linux-x86_64" then
     return "reaper_reapack-x86_64.so"
+  elseif os_str == "linux-aarch64" then
+    return "reaper_reapack-aarch64.so"
+  elseif os_str == "linux-armv7l" then
+    return "reaper_reapack-armv7l.so"
+  elseif os_str == "linux-i686" then
+    return "reaper_reapack-i686.so"
   end
+  return nil                            -- unknown OS/arch → manual install
 end
 
 -- ReaPack itself is missing: download its extension binary straight into
@@ -1808,8 +1826,9 @@ local function main()
         "Cancel = quit",
         "ReaImGui not installed", 3)
       if choice == 6 then       -- Yes
-        try_reapack_install()
-        return
+        if try_reapack_install() then return end
+        -- install flow failed (e.g. repo add rejected) → fall through to the
+        -- manual instructions below instead of exiting silently.
       elseif choice == 2 then   -- Cancel
         return
       end
@@ -1852,19 +1871,38 @@ local function main()
       -- No: fall through to the manual instructions below.
     end
 
-    local choice = reaper.ShowMessageBox(
-      "This script needs ReaImGui (free).\n\n" ..
-      "Quickest install (REAPER must restart after):\n" ..
-      "  1. Extensions - ReaPack - Import repositories...\n" ..
-      "  2. Paste:\n" ..
-      "     " .. REAIMGUI_REPO_URL .. "\n" ..
-      "  3. Extensions - ReaPack - Browse packages - search\n" ..
-      "     'ReaImGui' - right-click - Install - Apply.\n" ..
-      "  4. Restart REAPER and run this script again.\n\n" ..
-      "Open the ReaImGui homepage in your browser now?",
-      "ReaImGui not installed", 4)
-    if choice == 6 then
-      open_url("https://github.com/cfillion/reaimgui#installation")
+    -- Manual fallback, tailored to whether ReaPack is present: its menu steps
+    -- only make sense if the user actually has ReaPack.
+    local has_reapack = reaper.APIExists and reaper.APIExists('ReaPack_AddSetRepository')
+    if has_reapack then
+      local choice = reaper.ShowMessageBox(
+        "This script needs ReaImGui (free).\n\n" ..
+        "Quickest install (REAPER must restart after):\n" ..
+        "  1. Extensions - ReaPack - Import repositories...\n" ..
+        "  2. Paste:\n" ..
+        "     " .. REAIMGUI_REPO_URL .. "\n" ..
+        "  3. Extensions - ReaPack - Browse packages - search\n" ..
+        "     'ReaImGui' - right-click - Install - Apply.\n" ..
+        "  4. Restart REAPER and run this script again.\n\n" ..
+        "Open the ReaImGui homepage in your browser now?",
+        "ReaImGui not installed", 4)
+      if choice == 6 then
+        open_url("https://github.com/cfillion/reaimgui#installation")
+      end
+    else
+      local choice = reaper.ShowMessageBox(
+        "This script needs ReaImGui, which installs through ReaPack —\n" ..
+        "and neither is installed yet.\n\n" ..
+        "Manual setup (REAPER must restart along the way):\n" ..
+        "  1. Install ReaPack from https://reapack.com, then restart\n" ..
+        "     REAPER.\n" ..
+        "  2. Run this script again — it will offer to install ReaImGui\n" ..
+        "     for you (or use ReaPack's Browse packages to add it).\n\n" ..
+        "Open the ReaPack website now?",
+        "ReaPack not installed", 4)
+      if choice == 6 then
+        open_url("https://reapack.com/")
+      end
     end
     return
   end

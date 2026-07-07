@@ -89,7 +89,10 @@ rem ── helpers ────────────────────�
 
 :try_python
 rem Probe a command (all args, e.g. "py -3") as a working Python 3.9+.
-%* -c "import sys; assert sys.version_info >= (3, 9)" >nul 2>&1
+rem The assert is written WITHOUT parentheses on purpose: a ")" inside a
+rem parenthesized for-block (see :try_userdir) can prematurely close it on
+rem some cmd.exe versions, so we keep the same paren-free form everywhere.
+%* -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=9" >nul 2>&1
 if not errorlevel 1 set "PYEXE=%*"
 exit /b 0
 
@@ -98,7 +101,7 @@ rem Per-user python.org installs live here and are NOT on a console's PATH
 rem that was opened before the install (PATH is read once at launch).
 for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
   if not defined PYEXE (
-    "%%D\python.exe" -c "import sys; assert sys.version_info >= (3, 9)" >nul 2>&1
+    "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=9" >nul 2>&1
     if not errorlevel 1 set "PYEXE="%%D\python.exe""
   )
 )
