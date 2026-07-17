@@ -67,3 +67,7 @@ akash anna's*/
 Thumbs.db
 .idea/
 .vscode/
+
+# Feedback system — token + offline outbox stay local
+github_token.txt
+feedback_outbox/
