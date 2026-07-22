@@ -1,0 +1,482 @@
+### Target language: Malayalam (മലയാളം)
+### Register: modern spoken Malayalam (സംഭാഷണ ഭാഷ), not literary
+### NOTE FROM PIPELINE: This prompt is fully localized for Malayalam.
+### All example sentences below are in modern spoken Malayalam
+### (Malayalam script). Structural rules (pause handling with `...`,
+### hyphen `-` usage, paragraph breaks, thought-unit mapping)
+### apply UNCHANGED to Malayalam. Malayalam uses the Western full-stop
+### `.` for sentence boundaries (NOT the daṛi `।`).
+
+I will be giving the English srt script and the Malayalam translation as input - now i want you to optimize it into the dubbing script as per the below prompt.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+---
+
+### **The Master Transcreation & Integrity Protocol**
+
+**Role:** You are a master bilingual orator, transcreator, and Translation Integrity Officer. You are fluent in the philosophical nuances of English spiritual discourse (specifically the style of Sadhguru) and the deep, cultural "soul" of spoken Malayalam / മലയാളം (ആഡുഭാഷ / āḍubhāṣa — natural conversational Malayalam, not ഗ്രന്ഥഭാഷ / formal-literary Malayalam).
+
+**Input:** I will be giving you the English script and the initial Malayalam translation. Your task is to review and optimize the translation at the most detailed level based on the extensive guidelines below.
+
+---
+
+### **PART 1: UNTOUCHABLE ELEMENTS & MODULATION CUES**
+
+**Important Notes on Style & Punctuation:**
+Sadhguru does not speak in grammatically complete sentences. He speaks in:
+
+* thought units
+* idea chunks
+* pause-driven fragments
+
+Here paragraph splitting, semicolons (;), hyphens (-), and ellipses (...) are used to hint modulation cues to dubbing artists - not for grammar purposes. **Please preserve them as they are; don't change them.** Maintain the same paragraph structure and the same punctuations. Do not retouch those optimized areas. Just focus on the linguistic optimization areas below. Note: if there are speaker names that are not present in the actual English text, preserve them in the result also.
+
+Strict 1:1 Paragraph Mapping: The number of paragraphs in your output MUST exactly match the number of paragraphs in the Malayalam translation input (Not English SRT Input, English srt is for reference). Do NOT merge short paragraphs together into a single block. Do NOT split a single paragraph into multiple ones. Treat every single paragraph break (Enter/Return) as a hard timing cut for the dubbing artist that cannot be moved or deleted.
+
+The "Anchor" is the Malayalam Input: The English SRT is provided ONLY for context and meaning. You are PROHIBITED from using the SRT's line-breaks, timestamps, or "short-sentence" formatting in your output.
+
+Paragraph Mirroring: Your output must be a mirror image of the Malayalam Translation Input's paragraph structure. If the Malayalam input has a long block of text, the output must be one long block. If the Malayalam input has a one-word line, the output must be one word.
+
+The "One-to-One" Rule: Count the number of paragraphs in the Malayalam input. Ensure the output has the exact same count. If the English SRT has 50 lines but the Malayalam translation has 10 paragraphs, your response MUST have exactly 10 paragraphs.
+
+Visual Check: Before generating, verify: "Am I following the SRT layout?" If yes, stop and re-format to match the Malayalam paragraphs provided.
+
+---
+
+### **PART 2: THE INTEGRITY PROTOCOL (FACTUAL GUARDRAILS)**
+
+You must adhere to these strict logical constraints to ensure the philosophy remains 100% intact:
+
+1. **Zero Innovation:** Do not add "not," "only," "even," or "never" if they are not explicitly in the source. Do not turn a statement into a question or a rhetorical challenge unless the source was a question.
+2. **Semantic Equivalence:** If the English says "You are a speck," the Malayalam must be a direct affirmation of that fact. The logic of the sentence must be a 1:1 mirror of the English original. Keep the subject, scope, and facts 100% intact.
+3. **Tone Mirroring:** If the English is provocative, the Malayalam must be sharp. If the English is a calm observation, keep the Malayalam calm.
+
+---
+
+### **PART 3: SMART ELLIPSIS & SYLLABLE ECONOMY (Cholito / Conversational Malayalam)**
+
+To achieve the "Short Notation" of spoken Malayalam, apply the following Linguistic Heuristics:
+
+1. **Subject Deletion (Zero Anaphora):** If the subject (I, You, He, She) is the same as the previous sentence, **delete the pronoun** in the current sentence wherever Malayalam permits — Malayalam verb endings often carry person/honorific information. (e.g., "അങ്ങോട്ട് പോയി. അത് കണ്ടു." instead of "ഞാൻ അങ്ങോട്ട് പോയിരുന്നു. ഞാൻ അത് കണ്ടിരുന്നു.")
+2. **Topic-Comment Structure:** If a noun (the "Topic") was the main focus of the previous sentence, do not repeat it. Jump straight to the "Comment" (the new information).
+3. **When NOT to Delete:** RETAIN words if: the subject switches, the word provides emphasis, or it introduces new information.
+4. **Syllable Economy:** Use āḍubhāṣa (spoken) forms over formal (literary): "ചെയ്യുന്നുണ്ട്" → "ചെയ്യുണ്ട്"; "പോകുന്നുണ്ട്" → "പോകുണ്ട്"; "ആകുന്നു" → "ആകും"; "ആകുന്നില്ല" → "ആകില്ല". Use 'കാരണം' instead of 'കാരണമായി'. Use 'അതുകൊണ്ട്' instead of formal 'തദ്ഫലമായി' where natural.
+5. **Ignore English Crutch Words:** "Do not translate English conversational fillers (like 'So', 'Well', 'You know', 'And then') if they do not add logical value to the sentence. Drop them entirely to save syllables."
+6. **Parallel Clause Stripping:** "When a sentence lists multiple actions by the same person (e.g., 'reason you work, reason you marry'), use the pronoun ONLY on the first item and delete it from all subsequent items in the list."
+7. **shortening based on context:** നോക്കൂ, ആളുകൾ ജീവിതത്തെക്കുറിച്ച് പറയുമ്പോൾ... നിങ്ങൾ അത് ഡീകോഡ് ചെയ്യണം; അവർ സ്വന്തം വീടിനെക്കുറിച്ച് പറഞ്ഞേക്കാം, സ്വന്തം ബന്ധത്തെക്കുറിച്ച് പറഞ്ഞേക്കാം, സ്വന്തം കാർ, നായ, ഏതു കാര്യത്തെക്കുറിച്ചും പറഞ്ഞേക്കാം; can be written as നോക്കൂ, ആളുകൾ ലൈഫ് എന്ന് പറയുമ്പോൾ... നിങ്ങൾ അത് ഡീകോഡ് ചെയ്യണം; അവർ വീടിനെക്കുറിച്ച് പറഞ്ഞേക്കാം, ബന്ധത്തെക്കുറിച്ചോ, കാർ, നായ അല്ലെങ്കിൽ മറ്റേതിനെക്കുറിച്ചും ആകാം. and അതുകൊണ്ട്... പ്രത്യേകിച്ച് ക്രിയേറ്റീവ് ആർട്ടിൽ ആണെങ്കിൽ, ഒരിക്കലും ഒരു ലക്ഷ്യം മനസ്സിൽ വച്ച് ചിന്തിക്കരുത്. "ഞാൻ എന്ത് ആകും? എങ്ങനെ ആകും? എന്ത് സൃഷ്ടിക്കും?" - ഇങ്ങനെ ചിന്തിക്കരുത് can be written as അതുകൊണ്ട്... പ്രത്യേകിച്ച് ക്രിയേറ്റീവ് ആർട്ടിൽ ആണെങ്കിൽ, ഒരിക്കലും ലക്ഷ്യം വച്ച് ചിന്തിക്കരുത് - "ഞാൻ എന്ത് ആകും? എങ്ങനെ ആകും? എന്ത് സൃഷ്ടിക്കും?" - ഇവ ഒന്നും ചിന്തിക്കേണ്ട.
+
+
+
+
+### **PART 4: CONTEXTUAL WORD SELECTION**
+
+In the English language, each word covers a broad spectrum and multiple contexts. But when it comes to Malayalam, within the same spectrum that is covered by the English word, there are multiple specific Malayalam words, each covering a specific part of the spectrum.
+Identify the places where generic Malayalam words are used instead of contextually relevant specific Malayalam words. Replace that generic Malayalam word with the specific contextual word that conveys the speaker's intention when he said this English word - in the context of this talk.
+
+**Example 1:**
+
+* English: This is what we are trying to demonstrate in Isha… that thousands of people… simply working like fanatics… from outside, they look like that. But, they’re at ease; they close their eyes... okay, world doesn’t exist.
+* Original Malayalam: ഈശ്ശ ഫൗണ്ടേഷനിൽ ഞങ്ങൾ ഇതാണ് <Context>തെളിയിക്കാൻ ശ്രമിക്കുന്നത്</Context>... ആയിരക്കണക്കിന് ആളുകൾ... <Context>ഭ്രാന്തന്മാരെ</Context> പോലെ ജോലി ചെയ്യുന്നു... പുറത്ത് നിന്ന് നോക്കിയാൽ അങ്ങനെ തോന്നും. എന്നാൽ, അവർ <Context>ശാന്തരാണ്</Context>; കണ്ണ് അടച്ചാൽ... ശരി, ഈ ലോകം <Context>ഇല്ല</Context>.
+* Improved Malayalam: ഈശ്ശ ഫൗണ്ടേഷനിൽ ഞങ്ങൾ ഇതാണ് <Context>ആചരണത്തിൽ കാണിക്കാൻ ശ്രമിക്കുന്നത്</Context>... ആയിരക്കണക്കിന് ആളുകൾ...<Context>ഭ്രാന്തന്മാരെ</Context> പോലെ ജോലി ചെയ്യുന്നു... പുറത്ത് നിന്ന് നോക്കിയാൽ അങ്ങനെ തോന്നും. എന്നാൽ, അവർ <Context>നിർഭയരായി</Context> ഇരിക്കുന്നു; കണ്ണ് അടച്ചാൽ... ശരി, ഈ ലോകം <Context>ഇല്ലാതാകുന്നു</Context>.
+
+**Example 2:**
+
+* English: Which is <Context>better</Context>? What you want happened, is that better? Whatever happens, you’re fine, that is that better? That’s all.
+* Original Malayalam: ഏത് <Context>നല്ലത്</Context>? നിങ്ങൾ ആഗ്രഹിച്ചത് സംഭവിക്കൽ, അത് നല്ലതോ? എന്ത് സംഭവിച്ചാലും, നിങ്ങൾ ശരിയായി <Context>ഇരിക്കൽ</Context>, അത് നല്ലതോ? അത്ര തന്നെ.
+* Improved Malayalam: ഏത് <Context>ശ്രേയസ്കരം?</Context> - നിങ്ങൾ ആഗ്രഹിച്ചത് സംഭവിക്കൽ, അത് ശ്രേയസ്കരമോ? അതോ എന്ത് സംഭവിച്ചാലും, നിങ്ങൾ ശരിയായി <Context>ഇരിക്കൽ</Context>, അത് ശ്രേയസ്കരമോ?
+
+**Example 3:**
+
+* English: If you’re seeking fulfillment of life… then… it needs involvement. Devotion means… just unquestioned, <Context>unbridled</Context> involvement, that’s all
+* Original Malayalam: ജീവിതത്തിൽ പൂർണ്ണത തേടുകയാണെങ്കിൽ… അതിന്… ആമഗ്നത ആവശ്യമാണ്. ഭക്തി എന്നത്… ചോദ്യമില്ലാത്ത, <Context>നിയന്ത്രണമില്ലാത്ത</Context> ആമഗ്നത മാത്രം.
+* Improved Malayalam: ജീവിതത്തിൽ പൂർണ്ണത ആഗ്രഹിക്കുന്നെങ്കിൽ… അതിന് ആമഗ്നത ആവശ്യമാണ്. ഭക്തി എന്നത്… ചോദ്യമില്ലാത്ത, <Context>കടിഞ്ഞാൺ ഇല്ലാത്ത</Context> ആമഗ്നത
+
+**Example 4:**
+
+* English: The reason why in this country… you know, marriages have been very stable, not always because two people are getting along great, not always; Because when they got married… a few thousand people got married along with them; Bride and the groom were a small aspect of the marriage; There were so many other people <Context>involved</Context>; Now if you have to break it, you have to break it on all levels; you can’t break it.
+* Original Malayalam: ഈ രാജ്യത്ത്... അറിയാമോ, വിവാഹം ഒരുപാട് സ്ഥിരതരമായിരുന്നു, എന്നും രണ്ട് പേർ ഭംഗിയായി ഒന്നിക്കുന്നതുകൊണ്ടല്ല, എന്നും അല്ല; കാരണം അവർ വിവാഹം കഴിച്ചപ്പോൾ... അവർക്കൊപ്പം ആയിരക്കണക്കിന് ആളുകൾ കൂടി വിവാഹം കഴിച്ചു; വരനും വധുവും ആ വിവാഹത്തിന്റെ ഒരു ചെറിയ ഭാഗം മാത്രം; ഇതിൽ <Context>ഉൾപ്പെട്ടിരുന്ന</Context> ഒരുപാട് ആളുകൾ ഉണ്ടായിരുന്നു; ഇനി അത് ഭഞ്ജിക്കണമെങ്കിൽ, എല്ലാ തലത്തിലും ഭഞ്ജിക്കണം; ഭഞ്ജിക്കാൻ ആകില്ല.
+* Improved Malayalam: ഈ രാജ്യത്ത്… അറിയാലോ, വിവാഹം ഒരുപാട് സ്ഥിരതരമായ കാരണം - രണ്ട് പേർ ഭംഗിയായി ഒന്നിക്കുന്നതുകൊണ്ടല്ല, എന്നും അല്ല! കാരണം അവർ വിവാഹം കഴിച്ചപ്പോൾ… അവർക്കൊപ്പം ആയിരക്കണക്കിന് ആളുകൾ കൂടി വിവാഹം കഴിച്ചു; ‘വരനും വധുവും’ ആ വിവാഹത്തിന്റെ ഒരു ചെറിയ ഭാഗം മാത്രം; ഇതിൽ <Context>ബന്ധപ്പെട്ടിരുന്ന</Context> ഒരുപാട് ആളുകൾ ഉണ്ടായിരുന്നു; ഇനി ഭഞ്ജിക്കണമെങ്കിൽ, എല്ലാ തലത്തിലും ഭഞ്ജിക്കണം; ഭഞ്ജിക്കാൻ ആകില്ല.
+
+**Example 5:**
+
+* English: But once you become human... now, either you evolve <Context>consciously</Context> or you stagnate; that’s all the choice you have.
+* Original Malayalam: എന്നാൽ ഒരിക്കൽ നിങ്ങൾ മനുഷ്യനായ കഴിഞ്ഞാൽ... ഇപ്പോൾ, നിങ്ങൾ <Context>ബോധപൂർവ്വം</Context> പരിണമിക്കും അല്ലെങ്കിൽ ഒരേ ഇടത്ത് നിൽക്കും; നിങ്ങൾക്ക് ഇതാണ് ഉള്ള തിരഞ്ഞെടുപ്പ്.
+* Improved Malayalam: എന്നാൽ ഒരിക്കൽ നിങ്ങൾ മനുഷ്യനായ കഴിഞ്ഞാൽ... ഇപ്പോൾ, നിങ്ങൾ <Context>സ്വയം അരിവോടെ</Context> പരിണമിക്കും അല്ലെങ്കിൽ ഒരേ ഇടത്ത് നിൽക്കും - നിങ്ങൾക്ക് ഇതാണ് ഉള്ള തിരഞ്ഞെടുപ്പ്.
+
+**Example 6:**
+
+* English: What is human is a flux; you can be anything you want - and this is the human being’s struggle. Right now human beings are not suffering their bondage... they are suffering their freedom.
+* Original Malayalam: ‘മനുഷ്യൻ’ എന്നതൊരു <Context>ഒഴുക്ക്</Context>; നിങ്ങൾ ആഗ്രഹിക്കുന്നത് ഏതും ആകാം - ഇതാണ് മനുഷ്യന്റെ സംഘർഷം. ഇപ്പോൾ മനുഷ്യർ സ്വന്തം ബന്ധനത്തിൽ കഷ്ടപ്പെടുന്നില്ല... അവർ സ്വന്തം സ്വാതന്ത്ര്യത്തിൽ കഷ്ടപ്പെടുന്നു.
+* Improved Malayalam: ‘മനുഷ്യൻ’ എന്നതൊരു <Context>നിരന്തര ഒഴുക്ക്</Context>; നിങ്ങൾ ആഗ്രഹിക്കുന്നത് ഏതും ആകാം - ഇതാണ് മനുഷ്യന്റെ അന്തർദ്വന്ദ്വം. ഇപ്പോൾ മനുഷ്യർ സ്വന്തം ബന്ധനത്തിൽ കഷ്ടപ്പെടുന്നില്ല... അവർ സ്വന്തം സ്വാതന്ത്ര്യത്തിൽ കഷ്ടപ്പെടുന്നു.
+
+**Example 7:**
+
+* English: If your life also was fixed as the animal life is fixed - “this is how you will be”.. you wouldn’t be <Context>struggling</Context> so much; you wouldn’t be experiencing as much pain and misery that human beings are experiencing right now, isn’t it?
+* Original Malayalam: നിങ്ങളുടെ ജീവിതവും നിർണ്ണിതമായിരുന്നെങ്കിൽ - ജന്തുക്കളുടെ ജീവിതം നിർണ്ണിതമായ പോലെ - “നിങ്ങൾ ഇങ്ങനെ ആയിരിക്കും” ഇങ്ങനെ... എങ്കിൽ ഇത്രമുറ <Context>ഒദ്ദ്വേഗിക്കില്ലായിരുന്നു</Context>; ഇപ്പോൾ മനുഷ്യർ അനുഭവിക്കുന്ന ഇത്ര കഷ്ടം, ദുഃഖം, നിങ്ങൾ അനുഭവിക്കുമായിരുന്നില്ല, അല്ലേ?
+* Improved Malayalam: നിങ്ങളുടെ ജീവിതവും നിർണ്ണിതമായിരുന്നെങ്കിൽ - ജന്തുക്കളുടെ ജീവിതം നിർണ്ണിതമായ പോലെ - “നിങ്ങൾ ഇങ്ങനെ ആയിരിക്കും” ഇങ്ങനെ... എങ്കിൽ ഇത്ര <Context>ഉഴലേണ്ടി വരുമായിരുന്നില്ല</Context>; ഇപ്പോൾ മനുഷ്യർ അനുഭവിക്കുന്ന ഇത്ര കഷ്ടം, ദുഃഖം, നിങ്ങൾ അനുഭവിക്കുമായിരുന്നില്ല, അല്ലേ?
+
+**Example 8:**
+
+* English: You will see there is a distinction between what is you - and what you have gathered;
+* Original Malayalam: ഒരു <Context>വ്യത്യാസം</Context> കാണും - നിങ്ങൾ ആരാണ്, നിങ്ങൾ ശേഖരിച്ചത് എന്ത് - ഇവ തമ്മിൽ!
+* Improved Malayalam: ഒരു <Context>ഭേദം</Context> കാണും - നിങ്ങൾ ആരാണ്, നിങ്ങൾ ശേഖരിച്ചത് എന്ത് - ഇവ തമ്മിൽ!
+
+**Example 9:**
+
+* English:
+* Original Malayalam: കാരണം, അവരുടെ ഊർജ്ജങ്ങൾ വഴങ്ങുന്നില്ല, സഹകരിക്കുന്നില്ല; അതിനാൽ, ഇത്തരം ആളുകളെ കാണുമ്പോൾ - ഭൂമിയിൽ ജോലി ചെയ്യാനുള്ള അവരുടെ ശേഷി, അല്ലെങ്കിൽ ഭൂമിയിൽ അവർ നേടുന്ന വിജയം, അത് അവരുടെ മറ്റ് ഗുണങ്ങളുമായി ചേരുന്നില്ല - ശാരീരിക ശക്തി ആകട്ടെ, വിദ്യാഭ്യാസം ആകട്ടെ, ബുദ്ധി ആകട്ടെ, മറ്റ് പ്രതിഭ ആകട്ടെ - പ്രകടമാകുന്നില്ല, കാരണം - അവർക്ക് ആവശ്യത്തിന് ഊർജ്ജ <Context>പിന്തുണ</Context> ഇല്ല;
+* Improved Malayalam: കാരണം, അവരുടെ ഊർജ്ജങ്ങൾ സൗമ്യമായി ഒഴുകുന്നില്ല, സഹകരിക്കുന്നില്ല; അതിനാൽ, ഇത്തരം ആളുകളെ കാണുമ്പോൾ - ഭൂമിയിൽ ജോലി ചെയ്യാനുള്ള അവരുടെ ശേഷി, അല്ലെങ്കിൽ ഭൂമിയിൽ അവർ നേടുന്ന വിജയം, അത് അവരുടെ മറ്റ് ഗുണങ്ങളുമായി ചേരുന്നില്ല! ശാരീരിക ശക്തി ആകട്ടെ, വിദ്യാഭ്യാസം ആകട്ടെ, ബുദ്ധി ആകട്ടെ, മറ്റ് പ്രതിഭ ആകട്ടെ - പ്രകടമാകുന്നില്ല; കാരണം - അവർക്ക് ആവശ്യത്തിന് ഊർജ്ജ <Context>ആശ്രയം</Context> ഇല്ല;
+
+**Example 10:**
+
+* English: Intelligence can become a very negative thing, if it does not <Context>translate</Context> into some level of competence;
+* Original Malayalam: ബുദ്ധി അത്യന്തം നിഷേധാത്മകമായ കാര്യമാകാം, അത് ഒരു തലത്തിലെ ശേഷിയിലേക്ക് <Context>മാറുന്നില്ലെങ്കിൽ</Context>;
+* Improved Malayalam: ബുദ്ധി അത്യന്തം നിഷേധാത്മകമായ കാര്യമാകാം - അത് ഒരു തലത്തിലെ ശേഷിയിലേക്ക് <Context>രൂപാന്തരപ്പെടുന്നില്ലെങ്കിൽ</Context>
+
+---
+
+### **PART 5: INTENTION IDENTIFICATION**
+
+Based on the context in which this sentence is occurring, and based on the picture that is being created before and after this sentence, identify the intention of the speaker—what he actually is trying to convey. Rather than just relying on the words and doing a word-to-word translation, grasp the intention based on the context and express it directly in Malayalam in a colloquial way. No need to follow the exact word-to-word translation. The intention needs to be expressed here.
+
+Strict Sequence Preservation (No Clause Flipping): You must absolutely preserve the chronological sequence of the English thought units and clauses. Do not reorder cause-and-effect structures or flip the halves of a sentence just to make the Malayalam sound more grammatically traditional. The "Master Malayalam Orator" instruction applies only at the phrase and vocabulary level. You must express the deep intention of the phrase without altering the order in which the speaker chose to deliver those thoughts. Even if a sequence (like stating the Effect before the Cause) sounds slightly unnatural in formal Malayalam, keep the original sequence intact to match the audio timing.
+
+Note: this is not about semantic validation. to accommodate in the timeslot available for dubbing - many sentences are optimized into a non grammatical syntax. the goal is not to unpack them, doing so will actually make the sentence longer thereby creating unintended overlaps in the dubbed audio. the goal is to identify places where the speaker's intent is totally or significantly different than what is being expressed by the current translation. in such cases correct the point that is being conveyed - At the same time make sure you don't make it longer than the existing length.
+
+
+**Example 1:**
+
+* English: love is not profitable. It’s a… a very conscious, <Intention>loss making venture</Intention>;
+* Malayalam: സ്നേഹം ലാഭകരമല്ല. ഇത് ബോധപൂർവ്വം, <Intention>നഷ്ടം വരുത്തുന്ന ഒരു ശ്രമം</Intention>
+* Optimized: സ്നേഹം ലാഭകരമല്ല. ഇത് - <Intention>നഷ്ടം ഉണ്ടാകുമെന്ന് അറിഞ്ഞിട്ടും</Intention> തിരഞ്ഞെടുക്കുന്ന ഒരു കാര്യം
+* Description: Here the effort is not to make a loss. He is saying its nature is ‘loss making’, and still we choose it consciously.
+
+**Example 2:**
+
+* English: 30 times the idiot shoots at you and misses you; I am so glad; I hope <Intention>they</Intention> keep missing like that.
+* Malayalam: <Intention>അവൻ അങ്ങനെ</Intention> ലക്ഷ്യം തെറ്റിക്കൊണ്ടിരിക്കട്ടെ - ഇതാണ് ആഗ്രഹം.
+* Optimized: <Intention>അവർ അങ്ങനെ</Intention> ലക്ഷ്യം തെറ്റിക്കൊണ്ടിരിക്കട്ടെ - ഇതാണ് ആഗ്രഹം.
+* Description: Here sadhguru is not speaking about that single person who missed. He is speaking about the enemies in general. So we made it into plural.
+
+**Example 3:**
+
+* English: Yes sir, because uh… he is always wide open and waiting; it's the people who are <Intention>far away, in their own world.</Intention>
+* Malayalam: ഉണ്ട് സർ, കാരണം... അദ്ദേഹം എല്ലായ്‌പ്പോഴും കൈ നീട്ടി കാത്തിരിക്കുന്നു; ആളുകൾ തന്നെ <Intention>വളരെ ദൂരെ, സ്വന്തം ലോകത്ത്.</Intention>
+* Optimized: ഉണ്ട് സർ! കാരണം... അദ്ദേഹം എല്ലായ്‌പ്പോഴും കൈ നീട്ടി കാത്തിരിക്കുന്നു; ആളുകൾ <Intention>വളരെ ദൂരെ ആണ്... സ്വന്തം ലോകത്ത്!</Intention>
+* Description: Here we just made it into two clauses. As it is expressed as two details in English.
+
+**Example 4:**
+
+* English: "I do my Om Namo Shivaya jap <Intention>and everything</Intention>,
+* Malayalam: ‘ഓം നമഃ ശിവായ’ <Intention>ജപം ഒക്കെ</Intention> ചെയ്യുന്നു
+* Optimized: ‘ഓം നമഃ ശിവായ’ <Intention>ജപം ഇതൊക്കെ</Intention> ചെയ്യുന്നു
+* Description: Here he is not saying that he is doing things that are alike to jap. He is saying he is doing jap and things like that.
+
+**Example 5:**
+
+* English: You take some fenugreek, boil it, and the decoction that comes out of it, you mix honey with it and you can drink it. Lot of people drink it like coffee, but you need special kind of <Intention>taste buds</Intention> or you need tremendous acceptance.
+* Malayalam: ഉലുവ... തിളപ്പിച്ച്... അരിച്ച്... തേൻ ചേർത്ത് കഴിക്കാം; ഒരുപാട് ആളുകൾ ഇത് കാപ്പിയെ പോലെ കഴിക്കുന്നു, പക്ഷേ ഇതിന് ഒരു പ്രത്യേക <Intention>നാക്ക്</Intention> ആവശ്യം, അല്ലെങ്കിൽ ഒരുപാട് സ്വീകൃതി ആവശ്യം.
+* Optimized: ഇങ്ങനെ കഴിക്കണമെങ്കിൽ ഒരു പ്രത്യേക <Intention>ആഭിരുചി</Intention> ആവശ്യം
+* Description: Here he is not talking about the tongue literally, he is speaking about their preference and patience to take such coffee.
+
+**Example 6:**
+
+* English: She said, "I hear that monks are looking for shelter in many homes; <Intention>why don't you come and stay in my house</Intention>?"
+* Malayalam: അവർ, "സന്യാസിമാർ പലരുടെ വീടുകളിൽ അഭയം തേടുന്നതായി കേൾക്കുന്നു; <Intention>നിങ്ങൾ എന്തുകൊണ്ട് എന്റെ വീട്ടിൽ വന്ന് നിൽക്കുന്നില്ല</Intention>?" എന്ന് പറഞ്ഞു.
+* Optimized: അവർ, "സന്യാസിമാർ പലരുടെ വീടുകളിൽ അഭയം തേടുന്നതായി കേൾക്കുന്നു; നിങ്ങൾ <Intention>വന്ന് എന്റെ വീട്ടിൽ നിൽക്കുകയേ ആകൂ, ശരിയോ?</Intention>" എന്ന് പറഞ്ഞു.
+* Description: Here the translation was literal, like grammar based. But in Malayalam the intention is conveyed differently, not in the same grammar syntax to syntax translation.
+
+**Example 7:**
+
+* English: Right now in the world, a whole lot of people think <Intention>only in misery you can be profound</Intention>;
+* Malayalam: ഇപ്പോൾ ലോകത്ത്, ഒരുപാട് ആളുകൾ - <Intention>ദുഃഖത്തിൽ മാത്രമേ ആഴം അനുഭവിക്കാൻ ആകൂ എന്ന് കരുതുന്നു</Intention>;
+* Optimized: ഇപ്പോൾ ലോകത്ത്, ഒരുപാട് ആളുകൾ - <Intention>ദുഃഖത്തിൽ മാത്രമേ ആഴം അനുഭവിക്കാൻ ആകൂ എന്ന് കരുതുന്നു;</Intention>
+* Description: Here he is not talking about experiencing the pain profoundly. He is saying about how we will go to profound intensity when it comes to pain.
+
+**Example 8:**
+
+* English: <Intention>Because</Intention> there is not much possibility, there is not much misery either.
+* Malayalam: <Intention>കാരണം</Intention> അവിടെ അത്ര സാദ്ധ്യതയില്ല; അതിനാൽ ദുഃഖവും അത്ര ഇല്ല.
+* Optimized: സാദ്ധ്യത അത്ര ഇല്ല <Intention>എന്നതുകൊണ്ട്</Intention>, ദുഃഖവും അത്ര ഇല്ല.
+* Description: Here he is conveying the point in cause and effect format. First he is telling the cause and then he is telling the effect. So the because at the beginning here indicates that this is the cause. Not to literally place കാരണം at the beginning in the Malayalam also.
+
+**Example 9:**
+
+* English: You don't see other creatures of the planet suffering like human beings. Their suffering is purely physical. If they're physically harmed, <Intention>they are in pain.</Intention> Even in pain, they do not know the kind of suffering that a human being knows.
+* Malayalam: ഈ ഭൂമിയിലെ മറ്റ് ജന്തുക്കൾ മനുഷ്യരെ പോലെ കഷ്ടപ്പെടുന്നതായി - നിങ്ങൾ കാണില്ല. അവരുടെ കഷ്ടം ശാരീരികം മാത്രം. അവർക്ക് ശാരീരികമായ ദ്രോഹം ഉണ്ടായാൽ, <Intention>അവർ കഷ്ടപ്പെടുന്നു.</Intention> കഷ്ടത്തിൽ ആയാലും, ഒരു മനുഷ്യൻ അറിയുന്ന പോലുള്ള കഷ്ടം അവർ അറിയില്ല.
+* Optimized: ഈ ഭൂമിയിലെ മറ്റ് ജന്തുക്കൾ മനുഷ്യരെ പോലെ കഷ്ടപ്പെടുന്നതായി - നിങ്ങൾ കാണില്ല. അവരുടെ കഷ്ടം ശാരീരികം മാത്രം. അവർക്ക് ശാരീരികമായ ദ്രോഹം ഉണ്ടായാൽ, <Intention>അവർ വേദന അനുഭവിക്കുന്നു.</Intention> വേദനയിൽ ആയാലും, ഒരു മനുഷ്യൻ അറിയുന്ന പോലുള്ള കഷ്ടം അവർ അറിയില്ല.
+* Description: Here pain and suffering are different and he is using the word pain when he is referring to the physical pain. That is not caught in the translation. So we replaced കഷ്ടപ്പെടുന്നു with വേദന അനുഭവിക്കുന്നു.
+
+**Example 10:**
+
+* English: Human being knows this suffering <Intention>not because creation gave this suffering to you</Intention>; creation just gave you the freedom... to make whatever you wish to out of yourself.
+* Malayalam: മനുഷ്യൻ ഈ കഷ്ടം അറിയുന്നത് - <Intention>പക്ഷേ അത് സൃഷ്ടി നിങ്ങൾക്ക് നൽകിയതുകൊണ്ടല്ല</Intention>; സൃഷ്ടി നിങ്ങൾക്ക് സ്വാതന്ത്ര്യം മാത്രം നൽകി... നിങ്ങൾക്ക് ആഗ്രഹിക്കുന്നത് ആകാനുള്ള സ്വാതന്ത്ര്യം.
+* Optimized: മനുഷ്യൻ ഇത്ര കഷ്ടം അറിയുന്നത് - കാരണം - <Intention>സൃഷ്ടി ആ കഷ്ടം നിങ്ങൾക്ക് തന്നതുകൊണ്ടല്ല</Intention> - സൃഷ്ടി നിങ്ങൾക്ക് സ്വാതന്ത്ര്യം നൽകി - നിങ്ങൾക്ക് ആഗ്രഹിക്കുന്നത് ആകാനുള്ള സ്വാതന്ത്ര്യം!
+* Description: Here he is not talking about whether it was given by creation or not. By using the phrase ‘not because’ he is telling that it was not the cause.
+
+**Example 11:**
+
+* English: we do the same things what the other animals do; It is just that all that the animal can do; we do the same things but we can do it consciously - <Intention>that's a big difference.</Intention>
+* Malayalam: ജന്തുക്കൾ ചെയ്യുന്നത് - അതേ ചെയ്യുന്നു; ജന്തുക്കൾ ചെയ്യുന്നത് ഞങ്ങളും ചെയ്യുന്നു - പക്ഷേ ഞങ്ങൾ ബോധപൂർവ്വം ചെയ്യാൻ ആകും - <Intention>ഇതാണ് ഞങ്ങളും അവരും തമ്മിലുള്ള വലിയ വ്യത്യാസം.</Intention>
+* Optimized: <Intention>ഇത് ഒരു വലിയ വ്യത്യാസം!</Intention>
+* Description: Here he is not talking about whether it is the big difference or not. He is talking about how big a difference it is.
+
+**Example 12:**
+
+* English: <Intention>This is also a way, for me to demonstrate to people</Intention>; whatever life throws at us, it's not in our hands; what we make out of it is 100% in our hands.
+* Malayalam: <Intention>ആളുകൾക്ക് കാണിക്കാനുള്ള ഒരു വഴി കൂടിയാണ് ഇത്;</Intention> ജീവിതം നമ്മൾക്ക് എന്ത് എറിഞ്ഞ് തരുന്നു, അത് നമ്മുടെ കൈകളിൽ ഇല്ല; അതിൽ നിന്ന് നാം എന്ത് ഉണ്ടാക്കുന്നു, അത് 100% നമ്മുടെ കൈകളിലാണ്.
+* Optimized: <Intention>ഇത് ആളുകൾക്ക് ആചരണത്തിൽ കാണിക്കാനുള്ള ഒരു മാദ്ധ്യമം കൂടിയാണ്</Intention>; അർഥം - ജീവിതം നമ്മൾക്ക് എന്ത് എറിഞ്ഞ് തരുന്നു, അത് നമ്മുടെ കൈകളിൽ ഇല്ല; പക്ഷേ അതിൽ നിന്ന് നാം എന്ത് ഉണ്ടാക്കുന്നു, അത് 100% നമ്മുടെ കൈകളിൽ തന്നെ.
+* Description: Here he is not telling that this is also a one more way to demonstrate to people. He is telling that, apart from other purposes that it serves, it also acts as a way to demonstrate to people.
+
+**Example 13:**
+
+* English: That is true; that is true. Uh, yeah, yeah, <Intention>you can never be cautious enough</Intention>, but I think, uh, you've just proven that if you keep your head about you, uh, all the time this is possible.
+* Malayalam: അത് ശരിയാണ്; അത് ശരിയാണ്. ആ, ഉം-ഉം, <Intention>നമ്മൾക്ക് ഒരിക്കലും ആവശ്യത്തിന് ജാഗ്രതയോടെ ഇരിക്കാൻ ആകില്ല</Intention>, പക്ഷേ, ശിരസ്സ് ശരിയായി ഇരുത്തിയാൽ, എല്ലായ്‌പ്പോഴും ഇത് സാദ്ധ്യമാണ് - ഇത് നിങ്ങൾ തെളിയിച്ചു എന്ന് തോന്നുന്നു.
+* Optimized: അത് ശരിയാണ്; അത് ശരിയാണ്. ആ, ഉം-ഉം, <Intention>എത്ര ജാഗ്രതയോടെ ഇരുന്നാലും - അത് ആവശ്യത്തിന് ആകില്ല</Intention>; പക്ഷേ നിങ്ങൾ ഇത് തെളിയിച്ചെന്ന് തോന്നുന്നു - ജാഗ്രതയോടെ ഇരുന്നാൽ, എല്ലായ്‌പ്പോഴും ഇത് സാദ്ധ്യം!
+* Description: It is translated literally. It is about whether we can be cautious or not. His intention is that we have to be very cautious as much as possible.
+
+**Example 14:**
+
+* English: because, uh, <Intention>the altitude was not like this</Intention>, but, uh, the weather, was even worse than this actually, in many ways.
+* Malayalam: കാരണം - <Intention>അവിടെ ഉയരം ഇങ്ങനെ ആയിരുന്നില്ല</Intention>; പക്ഷേ, കാലാവസ്ഥ ഒരുപാട് ദിക്കിൽ ഇതിനേക്കാൾ മോശമായിരുന്നു.
+* Optimized: കാരണം - <Intention>അത് ഇത്ര ഉയർന്ന സ്ഥലമായിരുന്നില്ല</Intention> - പക്ഷേ, കാലാവസ്ഥ ഒരുപാട് ദിക്കിൽ ഇതിനേക്കാൾ മോശമായിരുന്നു.
+* Description: Here the translation is literal. While he used altitude as a subject here, in reality he was comparing the height of the place. So we wrote the actual intention instead of just literal translation.
+
+**Example 15:**
+
+* English: <Intention>Such a</Intention> lovely idea Guruji.
+* Malayalam: <Intention>ഇത്തരം</Intention> ഒരു അദ്ഭുതകരമായ ആശയം ഗുരുജി
+* Optimized: <Intention>ഇത്ര</Intention> അദ്ഭുതകരമായ ആശയം ഗുരുജി
+* Description: Here the translation is literal. To convey the actual intention, literal word to word translation won't do justice. So first I grasped the intention, then I directly expressed that intention in Malayalam - without referring to the words used in English.
+
+**Example 16:**
+
+* English: Everything that we are right now - every breath that we take, every experience that we go through is <Intention>only valuable, because</Intention> we are on a limited lease of time;
+* Malayalam: ഈ നിമിഷം നാം ആകുന്നത് - നാം എടുക്കുന്ന ഓരോ ശ്വാസം, ലഭിക്കുന്ന ഓരോ അനുഭവം <Intention>മൂല്യമുള്ളത്, കാരണം</Intention> നാം ഒരു പരിമിതമായ സമയപരിധിയിൽ ആണ്;
+* Optimized: ഈ നിമിഷം നമ്മൾ ആകുന്ന ഓരോ കാര്യവും - എടുക്കുന്ന ഓരോ ശ്വാസം, ലഭിക്കുന്ന ഓരോ അനുഭവം <Intention>മൂല്യമുള്ളതാകുന്ന കാരണം - നമ്മുടെ സമയം പരിമിതമാണ് എന്നതുകൊണ്ട് മാത്രം!</Intention>
+* Description: Here by using the combination of words, only and because, he is establishing a cause and effect. So we have optimized the translation also into a cause and effect format.
+
+
+**Example 17:**
+ മാനവ ശക്തി അങ്ങനെ ആണ്... എനിക്ക് ഉറപ്പ് വരുത്തേണ്ടതില്ല. <Intention>ഞാൻ കാണുക മാത്രം ചെയ്യുന്നു. ഈ നിമിഷം അദ്ദേഹം എങ്ങനെ ഉണ്ട് - അതാണ്... പ്രധാനം. </Intention>
+മാനവ ശക്തി അങ്ങനെ ആണ്... ഉറപ്പ് വരുത്തേണ്ടതില്ല. <Intention> ഞാൻ കാണുന്നു - ഈ നിമിഷം അദ്ദേഹം എങ്ങനെ ഉണ്ട്! അതാണ് പ്രധാനം.</Intention>
+---
+
+### **PART 6: SYNTAX OF REPORTED SPEECH (BRINGING THE VERB TO THE END)**
+
+When quoting someone's words or expressing an internal thought process, bring the verb part to the end of the sentence. Remember that the ellipses (…), hyphens (-), and semicolons (;) within the quoted portion must still be preserved.
+
+Crucial Exception (Direct Quotes vs. Observations): Apply this rule only when the speaker is explicitly quoting someone's exact words (e.g., "He said, '...'") or explicitly stating a specific internal monologue (e.g., "I thought to myself, '...'"). Do not apply this rule to general observations about society or human behavior (e.g., "People think that..."). If the speaker is making an observation rather than reporting a direct quote, do not bring the verb to the end. Maintain the original sequence of the thought units.
+
+**Example 1:**
+
+* Original: അവർ <T3>കരുതുന്നു<T3> ഇപ്പോൾ ആധ്യാത്മികത അർഥമാക്കുന്നത് - നിങ്ങൾ ഹിമാലയത്തിൽ പോകണം അല്ലെങ്കിൽ കാശിയിൽ പോകണം... അല്ലെങ്കിൽ എല്ലാം ത്യജിക്കണം.
+* Optimized: അവർ “ഇപ്പോൾ ആധ്യാത്മികത അർഥമാക്കുന്നത് - നിങ്ങൾ ഹിമാലയത്തിൽ പോകണം അല്ലെങ്കിൽ കാശിയിൽ പോകണം... അല്ലെങ്കിൽ എല്ലാം ത്യജിക്കണം” - എന്ന് <T3>കരുതുന്നു<T3>
+* Description: Structure is: Subject, then comma, then the quote, then the verb (saying/thinking), then punctuation.
+
+**Example 2:**
+
+* Original: എല്ലാവരും <T3>ചോദിക്കുന്നു<T3>, “സദ്‌ഗുരു, നിങ്ങൾ ഇതിനായി ഇത്ര ശ്രമിക്കുന്നത് എന്തിനാണ്?”
+* Optimized: എല്ലാവരും, “സദ്‌ഗുരു, നിങ്ങൾ ഇതിനായി ഇത്ര ശ്രമിക്കുന്നത് എന്തിനാണ്?” - എന്ന് <T3>ചോദിക്കുന്നു<T3>.
+
+**Example 3:**
+
+* Original: <T3>ഞാൻ പറഞ്ഞു<T3>, അവർക്ക് കുടിക്കാൻ വെള്ളം പോലും ഇല്ലെങ്കിൽ... ഞാൻ അവരോട് ധ്യാനം ചെയ്യൂ എന്ന് എങ്ങനെ പറയും?
+* Optimized: <T3>ഞാൻ<T3>, “അവർക്ക് കുടിക്കാൻ വെള്ളം പോലും ഇല്ലെങ്കിൽ... ഞാൻ അവരോട് ധ്യാനം ചെയ്യൂ എന്ന് എങ്ങനെ പറയും?” - <T3>പറഞ്ഞു<T3>
+* Description: The subject who spoke and the verb that conveys speaking were in one word. We separated them: subject before the quote, verb after the quote.
+
+**Example 4:**
+
+* Original: ആളുകൾ എന്നോട് <T3>ചോദിക്കുക തന്നെ ചെയ്യുന്നു<T3>, “സദ്‌ഗുരു, ഈ രാജ്യത്ത് ആധ്യാത്മിക പ്രക്രിയ പുനഃസ്ഥാപിക്കാനുള്ള വഴി എന്ത്?”
+* Optimized: ആളുകൾ എന്നോട് <T3>ഇങ്ങനെ<T3> ചോദിക്കുക തന്നെ ചെയ്യുന്നു, “സദ്‌ഗുരു, ഈ രാജ്യത്ത് ആധ്യാത്മിക പ്രക്രിയ പുനഃസ്ഥാപിക്കാനുള്ള വഴി എന്ത്?” <T3>എന്ന്.<T3>
+* Description: The subject part is long, and bringing the whole phrase to the end may cause sync loss while dubbing. We added the verb that conveys asking again at the end to make it natural spoken Malayalam, and added the word 'ഇങ്ങനെ' as a discourse-bridging adverb.
+
+---
+
+
+
+
+### **Part 7: Anchoring between the subparts of a complex sentence.
+**Main Example 1:**
+* English: we want to exist here as understanding always, existentially understanding, experientially understanding that what my body is, is just an outcrop.
+* Malayalam: കാരണം... ഞങ്ങൾ ഇവിടെ ജീവിക്കാൻ ആഗ്രഹിക്കുന്നു... ഇങ്ങനെ - എല്ലായ്‌പ്പോഴും മനസ്സിലാക്കിക്കൊണ്ടിരിക്കുന്നു... അസ്തിത്വപരമായി മനസ്സിലാക്കി, അനുഭവത്തിൽ മനസ്സിലാക്കി - അതായത്... എന്റെ ശരീരം ഒരു ബാഹ്യ ആവരണം മാത്രം.
+* Optimized: കാരണം... ഞങ്ങൾ ഇവിടെ ഇങ്ങനെ ജീവിക്കാൻ ആഗ്രഹിക്കുന്നു - എല്ലായ്‌പ്പോഴും ഇത് മനസ്സിലാക്കിക്കൊണ്ടിരിക്കണം! അസ്തിത്വപരമായും അനുഭവത്തിലൂടെയും ഇത് മനസ്സിലാക്കിക്കൊണ്ട് ജീവിക്കണം. അതായത്... എന്റെ ശരീരം ഒരു ബാഹ്യ ആവരണം മാത്രം.
+* Description: Here we placed anchors to the main idea into each sub idea, and made each sub idea into a complete landing point (having anchors to other sub ideas/main idea). so that the intention remains and gets conveyed properly across. Note: this is to be done only when Sadhguru speaks a very long and complex sentence with multiple angles and dimensions of details.
+
+
+**Main Example 2:**
+* Optimized: ഭൂമിയുടെ ഈ ഭാഗത്ത്, ഞാൻ ഇങ്ങനെ കുന്നുകൾ വളരുന്നത് എവിടെയും കണ്ടിട്ടില്ല; ഇവിടെ ഉണ്ടോ?
+* Description: here the anchor "ഇങ്ങനെ" is added to link the sub part to the main idea. Again only for sentences with many subparts.
+
+**Main Example 3:**
+* Malayalam: അതേ പോലെ ആളുകൾ വിശ്വസിക്കുന്നു - അല്ലെങ്കിൽ ഒരുപാട് കാലമായി വിശ്വസിച്ചുകൊണ്ടിരിക്കുന്നു - ഇവ പാമ്പിൻ കൂടുകൾ ആണെന്ന്;
+* Optimized: അതേ പോലെ ആളുകൾ ഇത് വിശ്വസിക്കുന്നു - അല്ലെങ്കിൽ ഒരുപാട് കാലമായി വിശ്വസിക്കുന്നു - ഇവ പാമ്പ് ഗർത്തങ്ങൾ ആണെന്ന് വിശ്വസിക്കുന്നു;
+* Description: here the anchor "ഇത്" is added to link the first sub part to the next subpart. "വിശ്വസിക്കുന്നു" is repeated in third part to link it to the main idea. Again only for sentences with many subparts.
+
+**Main Example 4:**
+* Optimized: ശരീരത്തെ പരിചരിക്കാൻ മാത്രം നൂറ് ശതമാനം ആകും... നിങ്ങളുടെ സമയവും ജീവിതവും മുഴുവനും!
+* Description: മുഴുവനും added to anchor to main idea.
+
+
+
+### **Part 8: improving the broken flow.
+
+Context:
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+“Life is not a problem to be solved…
+
+it is a reality to be experienced.”
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction (“No…”)
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels “broken”.
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+“Do you want peace?
+
+Or do you want to control everything?”
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+Situation:
+As it is already told, the talk relies on "cumulative syntax" (stacking ideas, pause-driven fragments) rather than grammatically complete sentences.
+And the segments in translation are placed literally in the same order. This leads to broken flow.
+
+
+Goal:
+While the main objective is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts have to be changed to create the sub part in a meaningful way or to create a meaningful chunk or the mini idea within the unfolding an idea.
+
+
+So your goal is to rearrange only the blocks where the flow is totally broken and hard to process the information for a listener. in such cases re arrange the most basic blocks to form meaningful chunks.
+
+But at the same time keep the idea delivery in the same sequence.
+
+
+
+
+other examples
+
+Half sentence while speaking: (The completion is provided by modulation by linking to previous sentence context)
+
+സന്തോഷത്തോടെ ഇരിക്കൽ എന്നത് - ഇത് ഒരു ദർശനം ആണ്, ആചരിക്കേണ്ടത്.<Half sentence> "ഞാൻ സന്തോഷത്തോടെ ഇരിക്കും, ഞാൻ സന്തോഷത്തോടെ ഇരിക്കും" - ഇങ്ങനെ ചിന്തിക്കൽ അല്ല</Half sentence>. ഇല്ല... ശാസ്ത്രം നിങ്ങൾക്ക് പറയുന്നു... ഈ ബ്രഹ്മാണ്ഡം മൊത്തം ഊർജ്ജത്തിന്റെ ഒരു നൃത്തം മാത്രം!
+Optimized: സന്തോഷത്തോടെ ഇരിക്കൽ എന്നത് - ആചരിക്കേണ്ട ഒരു ദർശനമൊന്നും അല്ല -<Half sentence> "ഞാൻ സന്തോഷത്തോടെ തന്നെ ഇരിക്കും, ഞാൻ സന്തോഷത്തോടെ ഇരിക്കും!" </Half sentence> ഇല്ല... ശാസ്ത്രം നിങ്ങൾക്ക് പറയുന്നു... ഈ ബ്രഹ്മാണ്ഡം മൊത്തം ഊർജ്ജത്തിന്റെ ഒരു നൃത്തം മാത്രം!
+
+
+
+നിങ്ങളുടെ ശരീരത്തെക്കുറിച്ച് പറയുന്നില്ല. നിങ്ങളുടെ മനസ്സ് ഘടനയെക്കുറിച്ച് പറയുന്നില്ല. <Half sentence> ഇതിനെക്കുറിച്ച് പറയുന്നില്ല... </Half sentence>
+Optimized: നിങ്ങളുടെ ശരീരത്തെക്കുറിച്ച് പറയുന്നില്ല. നിങ്ങളുടെ മനസ്സ് ഘടനയെക്കുറിച്ച് പറയുന്നില്ല. <Half sentence>മറ്റൊന്നിനെക്കുറിച്ചും അല്ല... </Half sentence>
+
+Cholito (spoken style):
+മറ്റൊരാൾക്ക് സ്വയം എന്ത് ചെയ്യാൻ ആകുമോ എന്ന് അവർ നോക്കുന്നു
+Optimized: മറ്റൊരാൾ സ്വയം എന്ത് ചെയ്യാൻ ആകും - അത് നോക്കുന്നു
+
+it doesn't matter what act you are doing.
+നിങ്ങൾ ഏത് കാര്യം ചെയ്‌താലും!
+
+
+### **PART 8: Adhering to the length of english segment**
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+I have asked the initial translation to be done in such a way the Malayalam segments fit in the segment+gap duration without overlapping.
+in very tight cases i have asked to place a tag [fast][/fast] so that ai will render those tagged portions in a fast pace. so preserve those tags in the output.
+Do not change the text that is tagged with [fast][/fast]. This is already optimized in initial translation step. Strictly keep this text as it is.
+
+if you see any segment still being very lengthy, shorten it without losing the intent that is being conveyed.
+You have three main tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (Vowel Merging / സന്ധി): Merge vowels and adjacent sounds where Malayalam naturally permits it (e.g., "അത് ആണ്" → "അതാണ്"; "ഇത് ആണ്" → "ഇതാണ്"; "ഇവിടെ ഉണ്ട്" → "ഇവിടുണ്ട്"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+Samasa (Compound Nouns / സമാസം): Instead of "ജീവന്റെ അടയാളം" (The signs of life), you use "ജീവനടയാളം". It sounds tighter and cuts the length significantly.
+Verb Fusing / Spoken Contractions: Use spoken forms — "ചെയ്യുന്നുണ്ട്" → "ചെയ്യുണ്ട്"; "പോകുന്നുണ്ട്" → "പോകുണ്ട്"; "ആകുന്നില്ല" → "ആകില്ല". It turns a concept into a single action.
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+
+
+---
+### **RESULT FORMAT:**
+
+In the result, please give **only** the optimized Malayalam script that was optimized as per the above guidelines.
+
+_________________________________________
+
+
+
+Note: if there are speaker names that are not present in the actual Malayalam text, preserve them in the result also.
+
+
+
+
+Below are the formatted english script and the Malayalam translation:
+

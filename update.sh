@@ -48,7 +48,16 @@ main() {
 
     if [ -d .git ] && command -v git >/dev/null 2>&1; then
         echo "[update] Pulling latest changes…"
-        git pull --ff-only
+        # --ff-only aborts on a diverged / locally-modified checkout. Don't
+        # let that fail the whole update (set -e) — fall back to the ZIP
+        # overlay, which adds/overwrites tracked files without touching the
+        # gitignored venv/settings. This is the common "update did nothing on
+        # a git install" case.
+        if ! git pull --ff-only; then
+            echo "[update] git pull could not fast-forward (diverged or local"
+            echo "         edits to tracked files) — falling back to ZIP overlay…"
+            zip_update
+        fi
     else
         zip_update
     fi
@@ -68,6 +77,18 @@ main() {
     else
         echo "[update] No venv found — running setup.sh first."
         if [ -f .direct-mode ]; then bash setup.sh --direct; else bash setup.sh; fi
+    fi
+
+    # Bundled dubbing app (dubbing/): refresh ITS venv only when the user has
+    # already set it up — dubbing deps are heavy (librosa/numpy), so sync-only
+    # installs never pull them. First-time setup happens from the dubbing
+    # panel itself (dubbing/setup_mac.command / dubbing/setup_windows.bat).
+    if [ -d dubbing/venv ] && [ -f dubbing/requirements.txt ]; then
+        echo "[update] Updating dubbing app dependencies…"
+        ./dubbing/venv/bin/pip install --quiet --upgrade -r dubbing/requirements.txt \
+            || echo "[update] Dubbing deps failed to update — re-run dubbing/setup_mac.command."
+    elif [ -d dubbing ]; then
+        echo "[update] Dubbing app present (not set up yet — use the Dubbing... button in REAPER)."
     fi
 
     echo

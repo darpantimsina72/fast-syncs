@@ -1,0 +1,1228 @@
+### Target language: Nepali (नेपाली)
+### Register: modern spoken Nepali (बोलचालको भाषा), not literary
+### NOTE FROM PIPELINE: This prompt is fully localized for Nepali.
+### Structural rules (pause handling with `...`, hyphen `-` usage,
+### paragraph breaks, thought-unit mapping) apply UNCHANGED to Nepali.
+### All examples below are in Nepali's native Devanagari script.
+### Nepali uses the daṛi `।` for sentence boundaries (Devanagari script).
+
+The goal is to generate a Nepali (नेपाली) dubbing script for the English talk given by Sadhguru (Including any other speakers who question or converse with him). The SRT file text will be given at the bottom.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+
+The SRT Temporal Blueprint: Mapping Threads to Pulses
+
+Instead of a plain transcript, you are receiving an SRT file. This file acts as the absolute structural blueprint for the dubbing script. Think of the SRT timestamps as the rigid framework of the loom.
+
+On-Signals (Spoken Pulses / Containers): The actual text block within a subtitle timestamp. This is continuous speech.
+
+Off-Signals (Silence Gaps / Spaces): The time gap between the end timestamp of one subtitle and the start timestamp of the next. This is a physical pause.
+
+CRITICAL RULE: The temporal blueprint overrides grammatical intuition. You must map the White Threads (thought units) onto these pulses and dictate the placement of your Green Threads (punctuation) strictly based on the On/Off signals, handling the mapping in the following ways:
+
+Before assessing case 1 or 2 or 3, first you must analyze and create the groups of subtitles, so that each group denotes one meaningful chunk or one thought unit of a complete thought.
+
+
+Case 1: One thought unit stretched across multiple pulses (e.g., 1 meaningful chunk or thought unit spoken over 3 subtitles):
+Do not smooth this out. You must weave a Green Thread (specifically the ... indicating a pause) exactly where the temporal gap occurs between the subtitles, even if it awkwardly breaks a Nepali clause in half. The pause must reflect the speaker's hesitation or deliberate pacing.
+
+Note that, only in this case, you can re arrange the sequence of these non-meaningful words/phrases that are building blocks of the meaningful chunk or a thought unit that was spread across multiple pulses, so that the thought unit or the meaningful chunk is formed in a natural way. Here still the pulses are separated by ... but they are resequenced to form a natural flow to form the meaningful chunk or thought unit.
+
+This applies only inside of a meaningful chunk/thought unit. The sequence of the meaningful chunks and thought units that form a complete thought remains same.
+In short, The "Holistic Mapping" Rule for case 1:
+When one thought unit or meaningful chunk is stretched across multiple pulses (pulses separated by ...), do not translate pulse-by-pulse. Instead:
+
+Synthesize: First, translate the entire English thought unit into a natural, complete Nepali sentence or clause.
+
+Distribute: Take that complete Nepali translation and "pour" it into the available pulse containers (the SRT timestamps).
+
+Fragment Naturally: When distributing the Nepali text across pulses, ensure that the text within each pulse forms a natural phonetic chunk (a phrase or sub-part) in Nepali.
+
+Transposition: Since Nepali is a Subject-Object-Verb (SOV) language and English is SVO, you must rearrange the words across the ... markers so the verb lands in the appropriate pulse for the Nepali flow, while ensuring the overall meaning matches the duration of the total pulses used.
+
+The "Bridge" Principle: Each segment between the ... should feel like a natural "breath" or a logical sub-component of the thought, not a random collection of words.
+
+Example of how to handle the "broken" input:
+
+English Pulses: the worship of the ... divine ... in the feminine form ... was hugely prevalent
+
+Wrong (Literal): यसको पूजा ... ईश्वरको ... नारी रूपमा ... व्यापक रूपमा प्रचलित थियो (This feels broken).
+
+Correct (Mapped): ईश्वरलाई ... नारी रूपमा ... पूजा गर्ने प्रचलन ... व्यापक रूपमा थियो (Each pulse now contains a logical Nepali phrase that builds toward the meaningful chunk/thought unit/conclusion).
+
+
+Case 2: Multiple thought units compressed into one pulse (e.g., 2-3 short sentences spoken rapidly in 1 subtitle):
+If the SRT shows continuous speech with no off-signal gaps, do not inject ... pauses just because the grammar suggests a new sentence. Translate the White Threads to flow rapidly together, using commas (,) in-between thought units and ; between different thoughts to maintain continuous structural phrasing to match the unbroken momentum of the speaker.
+
+Case 3: Overlapping boundaries (e.g., a pulse contains the end of thought A and the start of thought B):
+Translate the transition naturally with appropriate boundary punctuation, but reserve your heavy pause punctuation (... or -) only for where the actual SRT gap (Off-Signal) occurs.
+
+
+
+
+Now lets understand the requirement by an analogy.
+
+
+
+Its like weaving an art piece.
+
+
+
+The actual content itself is the white thread.
+
+The punctuation marks are the threads with green shades.
+
+… are the threads with pink shade.
+
+The paragraphs breaks are the threads with orange shades.
+
+The contextually perfect Nepali word choice is the thread of blue shades.
+
+The things that are not to be done are the red threads.
+
+
+
+Now as you start weaving the dubbing script you should carefully weave these color threads at appropriate places as per the instructions given below.
+
+
+
+Below is the information regarding the White threads:
+
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+“Life is not a problem to be solved…
+
+it is a reality to be experienced.”
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction (“No…”)
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels “broken”.
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+“Do you want peace?
+
+Or do you want to control everything?”
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts can be changed to create the sub part in a meaningful way. the subparts remain in the same order.
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of ‘Color A’ when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of ‘Color B’ when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid. these are joined with …
+
+Now the ‘Color A’ set and the ‘Color B’ set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+
+
+In short: Each individual piece that can be identified as a separate part or sub part is the white thread.
+
+
+
+To the extent possible make sure these pieces occur in the same sequence especially the meaningful chunks (made up of sub parts and internal parts)
+
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the coloured sections remain, the pieces of the same color that forms that colored section within can be rearranged.
+
+
+Below is the information regarding the green threads:
+
+now as we weave the white threads to form the sentences, we want to weave in the green threads (punctuation marks) as per the below rules.
+
+
+
+… indicates a pause in between the parts that makes a meaningful chunk or a clause.
+
+, indicates a pause between meaningful chunks that make up the sentence.
+
+; indicates connected sentences.
+
+Hyphen (-) indicates additional information related to the main idea of the sentence.
+
+
+
+
+we connect building parts with … to make up the internal part.
+
+we connect the internal parts with - to make up the subpart.
+
+we connect the subparts with ; to make up the body part.
+
+
+
+for example, the punctuation marks should be weaved like this:
+
+building part …  building part (one internal part)- another internal part - one more internal part; internal part - building part …  building part (another internal part);
+
+internal part -  building part …  building part (one internal part)
+
+subpart; subpart; internal part - internal part; building part…building part…building part; subpart
+
+
+
+
+Placing (-):
+
+  To Set Off Parenthetical Information:
+
+  Example: This is a very important point - one that you shouldn't forget.
+
+ Nepali: यो एकदम महत्त्वपूर्ण कुरा हो - जुन तपाईंले बिर्सनु हुँदैन।
+
+
+
+  Example: The students - all 35 of them - were excited for the field trip.
+
+  Nepali: विद्यार्थीहरू - जम्मै ३५ जना नै - फिल्ड ट्रिपका लागि उत्साहित थिए।
+
+
+
+ To Introduce a List:
+
+    Example: She bought many things - clothes, shoes, and accessories.
+
+Nepali: उनले धेरै कुरा किनिन् - लुगा, जुत्ता, र अन्य सरसामान।
+
+
+
+
+   To Introduce an additional Explanation after completion of one thought:
+
+    Example: The reason for the delay - traffic congestion - was unavoidable.
+
+Nepali: ढिलाइको कारण - ट्राफिक जाम - रोक्न सकिने थिएन।
+
+
+
+    Example: He is my uncle - who is a 7 feet tall man.
+
+Nepali: उहाँ मेरो काका - सात फिट अग्लो मान्छे।
+
+
+
+
+ Example: Today is Sunday - which is a holiday.
+
+Nepali: आज आइतबार - मतलब बिदाको दिन।
+
+
+
+    To Indicate an Abrupt Break or Change in Thought:
+
+    Example: I was about to leave - wait, there's someone at the door.
+
+Nepali: म निस्कनै लागेको थिएँ - पर्खनुस्, ढोकामा कोही आएको छ।
+
+
+
+
+To separate inserted thoughts that need a new modulation.
+
+
+
+Pattern: Main sentence - inserted phrase - continuation of the main sentence.
+
+
+
+    Example: The most important thing - and I can't stress this enough - is to be yourself.
+
+Nepali: सबभन्दा महत्त्वपूर्ण कुरा - जति जोड दिए पनि कम हुन्छ - आफू जस्तो छ त्यस्तै रहनु।
+
+
+
+Example: After 100 years - only in 2010, I think - they figured it out... that this theorem describes the black holes... in the universe.
+
+Nepali: १०० वर्षपछि - सायद २०१० मा होला जस्तो लाग्छ - उहाँहरूले यो पत्ता लगाउनुभयो... कि यो सिद्धान्तले ब्रह्माण्डका कृष्ण विवरहरूलाई वर्णन गर्छ।
+
+
+
+To separate totally different details within a sentence.
+
+Pattern: Main Sentence - detail 1 - detail 2 - continuation of main sentence.
+
+Example: I must tell you this -  two, about maybe three, four years ago - a young woman of 33 or 34 years of age - in a city called Hyderabad in Southern India -  she was a television anchor - one day she did this thing.
+
+Nepali : म तपाईंहरूलाई यो भन्नैपर्छ - करिब दुई, तीन कि चार वर्ष अघि - ३३ कि ३४ वर्षकी एक युवती - दक्षिण भारतको हैदराबाद भन्ने सहरमा - उनी एक टेलिभिजन एन्करर थिइन् - एक दिन उनले यो काम गरिन्।
+
+In below situation:
+
+When a phrase completes, clarifies, justifies, or defines a key concept or item mentioned immediately before it, so that it indicates change in tone.
+
+replace the punctuation before that phrase with a hyphen ( - ).
+
+Example: so in urban areas it may not matter -  because you have insurance and this and that.
+
+Nepali : त्यसैले सहरी क्षेत्रमा सायद यो ठूलो कुरा होइन - किनकि तपाईंसँग इन्स्योरेन्स छ, यो छ, त्यो छ, सबै छ।
+
+
+
+Use ( - ) specifically when The phrase reveals the actual components of a previously stated category to ensure that the tone would land and conclude the meaning, not continue a list.
+
+Example: “two things — your body and your mind”
+
+Nepali : दुइटा कुरा - तपाईंको शरीर, तपाईंको मन।
+
+
+
+
+Below is the information regarding the Pink threads:
+
+
+… should not occur in the text that belong to one single pulse. Even though grammatically it makes sense. Even though there are multiple thought units/phrases/sentences in it. because each pulse is a continuous speech, we don't want the gap in between the continuous pulse.
+
+… only to be placed when there is a pause in between pulses that make up a single thought unit or clause or sentence.
+
+
+
+Below is the information regarding the orange threads:
+
+
+
+Each orange thread is the paragraph break that happens in the dubbing script.
+
+Below are the rules where to weave in the orange thread.
+
+
+
+
+
+When the subject changes (e.g., from speaking about 'Nature' to 'Humans')
+
+When the focus moves from one concept to a completely new idea.
+
+Switch from Description to Reason
+
+Switch from one Context to another.
+
+Switch from Positive to Negative contrast
+
+Split the Question from its Answer.
+
+Before a quoted thought or dialogue starts.
+
+When a sentence structure repeats with a different subject.
+
+When the speaker or the person being quoted changes.
+
+When it changes from a core subject to its explanation using an example, illustration, or analogy.
+
+
+
+
+
+And the sentences that occur within one para can be made into one continuous paragraph. no need to keep them as separate lines within the paragraph.
+
+Example:
+
+हामी रामराज्यको कुरा गर्छौं... किनकि -
+
+रामराज्य भनेको... केवल एउटा महान् शासन मात्र होइन;
+
+यो... न्याय, धर्म, र निःस्वार्थताको एक प्रतिबिम्ब हो।
+
+
+
+in the above it is one paragraph, but it is three lines in a paragraph. the linebreaks within the paragraph can be removed and it can be made into continuous sentences for ease of reading as shown below:
+
+हामी रामराज्यको कुरा गर्छौं... किनकि - रामराज्य भनेको... केवल एउटा महान् शासन मात्र होइन; यो... न्याय, धर्म, र निःस्वार्थताको एक प्रतिबिम्ब हो।
+
+
+
+
+CRITICAL FORMATTING RULE: Continuous Text Blocks
+
+
+
+No Soft Breaks: Do not use line breaks or newlines within a paragraph for visual formatting.
+
+
+
+Single Line Constraint: Each paragraph block must be rendered as one single, continuous line of text.
+
+
+
+Separation: Use a double line break only between different paragraphs.
+
+
+
+
+
+
+
+Below is the information regarding the blue threads:
+
+
+
+There are the points where you have to identify the actual contextually best Nepali word or phrase; and identify the actual intention of sadhguru behind those words spoken by him. There are the places where literal word based translation fails. and you have to think deep and pick the appropriate Nepali expression that conveys the actual contextual point and intention.
+
+
+
+
+
+
+
+Need 1: Polishing the Script into a day to day spoken style:
+
+
+
+    Scenario 1.
+
+    In Nepali the translations for a, an and the are not needed - unless in specific cases.
+
+
+
+
+
+
+
+    Scenario 2.
+
+    In Nepali in many cases, an explicit pronoun can be dropped when context makes it clear, since the verb form or topic continuity carries the subject.
+
+
+
+
+    Scenario 3: Preferred word pairs
+
+    Dimension - आयाम
+
+    You know - थाहा छ नि..
+
+    Life - जीवन
+
+    People - मानिसहरू / मान्छे
+
+    Intense - तीव्रता
+
+    Lifetime - जुनी / जन्म
+
+    essentially - मूलतः
+
+    intense - तीव्रता (not प्रचण्डता in this context)
+
+    isn’t it? - होइन र?
+
+
+
+
+Scenario 4:
+
+This applies only to the segments that are lengthy in Nepali. In English, the segment is spoken with fewer words, but in Nepali, the written style contains more words which will exceed the time of the English segment. Mainly in such cases, we try to make the segment short by combining the words like we combine while talking (colloquial style). And in some cases, even though the words are more, Sadhguru speaks them fast. In such cases also shortening is needed. By analyzing the audio, please shorten the segments as and when necessary.
+
+
+
+CRITICAL: Remember we are not removing any segment, example, or list - we are trying to make it short by expressing the exact same content in fewer words / shorter syllables.
+
+
+
+
+    Example 1:
+
+    Fast spoken English segment: I'm not saying these things are wrong.
+
+    Nepali Lengthy sentence: म भन्दै छैन कि यी कुराहरू गलत हुन्।
+
+    Nepali Shortened Sentence: यी गलत हुन् भन्दै छैन।
+
+
+
+
+    Example 2:
+
+    Fast spoken English segment: Not some fanciful thing that I want to do or you want to do.
+
+    Nepali Lengthy sentence: यो कुनै काल्पनिक कुरा होइन जुन म गर्न चाहन्छु वा तपाईं गर्न चाहनुहुन्छ।
+
+    Nepali Shortened Sentence: मैले वा तपाईंले गर्न चाहेको कुनै काल्पनिक कुरा होइन।
+
+
+
+
+    Example 3:
+
+    Fast spoken English segment: There are many others who would like to be you. 'Oh, I wish I was 20 and I wish I could think what to do.
+
+    Nepali Lengthy sentence: 'ओहो, २० वर्षको उमेरमा के गर्ने भनेर सोच्न सक्थेँ भने कति राम्रो हुन्थ्यो। त्यतिबेलै केही गरिहाल्थेँ।' - यस्तो सोच्ने मानिस यहाँ धेरै छन्।
+
+    Nepali Shortened Sentence: 'ओहो, २०-मा के गर्ने सोच्न सकेको भए राम्रो हुन्थ्यो। त्यतिबेलै केही गरिहाल्थेँ।' - यस्तो सोच्नेहरू यहाँ धेरै छन्।
+
+
+
+
+  Scenario 5:
+
+    Aspect: Missing Detail
+
+    English: So you must fix yourself, you must engineer yourself the way you think is the best way to be for a human being;
+
+    Basic Translation: त्यसैले - मान्छे भएर बस्ने सर्वोत्तम तरिका जुन हो, त्यसरी नै आफैंलाई ठीक पारेर बनाउनुपर्छ;
+
+    Optimized Translation: त्यसैले - मान्छे भएर बस्ने सर्वोत्तम तरिका जुन हो भन्ने लाग्छ, त्यसरी नै आफैंलाई गढ्नुपर्छ;
+
+    Details of optimization: ‘भन्ने लाग्छ’ is the detail for ‘you think is’
+
+
+
+
+  Scenario 6:
+
+    Aspect: Thought Flow
+
+
+
+    English:
+
+    Living strong means your level of experience is intense and enormous.
+
+
+
+    Your level of experience will become enormous - only when your level of attention is absolute.
+
+    Basic Translation:
+
+     बलियो जीवन बाँच्नु भनेको - तपाईंको अनुभवको स्तर तीव्र र विशाल हुनु।
+
+
+
+    जब तपाईंको ध्यान पूर्ण हुन्छ, तब मात्र तपाईंको अनुभवको स्तर पनि विशाल हुन्छ।
+
+
+
+    Optimized Translation:
+
+    बलियो जीवन बाँच्नु भनेको - तपाईंको अनुभवको स्तर तीक्ष्ण र विशाल हुनु।
+
+
+
+    तपाईंको अनुभवको स्तर विशाल हुन्छ, त्यतिबेलै - जब तपाईंको ध्यान पूर्ण हुन्छ!
+
+    Details of optimization:
+
+    Let us take these two sentences as A and B.  'The enormity of experience’ is in the ending portion of A  and is in the beginning portion of B. Thus ensuring a smooth flow of thoughts and connectivity.
+
+
+
+
+Scenario 7:
+
+   Aspect:  Exact detail without deviation
+
+
+
+    English:
+
+    Though I am known to be a yogi - very analytical and logical - essentially, I have always lived my life as a devotee.
+
+    Basic Translation:
+
+    सबैले मलाई एकदम विश्लेषणात्मक, तार्किक योगी मान्छन्, तर साँच्चै भन्ने हो भने म सधैं एक भक्तको रूपमै मेरो जीवन बिताएको छु।
+
+    Optimized Translation:
+
+    सबैले मलाई एकदम विश्लेषणात्मक, तार्किक योगीको रूपमा देखे पनि, मूलतः, म सधैं एक भक्तको रूपमै मेरो जीवन बिताएको छु।
+
+    Details of optimization:
+
+    ‘मान्छन्’ is a slight deviation from what is said. ‘देखे पनि’ is closer to the actual detail ‘known to be’ in English.
+
+
+
+    ‘साँच्चै भन्ने हो भने’ conveys contradiction. ‘मूलतः’ conveys different levels of things - this is for the word ‘essentially’.
+
+
+
+
+Scenario 8:
+
+
+
+    Aspect:  Modulation Cues
+
+
+
+    English: I want you to understand... how difficult the spiritual process is going to be for you - is determined by you - not by nature and not by your guru.
+
+    Basic Translation:
+
+    तपाईं एउटा कुरा बुझ्नुहोस्... आध्यात्मिक प्रक्रिया तपाईंका लागि कति कठिन हुन्छ... त्यो तपाईंबाटै निर्धारित हुन्छ, प्रकृतिबाट होइन, तपाईंको गुरुबाट पनि होइन।
+
+    Optimized Translation:
+
+    तपाईं एउटा कुरा बुझ्नुहोस्... आध्यात्मिक प्रक्रिया तपाईंका लागि कति कठिन हुन्छ... त्यो तपाईंबाटै निर्धारित हुन्छ - प्रकृतिबाट होइन, तपाईंको गुरुबाट पनि होइन।
+
+    Details of optimization:
+
+    Once one thought is completed and next there is additional information, use - at the end of the main thought, so that the dubbing artist will complete that thought, and again add information after that - instead of reading the whole thing like a list of things.
+
+
+
+
+Scenario 9:
+
+
+
+Aspect: Modulation based ending
+
+Written: पत्तै नदिने भन्ने होइन, <Refining>ध्यान दिनुपर्छ - कसले के भन्दैछ भनेर।</Refining>
+
+
+
+Tuned for Dubbing: पत्तै नदिने भन्ने होइन, <Refining>ध्यान दिनुपर्छ - कसले के भन्दैछ!</Refining>
+
+
+
+
+scenario 10:
+
+Aspect: short notation while speaking
+
+
+
+Written: तपाईंलाई थाहा छ कि
+
+Tuned for Dubbing: थाहा छ नि
+
+
+
+
+Written: थाहा छैन भने
+
+Tuned for Dubbing: थाहा छैन भने / थाहा भएन भने
+
+
+
+Written: के कति
+
+Tuned for Dubbing: के कति
+
+
+
+
+Written: सोध्नुहुन्छ
+
+Tuned for Dubbing: सोध्नुहुन्छ
+
+
+
+Written: <Refining>तपाईं यहाँ</Refining> केही पनि नलिई आउनुभएको छ
+
+Tuned for Dubbing: <Refining>यहाँ आउनुभएको छ</Refining> केही पनि नलिई
+
+
+
+Written: खाना तपाईंको मुखमा जति <Refining>बढी समय रहन्छ</Refining>, तपाईंको पाचन त्यति राम्रो हुन्छ;
+
+Tuned for Dubbing: खाना तपाईंको मुखमा जति <Refining>बेरसम्म रहन्छ</Refining>, पाचन त्यति राम्रो हुन्छ;
+
+
+
+Written: आध्यात्मिक मार्गमा हुनुहुन्छ भने, तपाईंको जीवनमा केही भयानक <Refining> भइरहेकै हुन्छ</Refining> - यो उहाँहरू दृढतापूर्वक विश्वास गर्नुहुन्छ।
+
+Tuned for Dubbing: आध्यात्मिक मार्गमा हुनुहुन्छ भने, तपाईंको जीवनमा केही भयानक <Refining> भइहाल्छ नै </Refining> - यो उहाँहरू दृढतापूर्वक विश्वास गर्नुहुन्छ।
+
+
+
+scenario 11:
+
+Aspect: Not explicitly mentioning the redundant subject
+
+
+
+Written:  "ओहो <Refining>तपाईं आश्रममा बस्नुहुन्छ</Refining>, अनि, तपाईंको कष्ट के छ?" यसो भनेर सोध्नुहुन्छ।
+
+Tuned for Dubbing:  "ओहो <Refining>आश्रममा बस्नुहुन्छ</Refining>, अनि, तपाईंको कष्ट के छ?" यसो भनेर सोध्नुहुन्छ।
+
+
+
+
+Explanation: in English the subject must be there, but in Nepali, when the verb form, the topic continuity, or context already conveys the subject, the explicit pronoun can be dropped in spoken style.
+
+
+
+Written:  <Refining>तपाईं आध्यात्मिक मार्गमा हुनुहुन्छ भने</Refining>, तपाईंको जीवनमा केही भयानक भइहाल्छ नै - यो उहाँहरू दृढतापूर्वक विश्वास गर्नुहुन्छ।
+
+Tuned for Dubbing:  <Refining>आध्यात्मिक मार्गमा हुनुहुन्छ भने</Refining>, तपाईंको जीवनमा केही भयानक भइहाल्छ नै - यो उहाँहरू दृढतापूर्वक विश्वास गर्नुहुन्छ।
+
+
+
+
+Written:
+
+ त्यसो गर्नुभयो भने... कम्तीमा ३० देखि ४०% पाचन मुखमै भइसक्छ - त्यतिबेलै, त्यो तयार हुन्छ; अहिले खाना मुखमै राम्रोसँग तयार भएको हुन्छ; <Refining>त्यो भित्र जाँदा... पेटले त्यही नै आशा गर्छ - आधा-पच्चिएको खाना!</Refining>
+
+Tuned for Dubbing:
+
+ त्यसो गर्नुभयो भने... कम्तीमा ३० देखि ४०% पाचन मुखमै भइसक्छ - त्यतिबेलै, त्यो तयार हुन्छ; अहिले खाना मुखमै राम्रोसँग तयार भएको हुन्छ; <Refining> भित्र जाँदा... पेटले त्यही नै आशा गर्छ - आधा-पच्चिएको खाना!</Refining>
+
+
+
+Explanation: in English the subject must be there, but in Nepali sentences can be formed without the subject. Here the tagged part is the continuation of the first part, the subject is already established in the first part. In the second part which is a follow-up, in Nepali we can skip mentioning the subject again. In spoken style, the subject is implied here.
+
+
+
+Scenario 12:
+
+While quoting what someone spoke:
+
+Please place the quoted text in the double quotes and Bring the verb part to the end of the sentence while quoting someone's words or while expressing internal thought process.
+
+
+
+
+Examples:
+
+
+
+Example:
+
+
+
+Original : उहाँहरू <T3>सोच्नुहुन्छ<T3> अहिले आध्यात्मिकता भनेको तपाईंले हिमालय जानुपर्छ वा काशी जानुपर्छ... अथवा सबै थोक छोड्नुपर्छ
+
+
+
+optimized : उहाँहरू “अहिले आध्यात्मिकता भनेको तपाईंले हिमालय जानुपर्छ वा काशी जानुपर्छ... अथवा सबै थोक छोड्नुपर्छ” - यसो भनेर <T3>सोच्नुहुन्छ<T3>
+
+
+
+description:
+
+Here the structure is subject then comma then the thought or the words spoken by the subject in quotes then the verb that conveys saying or thinking and then period or question mark or other punctuation as per the need. Remember the … and - and ; within the quoted portion are still preserved.
+
+
+
+Example:
+
+Original
+
+सबैजना <T3>सोधिरहनुभएको छ<T3>, "सद्‌गुरु, तपाईं यसका लागि किन यति टाउको दुखाउनुहुन्छ?"
+
+
+
+optimized :
+
+सबैजना, "सद्‌गुरु, तपाईं यसका लागि किन यति टाउको दुखाउनुहुन्छ?" - यसो भनेर <T3>सोधिरहनुभएको छ<T3>।
+
+
+
+
+Example:
+
+Original
+
+<T3>मैले भनेँ<T3>, उहाँहरूलाई पिउने पानी नै छैन भने... त्यसो भए मैले उहाँहरूलाई ध्यान गर्न कसरी भन्ने?
+
+
+
+
+Optimized:
+
+<T3>मैले<T3>, “उहाँहरूलाई पिउने पानी नै छैन भने... त्यसो भए मैले उहाँहरूलाई ध्यान गर्न कसरी भन्ने?” - <T3>भनेँ<T3>
+
+
+
+description:
+
+Here the subject who spoke and the verb that conveys the speaking are in one word. we have separated them, and placed the subject before the quoted part and the verb after the quoted part.
+
+
+
+
+Original:
+
+मानिसहरूले मलाई <T3>सोधिरहनुहुन्छ<T3>, "सद्‌गुरु, यो देशमा आध्यात्मिक प्रक्रिया पुनःस्थापना गर्ने बाटो के हो?"
+
+
+
+Optimized:
+
+मानिसहरूले मलाई <T3>यसरी नै<T3> सोधिरहनुहुन्छ, "सद्‌गुरु, यो देशमा आध्यात्मिक प्रक्रिया पुनःस्थापना गर्ने बाटो के हो?" <T3>भन्नुहुन्छ।<T3>
+
+
+
+ description:
+
+Here the subject part is long, bringing the whole long phrase to the end may make sync loss while dubbing. So what we did is, we added the verb that conveys asking again at the end to make it end in a natural way of spoken Nepali. also note that we have added the word यसरी नै as a cataphoric adverb / discourse-bridging adverb.
+
+
+
+
+In Short below is the instruction in summary:
+
+Primary Directive: Create a Dubbing Performance Script
+
+Your goal is not just to translate, but to create a performance script for a dubbing artist. This means capturing the speaker's exact timing, rhythm, and pauses is your highest priority, even if it occasionally makes the sentence structure feel less conventional than written text.
+
+CRITICAL RULE: Meticulous Pause Transcription
+
+Non-Negotiable Pauses: You must use ... to mark every noticeable pause or hesitation in the speaker's delivery. This is the single most important rule.
+
+Priority Over Flow: If a choice must be made between a perfectly natural sentence flow and accurately placing a ... to match the speaker's timing, always prioritize matching the pause. It is better to have a slightly unusual sentence structure that syncs perfectly than a smooth sentence that doesn't.
+
+Review for Pauses: Before finalizing your output, perform a final mental check specifically for this rule: "Have I captured all the short, rhythmic pauses, or have I smoothed them over?"
+
+
+
+
+Below is the information regarding Red threads:
+
+Do not hallucinate.
+
+Do not remove or summarize the units.
+
+Do not add information that is not actually spoken.
+
+Do not re arrange the sentences or clauses just to prioritize the flow within the sentence. this will break the flow between the sentences.
+
+Do not skip the portions that are not spoken by sadhguru. Should include other speakers translation also.
+
+Do not skip the promo part.
+
+Do not explicitly create promo part if it is not there in english. if it's not there in english, in Nepali also it should not be there.
+
+Do not skip the part in the main talk just because it has already come in the promo part/previous parts.
+
+Do not skip English sentences or phrases thinking they are redundant or irrelevant or secondary details. Every thing said in English should be reflected in Nepali.
+
+THIS IS NOT A SUMMARY, THIS IS A DUBBING SCRIPT WHERE DIALOGUES ARE DUBBED AND ATTACHED TO THE ORIGINAL VIDEO. SO NO SKIPPING PARTS OR PHRASES OR DETAILS.
+
+
+
+
+Below are the must do:
+
+Keep every redundant phrase.
+
+Keep every repetition.
+
+keep every redundant detail.
+
+keep every insignificant detail.
+
+in the middle of a sentence, if he adds additional sentence or a secondary information, do not skip it, reflect every minute detail spoken just place a - before those parts.
+
+
+
+
+Below are example Nepali scripts weaved using all the color threads:
+
+
+
+1. मैले पहिले कहिल्यै ध्यान गरेको छैन...
+
+
+
+
+सद्‌गुरु:
+
+“ओहो मैले पहिले कहिल्यै ध्यान गरेको छैन; ध्यान कसरी गर्ने!” - यो त राम्रै कुरा हो, यदि पहिले कहिल्यै ध्यान नगरेको भए!
+
+
+
+ध्यानका लागि कुनै प्रतिभा चाहिँदैन; कुनै अभ्यास चाहिँदैन; कुनै सिनियरिटी चाहिँदैन; कुनै अनुभव पनि चाहिँदैन; चाहिने भनेको केवल ‘इच्छा’ … त्यति मात्रै!
+
+
+
+‘पूर्ण रूपमा तयार हुनु’ - ध्यानका लागि यही नै चाहिन्छ!
+
+
+
+अनि, तपाईं एउटा कुरा सिक्नुहोस् - कहिल्यै पनि अनुभवी ध्यानी नबन्नुहोस् - त्यसो भयो भने, आफैंलाई एउटा जटिलतामा धकेल्नुहुन्छ!
+
+
+
+ ‘ध्यान’ हरेक पटक नयाँ रूपमा फुल्ने जस्तो! हरेक पटक यो एउटा नयाँ सम्भावना हो।
+
+
+
+त्यस्तो होइन, …   "मैले बीस वर्ष ध्यान गरेको छु, त्यसैले म अनुभवी ध्यानी हुँ!" …   त्यस्तो केही हुँदैन।
+
+
+
+उदाहरणका लागि - मानौं, तपाईंले गत दश वर्षदेखि बगैंचा गर्नुभएको छ; त्यसको मतलब के - यसपालि, यो मौसममा, ‘बिरुवा नरोपे पनि, बगैंचामा फूल आफैं फुल्छ’? अथवा ‘पानी नहाले पनि, बगैंचामा फूल आफैं फुल्छ’? हेरचाह नगरे पनि, फूल आफैं फुल्छ - किनकि तपाईंसँग अनुभव छ!? - त्यस्तो हुन्छ र?
+
+
+
+होइन, यसपालि पनि सबै ठीकठाक गर्नुपर्छ। तब मात्र फूल फुल्छ; होइन र?
+
+
+
+सायद... माटो कसरी राख्ने... कति पानी हाल्ने … बगैंचा कसरी चलाउने - सायद यो विषयमा अनुभव काम लाग्ला; नत्र भने फूल आफैं फुल्दैन - खाली तपाईंसँग अनुभव छ भनेर! जीवनमा केही पनि - अनुभव छ भनेर आफैं हुँदैन। यसपालि पनि सबै ठीकठाक गर्नुपर्छ, होइन र?
+
+
+
+हँ?
+
+
+
+ध्यानको हकमा पनि त्यस्तै, कहिल्यै पनि सिनियर ध्यानी नबन्नुहोस्। ध्यानमा बस्ने हरेक पटक, जीवनमा पहिलो पटक बस्दै हुनुहुन्छ - यसरी बस्नुहोस्। तब मात्र यसले राम्रो काम गर्छ।
+
+
+
+
+2. मेरा विचारहरूलाई कसरी नियन्त्रण गर्ने?
+
+
+
+सद्‌गुरु:
+
+मनमा .. बेलगाम विचार, भावना आउँदा, पहिले तपाईंले गर्नुपर्ने कुरा - तिनलाई जस्तो छ त्यस्तै हेर्नुहोस्; रोक्न नखोज्नुहोस्, रोक्न खोज्नुभयो भने - ती क्षणभरमै दोब्बर हुन्छन्।
+
+
+
+यो मनमा घटाउ, भाग छैन; जोड, गुणन मात्र छ।
+
+
+
+"मलाई यो भावना चाहिँदैन" - भन्नुभयो भने, त्यो बढ्छ - एक भएर दुई हुन्छ।
+
+
+
+"ओहो, यो फेरि आउँदैछ; मलाई यो चाहिँदैन, मलाई यो चाहिँदैन" - भन्नुभयो भने, त्यो सयौं गुणा हुन्छ। तपाईंको मनको स्वभावै यस्तै हो।
+
+
+
+मनबाट कुनै पनि कुरा जबरजस्ती हटाउन सकिँदैन। कसैले पनि कुनै कुरा मनबाट जबरजस्ती हटाउने कुनै उपायै छैन।
+
+
+
+त्यसैले तपाईंले गर्नुपर्ने कुरा - यति बुझ्नुहोस् - त्यो हो, ‘विचार र भावना’ वास्तवमा पहिले संग्रहित जानकारीको पुनः प्रयोग मात्र हो! स्मृतिको रिसाइक्लिङ!
+
+
+
+तर, ‘मेमोरी’ अलिकति गन्ध फैलाउँछ; त्यो आइरहन्छ। त्यसलाई त्यसरी नै हेर्नुपर्छ! त्यसबाट अलि टाढा सर्नुपर्छ!
+
+
+
+यो कस्तो - मानौं, तपाईं ट्राफिक जाममा अड्किनुभएको छ; एयरपोर्ट जाँदैहुनुहुन्छ, ट्राफिक जाममा अड्किनुभयो - ‘कति’ चिन्तित, असहज महसुस गर्नुहुन्छ! ठीक छ, जसरी पनि एयरपोर्ट पुगेर विमानमा चढेर हिँड्नुभयो।
+
+
+
+तल ट्राफिक एकदम जाम। अब माथिबाट हेर्दा, “ओहो, त्यो ट्राफिक जाम पनि कस्तो राम्रो!” …  खाली अलिकति दूरी भएकैले!
+
+
+
+ अझै त्यही ट्राफिक जाम छ - तर दूरी भएकैले, क्षणभरमै कुरा हल्का भइहाल्छ। त्यस्तै तपाईंको विचार, भावनाको हकमा पनि!
+
+
+
+सामान्य साधनाले … अलिकति दूरी आउँछ - तपाईंको शारीरिक प्रक्रियाबाट! अनि मानसिक प्रक्रियाबाट पनि!
+
+
+
+त्यो नगरी हरेक विचार, भावनालाई सम्हाल्न खोज्नुभयो भने, ती हजारौं गुणा हुन्छन्।
+
+
+
+
+
+
+3. भोलि ध्यान छोड्ने भनेर सोच्नुभयो भने...
+
+
+
+सद्‌गुरु: सबैले दाँत माझ्नुभयो?
+
+
+
+सहभागी: माझेँ।
+
+
+
+सद्‌गुरु: राम्रो!
+
+
+
+आफैं माझ्नुभयो... कि त तपाईंको आमा-बुबा, श्रीमान्, श्रीमती, अथवा अरू कसैले जोड दिएर - "आज दाँत माझ्नैपर्छ" - भन्नुभयो?
+
+
+
+आफैं माझ्नुभयो!
+
+
+
+सहभागी: हजुर।
+
+
+
+सद्‌गुरु: ओहो! एकदम राम्रो कुरा!
+
+
+
+तर तपाईंलाई याद छ कि, तपाईंको जीवनको कुनै एक समयमा - यति सानै बेला - तपाईंको आमाले जोड दिएर भन्नुहुन्थ्यो “दाँत माझ्नैपर्छ। नत्र खाजा पाउँदैनस्!”
+
+कति दिन? - तीन महिना, छ महिना, कि एक वर्ष!
+
+
+
+त्यसपछि, आफैं माझ्नुहुन्छ; भोलि तपाईंको आमा आएर, "हेर्, दाँत माझ्नु वास्तवमा गलत हो; यसमा कुनै फाइदा छैन; मैले छोडिदिएँ; तँ पनि छोड्" - भन्नुभयो भने, छोड्नुहुन्छ?
+
+सहभागी: छोड्दिनँ।
+
+
+
+सद्‌गुरु: किन?
+
+
+
+किनकि अहिले तपाईंलाई ‘यसको महत्त्व के, यसले तपाईंलाई के गरिरहेको छ’ - त्यो थाहा भइसक्यो।
+
+
+
+अब कसैले यो गर्न जोड गर्नुपर्दैन।
+
+
+
+यसको महत्त्व नबुझेसम्म, कसैलाई दबाब दिएर गराउनुपर्छ; यसको महत्त्व बुझिसकेपछि, फेरि कसैलाई भन्नै पर्दैन, होइन र? किनकि, अहिले - यसले तपाईंलाई के गरिरहेको छ त्यो तपाईंलाई थाहा भइसक्यो; कसैले ‘नगर्’ भने पनि, तपाईंले गर्नुहुन्छ। त्यसैले, यही दृढताका साथ सुरु गरौं, ठीक छ?
+
+
+
+
+
+
+4. ध्यानले काम गर्छ कि?
+
+
+
+सद्‌गुरु:
+
+यसले काम गर्छ कि? …
+
+
+
+सायद सधैं …  शारीरिक प्रकटहरू नै सबभन्दा प्रत्यक्ष अनुभवमा आउँछन्। तर अरू पनि धेरै प्रकटहरू छन् ... शारीरिक र मानसिक स्थितिभन्दा बाहिर पनि अरू धेरै प्रकटहरू छन्।
+
+
+
+शारीरिक र मानसिक रूपमा - कुनै पनि भीडमा यसले तपाईंलाई अलग्गै देखाइदिन्छ - यदि तपाईंले यो साधनाका लागि आफूलाई पर्याप्त समर्पित गर्नुभयो भने!
+
+
+
+तर यी फाइदाहरू, यी … स्वास्थ्यको दृष्टिकोणले हेर्दा - धेरै आधुनिक अनुसन्धानहरूले भन्दैछन् - यसले तपाईंका लागि अद्भुत काम गर्छ!
+
+
+
+तर यी सबै - शारीरिक स्वास्थ्य, मानसिक क्षमता, जीवनलाई सजिलै सामना गर्न सक्नु - यी सबै त साइड इफेक्ट मात्र हुन्; असली कुरा बिस्तारै रूप लिँदैछ। त्यो - प्रकट भएपछि मात्र तपाईंलाई थाहा हुन्छ। त्योभन्दा पहिले केही पनि भइरहेको छैन भन्ने नै लाग्छ।
+
+
+
+यो कस्तो - तपाईंको घरमा … एउटा फूलको बिरुवा रोप्नुभयो; त्यो बढिरहेको छ - खाली पात मात्रै आइरहेको छ!
+
+
+
+छिमेकीले तपाईंलाई भन्नुहुनेछ, "यसमा फाइदा छैन; फूल भन्नुभयो, पात मात्रै आइरहेको छ। काटिदिऔं, आगो ताप्न काम लाग्छ।"
+
+
+
+तपाईंले भन्नुहुनेछ, "पर्खौं, सायद भोलि बिहान फुल्छ कि!"
+
+
+
+भोलि बिहान केही पनि आउँदैन।
+
+
+
+फेरि, "अर्को दिन हेरौं" - अर्को दिन, अर्को दिन... यसरी वर्ष बित्छ; यो बिरुवा फुल्न कति समय लाग्छ भनेर तपाईंलाई थाहा भएन भने, सायद सय पटक काटिसक्नुहुन्थ्यो।
+
+
+
+तर त्यसको हेरचाह गरेर निरन्तरता दिनुभयो भने - एक दिन त्यो फुलेर, फूलले भरिन्छ, तब तपाईंलाई थाहा हुन्छ - “यो बिरुवा पातका लागि होइन... यो छायाँका लागि होइन... यो थोरै अक्सिजनका लागि पनि होइन”!
+
+
+
+फूल फुलेपछि ‘यो’ भन्न नसकिने सुन्दर हुन्छ!
+
+
+
+
+
+
+5. के ध्यानले साँच्चै काम गर्छ?
+
+
+
+यस्तो नसोच्नुहोस् - आज साधना गर्नुभयो, "ओहो मलाई त केही पनि भएन!" अर्को दिन साधना गर्नुभयो, "ओहो मलाई त केही पनि भएन!" केही हुन जरुरी छैन, बुझ्नुभयो? खाली गरिरहनु! यसलाई एउटा समर्पणको रूपमा गर्नुहोस्, बुझ्नुभयो?
+
+
+
+केही पाउन जरुरी छैन! जीवन बिताउने तरिका यो होइन - "यो गरेँ, के पाउँछु? त्यो गरेँ, के पाउँछु?" - यो बाँच्ने पद्धति होइन।
+
+
+
+"मैले के पाउँछु?" - जसले यो सोच्छन्, उहाँहरूले जीवन थाहा पाउन सक्नुहुन्न। तपाईंलाई ‘महत्त्वपूर्ण लाग्ने’ जुन हो, त्यो गरिरहनुहोस् - खाली एउटा समर्पणको रूपमा! जे हुनुपर्ने हो त्यो हुन्छ!
+
+
+
+तर तपाईं एकदम गोल-ओरिएन्टेड भइसक्नुभएको छ - बिरुवा बढ्नुअघि नै तपाईंलाई आँप चाहिन्छ!
+
+
+
+होइन! बिरुवालाई बढाउनुहोस्, त्यसको हेरचाह गर्नुहोस्... आँप तपाईंको टाउकोमा झर्छ - नचाहे पनि!
+
+
+
+Focus area 2: Length of the Nepali segments:
+
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+
+
+Gap threshold = minimum 20 %
+Relative density threshold - 1.1
+
+
+
+that means if the gap after the segment is less than 20% of the length of the segment, then that segment is flagged for gap threshold.
+that means if the Relative number of syllables per second is greater than 1.3 times the average number of syllables per second, then that segment is flagged for gap threshold.
+
+Now
+
+Gap threshold flagged, density threshold flagged
+
+Case 1:
+Gap threshold flagged, density threshold flagged
+Action:
+need heavy compressing. Express the main idea by cutting as many additional details as possible. Just convey the main point in short and crisp way. And add tags [fast][/fast] around the corresponding Nepali segment so that ElevenLabs will render this segment in fast pace.
+
+Case 2:
+Gap threshold flagged, density threshold not flagged
+Action:
+Here the aim is to achieve at least some level of shortening, so that the Nepali fits in - as there is no gap after this.
+
+Apply all the shortening approaches mentioned above
+
+also use below Shortening approaches as well:
+
+You have three additional tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (सन्धि / Vowel Merging): Merge vowels and adjacent sounds where Nepali naturally permits it (e.g., "के हो" → "के'", "गरेको छु" → "गरेँ"-style elisions; "गरिरहेको" → "गर्दै"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+
+Samasa (समास / Compound Nouns): Instead of "जीवनको संकेत" (The signs of life), you use "जीवन-संकेत". It sounds tighter and cuts the length significantly.
+
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+Verb Fusing / Contracted Forms: Use contracted spoken forms — "गरिरहेको छु" → "गर्दैछु"; "गइरहेको छु" → "जाँदैछु"; "हुँदैन" → "हुन्न". It turns a concept into a single action and matches natural Nepali colloquial speech.
+
+
+
+make sure the real intention being conveyed is not diluted. this is high priority. You aren't "diluting" the Master's words; you are "distilling" them. that means you are not skipping details, you are adjusting the structure.
+- Reduce verbosity while preserving meaning.
+- use context from previous and next segments
+- avoid repeating ideas already stated nearby
+- Do not remove key philosophical or logical meaning, Prefer simplifying structure over dropping whole concepts altogether.
+
+You should check if the segments tagged for shortening are able to be pronounced within The total time available for the dubbing segment. One way to check is the number of Akṣaras (syllabic units) in the Nepali segment must be almost same as the number of English syllables. For example, in प्रक्रिया there are three syllabic units प्र, क्रि, and या.
+
+
+Case 3:
+Gap threshold not flagged, density threshold flagged
+Action:
+Make the Nepali crisp without losing any details.
+
+
+Case 4:
+Gap threshold not flagged, density threshold not flagged
+- no need to shorten
+
+
+
+
+Secondary: check if the segments can be spoken in the time in general, if any Nepali segment contains relatively large number of words or lengthy words compared to corresponding English segment, shorten them also.
+
+
+
+Additional requirement:
+
+if the original audio includes the promo part (few sentences from the talk shown at the start of the video to create interest in the viewer) then, Both the scripts should also include the promo part at the beginning.
+
+
+Also, if you have to truncate the output because mention that also at the beginning. and then give the actual translation asked above.
+
+Below is the formatted English script :

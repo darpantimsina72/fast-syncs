@@ -1,0 +1,1230 @@
+### Target language: Tamil (தமிழ்)
+### Register: modern spoken Tamil (பேச்சு வழக்கு), not Senthamizh
+### NOTE FROM PIPELINE: This prompt is fully localized for Tamil.
+### Structural rules (pause handling with `...`, hyphen `-` usage,
+### paragraph breaks, thought-unit mapping) apply UNCHANGED to Tamil.
+### All examples below are in Tamil's native script.
+### Tamil uses the Western full-stop `.` for sentence boundaries
+### (NOT the daṛi `।`).
+
+The goal is to generate a Tamil (தமிழ்) dubbing script for the English talk given by Sadhguru (Including any other speakers who question or converse with him). The SRT file text will be given at the bottom.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+
+The SRT Temporal Blueprint: Mapping Threads to Pulses
+
+Instead of a plain transcript, you are receiving an SRT file. This file acts as the absolute structural blueprint for the dubbing script. Think of the SRT timestamps as the rigid framework of the loom.
+
+On-Signals (Spoken Pulses / Containers): The actual text block within a subtitle timestamp. This is continuous speech.
+
+Off-Signals (Silence Gaps / Spaces): The time gap between the end timestamp of one subtitle and the start timestamp of the next. This is a physical pause.
+
+CRITICAL RULE: The temporal blueprint overrides grammatical intuition. You must map the White Threads (thought units) onto these pulses and dictate the placement of your Green Threads (punctuation) strictly based on the On/Off signals, handling the mapping in the following ways:
+
+Before assessing case 1 or 2 or 3, first you must analyze and create the groups of subtitles, so that each group denotes one meaningful chunk or one thought unit of a complete thought.
+
+
+Case 1: One thought unit stretched across multiple pulses (e.g., 1 meaningful chunk or thought unit spoken over 3 subtitles):
+Do not smooth this out. You must weave a Green Thread (specifically the ... indicating a pause) exactly where the temporal gap occurs between the subtitles, even if it awkwardly breaks a Tamil clause in half. The pause must reflect the speaker's hesitation or deliberate pacing.
+
+Note that, only in this case, you can re arrange the sequence of these non-meaningful words/phrases that are building blocks of the meaningful chunk or a thought unit that was spread across multiple pulses, so that the thought unit or the meaningful chunk is formed in a natural way. Here still the pulses are separated by ... but they are resequenced to form a natural flow to form the meaningful chunk or thought unit.
+
+This applies only inside of a meaningful chunk/thought unit. The sequence of the meaningful chunks and thought units that form a complete thought remains same.
+In short, The "Holistic Mapping" Rule for case 1:
+When one thought unit or meaningful chunk is stretched across multiple pulses (pulses separated by ...), do not translate pulse-by-pulse. Instead:
+
+Synthesize: First, translate the entire English thought unit into a natural, complete Tamil sentence or clause.
+
+Distribute: Take that complete Tamil translation and "pour" it into the available pulse containers (the SRT timestamps).
+
+Fragment Naturally: When distributing the Tamil text across pulses, ensure that the text within each pulse forms a natural phonetic chunk (a phrase or sub-part) in Tamil.
+
+Transposition: Since Tamil is a Subject-Object-Verb (SOV) language and English is SVO, you must rearrange the words across the ... markers so the verb lands in the appropriate pulse for the Tamil flow, while ensuring the overall meaning matches the duration of the total pulses used.
+
+The "Bridge" Principle: Each segment between the ... should feel like a natural "breath" or a logical sub-component of the thought, not a random collection of words.
+
+Example of how to handle the "broken" input:
+
+English Pulses: the worship of the ... divine ... in the feminine form ... was hugely prevalent
+
+Wrong (Literal): அதன் வழிபாடு ... கடவுளை ... பெண் வடிவத்தில் ... பரவலாக இருந்தது (This feels broken).
+
+Correct (Mapped): கடவுளை ... பெண் வடிவத்தில் ... வழிபடுவது ... பரவலாக இருந்தது (Each pulse now contains a logical Tamil phrase that builds toward the meaningful chunk/thought unit/conclusion).
+
+
+Case 2: Multiple thought units compressed into one pulse (e.g., 2-3 short sentences spoken rapidly in 1 subtitle):
+If the SRT shows continuous speech with no off-signal gaps, do not inject ... pauses just because the grammar suggests a new sentence. Translate the White Threads to flow rapidly together, using commas (,) in-between thought units and ; between different thoughts to maintain continuous structural phrasing to match the unbroken momentum of the speaker.
+
+Case 3: Overlapping boundaries (e.g., a pulse contains the end of thought A and the start of thought B):
+Translate the transition naturally with appropriate boundary punctuation, but reserve your heavy pause punctuation (... or -) only for where the actual SRT gap (Off-Signal) occurs.
+
+
+
+
+Now lets understand the requirement by an analogy.
+
+
+
+Its like weaving an art piece.
+
+
+
+The actual content itself is the white thread.
+
+The punctuation marks are the threads with green shades.
+
+… are the threads with pink shade.
+
+The paragraphs breaks are the threads with orange shades.
+
+The contextually perfect Tamil word choice is the thread of blue shades.
+
+The things that are not to be done are the red threads.
+
+
+
+Now as you start weaving the dubbing script you should carefully weave these color threads at appropriate places as per the instructions given below.
+
+
+
+Below is the information regarding the White threads:
+
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+“Life is not a problem to be solved…
+
+it is a reality to be experienced.”
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction (“No…”)
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels “broken”.
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+“Do you want peace?
+
+Or do you want to control everything?”
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts can be changed to create the sub part in a meaningful way. the subparts remain in the same order.
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of ‘Color A’ when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of ‘Color B’ when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid. these are joined with …
+
+Now the ‘Color A’ set and the ‘Color B’ set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+
+
+In short: Each individual piece that can be identified as a separate part or sub part is the white thread.
+
+
+
+To the extent possible make sure these pieces occur in the same sequence especially the meaningful chunks (made up of sub parts and internal parts)
+
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the coloured sections remain, the pieces of the same color that forms that colored section within can be rearranged.
+
+
+Below is the information regarding the green threads:
+
+now as we weave the white threads to form the sentences, we want to weave in the green threads (punctuation marks) as per the below rules.
+
+
+
+… indicates a pause in between the parts that makes a meaningful chunk or a clause.
+
+, indicates a pause between meaningful chunks that make up the sentence.
+
+; indicates connected sentences.
+
+Hyphen (-) indicates additional information related to the main idea of the sentence.
+
+
+
+
+we connect building parts with … to make up the internal part.
+
+we connect the internal parts with - to make up the subpart.
+
+we connect the subparts with ; to make up the body part.
+
+
+
+for example, the punctuation marks should be weaved like this:
+
+building part …  building part (one internal part)- another internal part - one more internal part; internal part - building part …  building part (another internal part);
+
+internal part -  building part …  building part (one internal part)
+
+subpart; subpart; internal part - internal part; building part…building part…building part; subpart
+
+
+
+
+Placing (-):
+
+  To Set Off Parenthetical Information:
+
+  Example: This is a very important point - one that you shouldn't forget.
+
+ Tamil: இது மிக முக்கியமான விஷயம் - இதை நீங்க மறக்கக் கூடாது.
+
+
+
+  Example: The students - all 35 of them - were excited for the field trip.
+
+  Tamil: மாணவர்கள் - மொத்தம் 35 பேரும் - field trip-க்கு ரொம்ப உற்சாகமா இருந்தாங்க.
+
+
+
+ To Introduce a List:
+
+    Example: She bought many things - clothes, shoes, and accessories.
+
+Tamil: அவ நிறைய பொருள் வாங்கினா - துணி, செருப்பு, மத்த accessories எல்லாம்.
+
+
+
+
+   To Introduce an additional Explanation after completion of one thought:
+
+    Example: The reason for the delay - traffic congestion - was unavoidable.
+
+Tamil: தாமதத்துக்கான காரணம் - traffic jam - தவிர்க்க முடியாதது.
+
+
+
+    Example: He is my uncle - who is a 7 feet tall man.
+
+Tamil: அவர் என் மாமா - ஏழு அடி உயரமான ஆள்.
+
+
+
+
+ Example: Today is Sunday - which is a holiday.
+
+Tamil: இன்னிக்கு ஞாயிற்றுக்கிழமை - அதாவது விடுமுறை நாள்.
+
+
+
+    To Indicate an Abrupt Break or Change in Thought:
+
+    Example: I was about to leave - wait, there's someone at the door.
+
+Tamil: நான் கிளம்பப் போனேன் - இருங்க, யாரோ கதவுக்கிட்ட வந்திருக்காங்க.
+
+
+
+
+To separate inserted thoughts that need a new modulation.
+
+
+
+Pattern: Main sentence - inserted phrase - continuation of the main sentence.
+
+
+
+    Example: The most important thing - and I can't stress this enough - is to be yourself.
+
+Tamil: ரொம்ப முக்கியமான விஷயம் - இதை எவ்வளவு வலியுறுத்தினாலும் போதாது - நீங்க நீங்களாவே இருக்கணும்.
+
+
+
+Example: After 100 years - only in 2010, I think - they figured it out... that this theorem describes the black holes... in the universe.
+
+Tamil: 100 வருஷம் கழிச்சு - 2010-ல தான் னு நினைக்கிறேன் - அவங்க கண்டுபிடிச்சாங்க... இந்த theorem பிரபஞ்சத்துல இருக்கிற black holes-ஐ விளக்குதுன்னு.
+
+
+
+To separate totally different details within a sentence.
+
+Pattern: Main Sentence - detail 1 - detail 2 - continuation of main sentence.
+
+Example: I must tell you this -  two, about maybe three, four years ago - a young woman of 33 or 34 years of age - in a city called Hyderabad in Southern India -  she was a television anchor - one day she did this thing.
+
+Tamil : இதை நான் உங்களுக்கு சொல்லியே ஆகணும் - ஏதோ ரெண்டு, மூணு கி நாலு வருஷத்துக்கு முன்னாடி - 33 கி 34 வயசான ஒரு பெண் - தென்னிந்தியாவுல ஹைதராபாத் ங்கிற ஒரு நகரத்துல - அவ ஒரு television anchor-ஆ இருந்தா - ஒரு நாள் அவ இந்த காரியத்தை செஞ்சா.
+
+In below situation:
+
+When a phrase completes, clarifies, justifies, or defines a key concept or item mentioned immediately before it, so that it indicates change in tone.
+
+replace the punctuation before that phrase with a hyphen ( - ).
+
+Example: so in urban areas it may not matter -  because you have insurance and this and that.
+
+Tamil : அதனால நகரப் பகுதிகள்ள இது பெரிய விஷயம் இல்லாம இருக்கலாம் - ஏன்னா உங்களுக்கு insurance இருக்கு, இது இருக்கு, அது இருக்கு.
+
+
+
+Use ( - ) specifically when The phrase reveals the actual components of a previously stated category to ensure that the tone would land and conclude the meaning, not continue a list.
+
+Example: “two things — your body and your mind”
+
+Tamil : ரெண்டு விஷயங்கள் - உங்க உடம்பு, உங்க மனசு.
+
+
+
+
+Below is the information regarding the Pink threads:
+
+
+… should not occur in the text that belong to one single pulse. Even though grammatically it makes sense. Even though there are multiple thought units/phrases/sentences in it. because each pulse is a continuous speech, we don't want the gap in between the continuous pulse.
+
+… only to be placed when there is a pause in between pulses that make up a single thought unit or clause or sentence.
+
+
+
+Below is the information regarding the orange threads:
+
+
+
+Each orange thread is the paragraph break that happens in the dubbing script.
+
+Below are the rules where to weave in the orange thread.
+
+
+
+
+
+When the subject changes (e.g., from speaking about 'Nature' to 'Humans')
+
+When the focus moves from one concept to a completely new idea.
+
+Switch from Description to Reason
+
+Switch from one Context to another.
+
+Switch from Positive to Negative contrast
+
+Split the Question from its Answer.
+
+Before a quoted thought or dialogue starts.
+
+When a sentence structure repeats with a different subject.
+
+When the speaker or the person being quoted changes.
+
+When it changes from a core subject to its explanation using an example, illustration, or analogy.
+
+
+
+
+
+And the sentences that occur within one para can be made into one continuous paragraph. no need to keep them as separate lines within the paragraph.
+
+Example:
+
+ராமராஜ்யத்தைப் பத்தி பேசுறோம்... ஏன்னா -
+
+ராமராஜ்யம்னா... வெறும் ஒரு சிறந்த ஆட்சி மட்டுமில்ல;
+
+அது... நியாயம், தர்மம், சுயநலமின்மை - இதோட ஒரு பிரதிபலிப்பு.
+
+
+
+in the above it is one paragraph, but it is three lines in a paragraph. the linebreaks within the paragraph can be removed and it can be made into continuous sentences for ease of reading as shown below:
+
+ராமராஜ்யத்தைப் பத்தி பேசுறோம்... ஏன்னா - ராமராஜ்யம்னா... வெறும் ஒரு சிறந்த ஆட்சி மட்டுமில்ல; அது... நியாயம், தர்மம், சுயநலமின்மை - இதோட ஒரு பிரதிபலிப்பு.
+
+
+
+
+CRITICAL FORMATTING RULE: Continuous Text Blocks
+
+
+
+No Soft Breaks: Do not use line breaks or newlines within a paragraph for visual formatting.
+
+
+
+Single Line Constraint: Each paragraph block must be rendered as one single, continuous line of text.
+
+
+
+Separation: Use a double line break only between different paragraphs.
+
+
+
+
+
+
+
+Below is the information regarding the blue threads:
+
+
+
+There are the points where you have to identify the actual contextually best Tamil word or phrase; and identify the actual intention of sadhguru behind those words spoken by him. There are the places where literal word based translation fails. and you have to think deep and pick the appropriate Tamil expression that conveys the actual contextual point and intention.
+
+
+
+
+
+
+Need 1: Polishing the Script into a day to day spoken style:
+
+
+
+    Scenario 1.
+
+    In Tamil the translations for a, an and the are not needed - unless in specific cases.
+
+
+
+
+
+
+    Scenario 2.
+
+    In Tamil in many cases, an explicit pronoun can be dropped when context makes it clear, since the verb form or topic continuity carries the subject.
+
+
+
+
+    Scenario 3: Preferred word pairs
+
+    Dimension - பரிமாணம்
+
+    You know - தெரியுமா..
+
+    Life - வாழ்க்கை
+
+    People - மக்கள் / ஆட்கள்
+
+    Intense - தீவிரம்
+
+    Lifetime - பிறவி
+
+    essentially - அடிப்படையில்
+
+    intense - தீவிரம் (not கடுமை in this context)
+
+    isn’t it? - இல்லையா?
+
+
+
+
+Scenario 4:
+
+This applies only to the segments that are lengthy in Tamil. In English, the segment is spoken with fewer words, but in Tamil, the written style contains more words which will exceed the time of the English segment. Mainly in such cases, we try to make the segment short by combining the words like we combine while talking (colloquial style). And in some cases, even though the words are more, Sadhguru speaks them fast. In such cases also shortening is needed. By analyzing the audio, please shorten the segments as and when necessary.
+
+
+
+CRITICAL: Remember we are not removing any segment, example, or list - we are trying to make it short by expressing the exact same content in fewer words / shorter syllables.
+
+
+
+
+    Example 1:
+
+    Fast spoken English segment: I'm not saying these things are wrong.
+
+    Tamil Lengthy sentence: இவை எல்லாம் தவறு என்று நான் சொல்லவில்லை.
+
+    Tamil Shortened Sentence: இதெல்லாம் தப்புன்னு சொல்லல.
+
+
+
+
+    Example 2:
+
+    Fast spoken English segment: Not some fanciful thing that I want to do or you want to do.
+
+    Tamil Lengthy sentence: இது நான் செய்ய விரும்பும் அல்லது நீங்கள் செய்ய விரும்பும் ஏதோ ஒரு கற்பனையான விஷயம் அல்ல.
+
+    Tamil Shortened Sentence: நான் கி நீங்க செய்யணும்னு நினைக்கிற கற்பனை விஷயம் இல்ல.
+
+
+
+
+
+
+    Example 3:
+
+    Fast spoken English segment: There are many others who would like to be you. 'Oh, I wish I was 20 and I wish I could think what to do.
+
+    Tamil Lengthy sentence: 'ஆஹா, 20 வயசுல என்ன செய்யணும்னு யோசிக்க முடிஞ்சா எவ்வளவு நல்லா இருந்திருக்கும். அந்த நேரத்துல நான் எதையாவது செஞ்சே இருப்பேன்.' - இப்படி நினைக்கிற ஆட்கள் இங்க நிறைய பேர் இருக்காங்க.
+
+    Tamil Shortened Sentence: 'ஆஹா, 20-ல என்ன செய்யணும்னு யோசிக்க முடிஞ்சா நல்லா இருந்திருக்கும். அப்பவே எதையாவது செஞ்சிருப்பேன்.' - இப்படி நினைக்கிற ஆட்கள் இங்க நிறைய பேர் இருக்காங்க.
+
+
+
+
+  Scenario 5:
+
+    Aspect: Missing Detail
+
+    English: So you must fix yourself, you must engineer yourself the way you think is the best way to be for a human being;
+
+    Basic Translation: அதனால - மனிதனா இருக்கிறதுக்கு சிறந்த வழி எதுவோ, அந்த மாதிரியே உங்களையே சரி செஞ்சு உருவாக்கணும்;
+
+    Optimized Translation: அதனால - மனிதனா இருக்கிறதுக்கு சிறந்த வழின்னு நீங்க நினைக்கிறீங்களோ, அந்த மாதிரியே உங்களையே வடிவமைச்சு உருவாக்கணும்;
+
+    Details of optimization: ‘நீங்க நினைக்கிறீங்களோ’ is the detail for ‘you think is’
+
+
+
+
+
+
+
+  Scenario 6:
+
+    Aspect: Thought Flow
+
+
+
+    English:
+
+    Living strong means your level of experience is intense and enormous.
+
+
+
+    Your level of experience will become enormous - only when your level of attention is absolute.
+
+    Basic Translation:
+
+     வலிமையா வாழ்றதுன்னா - உங்க அனுபவத்தோட நிலை தீவிரமா, பெரிசா இருக்கணும்.
+
+
+
+    எப்போ உங்க கவனம் முழுமையா இருக்கோ, அப்போ தான் உங்க அனுபவத்தோட நிலை பெரிசா ஆகும்.
+
+
+
+    Optimized Translation:
+
+    வலிமையா வாழ்றதுன்னா - உங்க அனுபவத்தோட நிலை கூர்மையா, பெரிசா இருக்கணும்.
+
+
+
+    உங்க அனுபவத்தோட நிலை பெரிசா ஆகும் - எப்போன்னா - எப்போ உங்க கவனம் முழுமையா இருக்கோ அப்போ தான்!
+
+    Details of optimization:
+
+    Let us take these two sentences as A and B.  'The enormity of experience’ is in the ending portion of A  and is in the beginning portion of B. Thus ensuring a smooth flow of thoughts and connectivity.
+
+
+
+
+Scenario 7:
+
+   Aspect:  Exact detail without deviation
+
+
+
+    English:
+
+    Though I am known to be a yogi - very analytical and logical - essentially, I have always lived my life as a devotee.
+
+    Basic Translation:
+
+    எல்லாரும் என்னை ரொம்ப பகுப்பாய்வோட, தர்க்க ரீதியான யோகின்னு நினைக்கிறாங்க, ஆனா உண்மையில சொல்லணும்னா நான் எப்போதும் ஒரு பக்தனாவே என் வாழ்க்கையை கழிச்சிருக்கேன்.
+
+    Optimized Translation:
+
+    எல்லாரும் என்னை ரொம்ப பகுப்பாய்வோட, தர்க்க ரீதியான யோகின்னு பார்த்தாலும், அடிப்படையில, நான் எப்போதும் ஒரு பக்தனாவே என் வாழ்க்கையை கழிச்சிருக்கேன்.
+
+    Details of optimization:
+
+    ‘நினைக்கிறாங்க’ is a slight deviation from what is said. ‘பார்த்தாலும்’ is closer to the actual detail ‘known to be’ in English.
+
+
+
+    ‘உண்மையில சொல்லணும்னா’ conveys contradiction. ‘அடிப்படையில’ conveys different levels of things - this is for the word ‘essentially’.
+
+
+
+
+Scenario 8:
+
+
+
+    Aspect:  Modulation Cues
+
+
+
+    English: I want you to understand... how difficult the spiritual process is going to be for you - is determined by you - not by nature and not by your guru.
+
+    Basic Translation:
+
+    நீங்க ஒரு விஷயத்தை புரிஞ்சிக்கணும்... ஆன்மிக செயல்முறை உங்களுக்கு எவ்வளவு கடினமா இருக்கப் போகுதுன்னு... அது உங்களாலயே தான் தீர்மானிக்கப்படுது, இயற்கையால இல்ல, உங்க குருவாலயும் இல்ல.
+
+    Optimized Translation:
+
+    நீங்க ஒரு விஷயத்தை புரிஞ்சிக்கணும்... ஆன்மிக செயல்முறை உங்களுக்கு எவ்வளவு கடினமா இருக்கப் போகுதுன்னு... அது உங்களாலயே தான் தீர்மானிக்கப்படுது - இயற்கையால இல்ல, உங்க குருவாலயும் இல்ல.
+
+    Details of optimization:
+
+    Once one thought is completed and next there is additional information, use - at the end of the main thought, so that the dubbing artist will complete that thought, and again add information after that - instead of reading the whole thing like a list of things.
+
+
+
+
+Scenario 9:
+
+
+
+Aspect: Modulation based ending
+
+Written: அலட்சியம் செய்யக் கூடாதுன்னு இல்ல, <Refining>கவனிக்கணும் - யார் என்ன சொல்றாங்கன்னு.</Refining>
+
+
+
+Tuned for Dubbing: அலட்சியம் செய்யக் கூடாதுன்னு இல்ல, <Refining>கவனிக்கணும் - யார் என்ன சொல்றாங்கன்னு!</Refining>
+
+
+
+
+scenario 10:
+
+Aspect: short notation while speaking
+
+
+
+Written: உங்களுக்கு தெரியுமா
+
+Tuned for Dubbing: தெரியுமா
+
+
+
+Written: தெரியலன்னா
+
+Tuned for Dubbing: தெரியலன்னா / தெரியாட்டி
+
+
+
+Written: என்ன என்னவோ
+
+Tuned for Dubbing: என்னென்னவோ
+
+
+
+
+Written: கேட்கிறாங்க
+
+Tuned for Dubbing: கேக்கிறாங்க
+
+
+
+Written: <Refining>நீங்க இங்க</Refining> எதுவும் கொண்டு வராமலே வந்திருக்கீங்க
+
+Tuned for Dubbing: <Refining>இங்க வந்திருக்கீங்க</Refining> எதுவும் கொண்டு வராமலே
+
+
+
+Written: சாப்பாடு உங்க வாயில எவ்வளவு <Refining>அதிக நேரம் இருக்குதோ</Refining>, உங்க ஜீரணம் அவ்வளவு நல்லா ஆகும்;
+
+Tuned for Dubbing: சாப்பாடு உங்க வாயில எவ்வளவு <Refining>அதிக நேரம் இருக்குதோ</Refining>, ஜீரணம் அவ்வளவு நல்லா ஆகும்;
+
+
+
+Written: ஆன்மிக பாதைல இருக்கீங்கன்னா, உங்க வாழ்க்கையில ஏதாவது மோசமா <Refining> நடந்தே தீரும்</Refining> - இதை அவங்க உறுதியா நம்பறாங்க.
+
+Tuned for Dubbing: ஆன்மிக பாதைல இருக்கீங்கன்னா, உங்க வாழ்க்கையில ஏதாவது மோசமா <Refining> நடந்தேயாகும் </Refining> - இதை அவங்க உறுதியா நம்பறாங்க.
+
+
+
+scenario 11:
+
+Aspect: Not explicitly mentioning the redundant subject
+
+
+
+Written:  "ஓ <Refining>நீங்க ஆசிரமத்துல இருக்கீங்க</Refining>, அப்போ, உங்களுக்கு என்ன கஷ்டம்?" அப்படின்னு கேக்கிறாங்க.
+
+Tuned for Dubbing:  "ஓ <Refining>ஆசிரமத்துல இருக்கீங்க</Refining>, அப்போ, உங்களுக்கு என்ன கஷ்டம்?" அப்படின்னு கேக்கிறாங்க.
+
+
+
+
+Explanation: in English the subject must be there, but in Tamil, when the verb form, the topic continuity, or context already conveys the subject, the explicit pronoun can be dropped in spoken style.
+
+
+
+Written:  <Refining>நீங்க ஆன்மிக பாதைல இருக்கீங்கன்னா</Refining>, உங்க வாழ்க்கையில ஏதாவது மோசமா நடந்தே தீரும் - இதை அவங்க உறுதியா நம்பறாங்க.
+
+Tuned for Dubbing:  <Refining>ஆன்மிக பாதைல இருக்கீங்கன்னா</Refining>, உங்க வாழ்க்கையில ஏதாவது மோசமா நடந்தே தீரும் - இதை அவங்க உறுதியா நம்பறாங்க.
+
+
+
+
+Written:
+
+ அப்படி செஞ்சா... குறைஞ்சது 30 லேர்ந்து 40% ஜீரணம் வாயிலயே ஆயிடும் - அப்போவே, அது தயாரா ஆகுது; இப்போ சாப்பாடு வாயிலயே நல்லா தயாரா இருக்கும்; <Refining>அது உள்ள போனா... வயித்துக்கு அதுவே வேணும் - பாதி ஜீரணமான சாப்பாடு!</Refining>
+
+Tuned for Dubbing:
+
+ அப்படி செஞ்சா... குறைஞ்சது 30 லேர்ந்து 40% ஜீரணம் வாயிலயே ஆயிடும் - அப்போவே, அது தயாரா ஆகுது; இப்போ சாப்பாடு வாயிலயே நல்லா தயாரா இருக்கும்; <Refining> உள்ள போனா... வயித்துக்கு அதுவே வேணும் - பாதி ஜீரணமான சாப்பாடு!</Refining>
+
+
+
+Explanation: in English the subject must be there, but in Tamil sentences can be formed without the subject. Here the tagged part is the continuation of the first part, the subject is already established in the first part. In the second part which is a follow-up, in Tamil we can skip mentioning the subject again. In spoken style, the subject is implied here.
+
+
+
+Scenario 12:
+
+While quoting what someone spoke:
+
+Please place the quoted text in the double quotes and Bring the verb part to the end of the sentence while quoting someone's words or while expressing internal thought process.
+
+
+
+
+Examples:
+
+
+
+Example:
+
+
+
+Original : அவங்க <T3>நினைக்கிறாங்க<T3> இப்போ ஆன்மிகம்னா நீங்க இமயமலைக்கு போகணும் கி காசிக்கு போகணும்... இல்லாட்டி எல்லாத்தையும் விட்டுவிடணும்
+
+
+
+optimized : அவங்க “இப்போ ஆன்மிகம்னா நீங்க இமயமலைக்கு போகணும் கி காசிக்கு போகணும்... இல்லாட்டி எல்லாத்தையும் விட்டுவிடணும்” - அப்படின்னு <T3>நினைக்கிறாங்க<T3>
+
+
+
+description:
+
+Here the structure is subject then comma then the thought or the words spoken by the subject in quotes then the verb that conveys saying or thinking and then period or question mark or other punctuation as per the need. Remember the … and - and ; within the quoted portion are still preserved.
+
+
+
+Example:
+
+Original
+
+ஒவ்வொருத்தரும் <T3>கேக்கிறாங்க<T3>, "சத்குரு, நீங்க இதுக்காக ஏன் இவ்வளவு தலையை உடைச்சுக்கிறீங்க?"
+
+
+
+optimized :
+
+ஒவ்வொருத்தரும், "சத்குரு, நீங்க இதுக்காக ஏன் இவ்வளவு தலையை உடைச்சுக்கிறீங்க?" - அப்படின்னு <T3>கேக்கிறாங்க<T3>.
+
+
+
+
+Example:
+
+Original
+
+<T3>நான் சொன்னேன்<T3>, அவங்களுக்கு குடிக்க தண்ணியே இல்லைன்னா... அப்போ நான் அவங்கள தியானம் செய்யன்னு எப்படி சொல்றது?
+
+
+
+
+Optimized:
+
+<T3>நான்<T3>, “அவங்களுக்கு குடிக்க தண்ணியே இல்லைன்னா... அப்போ நான் அவங்கள தியானம் செய்யன்னு எப்படி சொல்றது?” - <T3>சொன்னேன்<T3>
+
+
+
+description:
+
+Here the subject who spoke and the verb that conveys the speaking are in one word. we have separated them, and placed the subject before the quoted part and the verb after the quoted part.
+
+
+
+
+Original:
+
+ஆட்கள் என்னை <T3>கேட்டுக்கிட்டே இருக்காங்க<T3>, "சத்குரு, இந்த நாட்டுல ஆன்மிக செயல்முறையை மீட்டெடுக்கிற வழி என்ன?"
+
+
+
+Optimized:
+
+ஆட்கள் என்னை <T3>இப்படியே<T3> கேட்டுக்கிட்டே இருக்காங்க, "சத்குரு, இந்த நாட்டுல ஆன்மிக செயல்முறையை மீட்டெடுக்கிற வழி என்ன?" <T3>ன்னு சொல்றாங்க.<T3>
+
+
+
+ description:
+
+Here the subject part is long, bringing the whole long phrase to the end may make sync loss while dubbing. So what we did is, we added the verb that conveys asking again at the end to make it end in a natural way of spoken Tamil. also note that we have added the word இப்படியே as a cataphoric adverb / discourse-bridging adverb.
+
+
+
+
+In Short below is the instruction in summary:
+
+Primary Directive: Create a Dubbing Performance Script
+
+Your goal is not just to translate, but to create a performance script for a dubbing artist. This means capturing the speaker's exact timing, rhythm, and pauses is your highest priority, even if it occasionally makes the sentence structure feel less conventional than written text.
+
+CRITICAL RULE: Meticulous Pause Transcription
+
+Non-Negotiable Pauses: You must use ... to mark every noticeable pause or hesitation in the speaker's delivery. This is the single most important rule.
+
+Priority Over Flow: If a choice must be made between a perfectly natural sentence flow and accurately placing a ... to match the speaker's timing, always prioritize matching the pause. It is better to have a slightly unusual sentence structure that syncs perfectly than a smooth sentence that doesn't.
+
+Review for Pauses: Before finalizing your output, perform a final mental check specifically for this rule: "Have I captured all the short, rhythmic pauses, or have I smoothed them over?"
+
+
+
+
+Below is the information regarding Red threads:
+
+Do not hallucinate.
+
+Do not remove or summarize the units.
+
+Do not add information that is not actually spoken.
+
+Do not re arrange the sentences or clauses just to prioritize the flow within the sentence. this will break the flow between the sentences.
+
+Do not skip the portions that are not spoken by sadhguru. Should include other speakers translation also.
+
+Do not skip the promo part.
+
+Do not explicitly create promo part if it is not there in english. if it's not there in english, in Tamil also it should not be there.
+
+Do not skip the part in the main talk just because it has already come in the promo part/previous parts.
+
+Do not skip English sentences or phrases thinking they are redundant or irrelevant or secondary details. Every thing said in English should be reflected in Tamil.
+
+THIS IS NOT A SUMMARY, THIS IS A DUBBING SCRIPT WHERE DIALOGUES ARE DUBBED AND ATTACHED TO THE ORIGINAL VIDEO. SO NO SKIPPING PARTS OR PHRASES OR DETAILS.
+
+
+
+
+Below are the must do:
+
+Keep every redundant phrase.
+
+Keep every repetition.
+
+keep every redundant detail.
+
+keep every insignificant detail.
+
+in the middle of a sentence, if he adds additional sentence or a secondary information, do not skip it, reflect every minute detail spoken just place a - before those parts.
+
+
+
+
+Below are example Tamil scripts weaved using all the color threads:
+
+
+
+1. நான் இதுவரை தியானமே செய்ததில்லை...
+
+
+
+
+சத்குரு:
+
+“ஓ நான் இதுவரை தியானமே செஞ்சதில்ல; தியானம் எப்படி செய்யறது!” - அது நல்ல விஷயம் தான், இதுவரை தியானம் செய்யாம இருந்திருந்தா!
+
+
+
+தியானத்துக்கு எந்த திறமையும் தேவை இல்ல; எந்த பயிற்சியும் தேவை இல்ல; எந்த seniority-யும் தேவை இல்ல; எந்த அனுபவமும் தேவை இல்ல; தேவை வெறும் ‘விருப்பம்’ … அவ்வளவு தான்!
+
+
+
+‘முழுமையா விருப்பத்தோட இருக்கிறது’ - தியானத்துக்கு இது தான் தேவை!
+
+
+
+இன்னொண்ணு, நீங்க ஒரு விஷயத்தை கத்துக்கணும் - எப்பவுமே அனுபவசாலியான தியானியா ஆயிடாதீங்க - ஆனா, உங்களையே ஒரு சிக்கல்ல தள்ளிடுவீங்க!
+
+
+
+ ‘தியானம்’ ஒவ்வொரு தடவையும் புதுசா மலர்றது போல! ஒவ்வொரு தடவையும் இது ஒரு புது சாத்தியம்.
+
+
+
+அப்படி இல்லாம, …   "நான் இருபது வருஷம் தியானம் செஞ்சிருக்கேன், அதனால நான் அனுபவசாலியான தியானி!" …   அப்படி எதுவும் கிடையாது.
+
+
+
+உதாரணமா - வச்சுக்கோங்க, நீங்க கடைசி பத்து வருஷமா தோட்டம் போட்டிருக்கீங்க; அப்போ அர்த்தம் என்னன்னா - இந்த தடவை, இந்த season-ல, ‘நாற்று நடாமலே, தோட்டத்துல பூ தானா பூத்திடும்’? இல்ல ‘தண்ணி ஊத்தாமலே, தோட்டத்துல பூ தானா பூத்திடும்’? கவனிக்காமயே, பூ தானா பூத்திடும் - ஏன்னா உங்களுக்கு அனுபவம் இருக்கு!? - அப்படி நடக்குமா?
+
+
+
+இல்ல, இந்த தடவையும் எல்லாத்தையும் சரியா செய்யணும். அப்போ தான் பூ பூக்கும்; இல்லையா?
+
+
+
+ஒருவேள... மண்ண எப்படி வைக்கணும்... எவ்வளவு தண்ணி ஊத்தணும் … தோட்டத்தை எப்படி நடத்தணும் - இந்த விஷயத்துல அனுபவம் உதவலாம்; இல்லாட்டி பூ தானா பூத்துடாது - வெறும் உங்களுக்கு அனுபவம் இருக்குன்னு! வாழ்க்கையில எதுவுமே - அனுபவம் இருக்குன்னு தானா நடக்காது. இந்த தடவையும் எல்லாத்தையும் சரியா செய்யணும், இல்லையா?
+
+
+
+ஆ஁?
+
+
+
+தியானத்துலயும் அப்படியே, எப்பவுமே senior தியானியா ஆயிடாதீங்க. தியானத்துல உக்காரும் ஒவ்வொரு தடவையும், வாழ்க்கையில இது தான் முதல் தடவை உக்காறேன் - அப்படி உக்காருங்க. அப்போ தான் இது அருமையா வேலை செய்யும்.
+
+
+
+
+2. என் சிந்தனைகளை எப்படி கட்டுப்படுத்துறது?
+
+
+
+சத்குரு:
+
+மனசுல .. கட்டுப்பாடில்லாத சிந்தனைகள், உணர்ச்சிகள் வந்தா, முதல்ல நீங்க செய்யணும் என்னன்னா - அதை இருக்கிற மாதிரியே பாருங்க; தடுக்கப் போகாதீங்க, தடுத்தா - அது நொடிக்குள்ள இரண்டு மடங்கா ஆயிடும்.
+
+
+
+இந்த மனசுல கழித்தல், வகுத்தல் இல்ல; கூட்டல், பெருக்கல் தான் இருக்கு.
+
+
+
+"எனக்கு இந்த உணர்ச்சி வேண்டாம்" - அப்படி சொன்னா, அது அதிகமாகும் - ஒண்ணு ரெண்டா ஆகும்.
+
+
+
+"ஆஹா, இது இன்னும் வருது; எனக்கு இது வேண்டாம், எனக்கு இது வேண்டாம்" - அப்படி சொன்னா, அது நூறு மடங்கா ஆகும். உங்க மனசோட இயல்பு இது தான்.
+
+
+
+மனசுல இருந்து எதையும் வலுக்கட்டாயமா எடுக்க முடியாது. யாராலயும் எதையும் மனசுல இருந்து வலுக்கட்டாயமா எடுக்க எந்த வழியும் கிடையாது.
+
+
+
+அதனால நீங்க செய்யணும் என்னன்னா - இதை புரிஞ்சிக்கோங்க - அது என்னன்னா, ‘சிந்தனை, உணர்ச்சி’ எல்லாம் முன்னாடியே சேமிச்ச information-ஐ மறுபடியும் பயன்படுத்துறது தான்! நினைவின் recycling!
+
+
+
+ஆனா, ‘memory’ கொஞ்சம் வாசனை விடுது; அது வந்துகிட்டே இருக்கும். அதை அப்படியே பார்க்கணும்! அதிலிருந்து கொஞ்சம் தள்ளி வரணும்!
+
+
+
+இது எப்படின்னா - வச்சுக்கோங்க, நீங்க traffic jam-ல மாட்டிக்கிட்டிருக்கீங்க; airport போய்க்கிட்டிருக்கீங்க, traffic jam-ல மாட்டிக்கிட்டிருக்கீங்க - ‘எவ்வளவு’ கவலையா, அசௌகரியமா உணர்றீங்க! சரி, எப்படியோ airport சென்று, விமானத்துல ஏறி கிளம்பிட்டீங்க.
+
+
+
+கீழ traffic மோசமா jam. இப்போ மேலேர்ந்து பார்த்தா, “ஆஹா, அந்த traffic jam எவ்வளவு அழகா இருக்கு!” …  வெறும் கொஞ்சம் தூரம் இருக்கிறதனாலயே!
+
+
+
+ இப்பவும் அதே traffic jam தான் - ஆனா தூரம் இருக்கிறதனால, ஒரு நொடியில விஷயம் இலகுவா ஆயிடுது. அதே மாதிரி தான் உங்க சிந்தனை, உணர்ச்சி விஷயத்துலயும்!
+
+
+
+கொஞ்சம் சாதனைல … கொஞ்சம் தூரம் வருது - உங்க உடல் செயல்முறையில இருந்து! மறுபடி மன செயல்முறையில இருந்தும்!
+
+
+
+அதை செய்யாம ஒவ்வொரு சிந்தனை, உணர்ச்சியையும் சமாளிக்கப் போனா, அவை ஆயிரம் மடங்கா ஆயிடும்.
+
+
+
+
+
+
+3. நாளைக்கு தியானம் விட்டுடலாம்னு நினைச்சா...
+
+
+
+சத்குரு: எல்லாரும் பல் தேய்ச்சீங்களா?
+
+
+
+பங்கேற்பாளர்: தேய்ச்சேன்.
+
+
+
+சத்குரு: நல்லது!
+
+
+
+நீங்களே தேய்ச்சீங்களா... இல்ல உங்க அப்பா-அம்மா, கணவன், மனைவி, இல்ல வேற யாராவது நிர்பந்திச்சு - "இன்னிக்கு பல் தேய்ச்சே ஆகணும்" - அப்படி சொன்னாங்களா?
+
+
+
+நீங்களே தேய்ச்சீங்க!
+
+
+
+பங்கேற்பாளர்: ஆமா.
+
+
+
+சத்குரு: ஓ! அருமை!
+
+
+
+ஆனா உங்களுக்கு ஞாபகம் இருக்கா, உங்க வாழ்க்கையில ஒரு காலத்துல - இந்த வயசுல - உங்க அம்மா வலியுறுத்தி சொல்வாங்க “பல் தேய்ச்சே ஆகணும். இல்லாட்டி காலை சாப்பாடு கிடைக்காது!”
+
+எத்தனை நாள்? - மூணு மாசம், ஆறு மாசம், கி ஒரு வருஷம்!
+
+
+
+அதுக்கு அப்புறம், நீங்களே தேய்க்கிறீங்க; நாளைக்கு உங்க அம்மா வந்து, "கேளு, பல் தேய்க்கிறது உண்மையில தப்பு; இதுல எந்த லாபமும் இல்ல; நான் விட்டுட்டேன்; நீயும் விட்டுடு" - அப்படி சொன்னா, விட்டுடுவீங்களா?
+
+பங்கேற்பாளர்: விடமாட்டேன்.
+
+
+
+சத்குரு: ஏன்?
+
+
+
+ஏன்னா இப்போ நீங்க ‘இதோட முக்கியத்துவம் என்ன, இது உங்களுக்கு என்ன செய்யுது’ - அதை புரிஞ்சுக்கிட்டீங்க.
+
+
+
+இப்போ இனிமே யாரும் இதை செய்யன்னு நிர்பந்திக்க தேவை இல்ல.
+
+
+
+இதோட முக்கியத்துவம் புரியற வரைக்கும், யாரையாவது நிர்பந்திச்சு செய்ய வைக்கணும்; இதோட முக்கியத்துவம் புரிஞ்சா, அப்புறம் யாரும் சொல்ல வேண்டிய அவசியம் இல்ல, இல்லையா? ஏன்னா, இப்போ - இது உங்களுக்கு என்ன செய்யுதுன்னு உங்களுக்கு தெரிஞ்சு போச்சு; யாராவது ‘செய்யாதீங்க’ன்னு சொன்னாலும், நீங்க செய்வீங்க. அதனால, இந்த உறுதியோடயே தொடங்குவோம், சரியா?
+
+
+
+
+
+
+4. தியானம் வேலை செய்யுமா?
+
+
+
+சத்குரு:
+
+இது வேலை செய்யுமா? …
+
+
+
+ஒருவேள எப்பவும் …  உடல்ரீதியான வெளிப்பாடுகள் தான் மிக நேரடியா அனுபவத்துக்கு வருது. ஆனா இன்னும் நிறைய வெளிப்பாடுகள் இருக்கு ... உடல், மன நிலைகளுக்கு வெளியேயும் இன்னும் நிறைய வெளிப்பாடுகள் இருக்கு.
+
+
+
+உடல், மன ரீதியா - எந்த கூட்டத்துலயும் இது உங்களை தனியா காட்டும் - நீங்க இந்த சாதனைக்கு போதுமான அளவு உங்களையே அர்ப்பணிச்சா!
+
+
+
+ஆனா இந்த நன்மைகள், இதெல்லாம் … உடல்நலம் ரீதியா பார்த்தா - நிறைய நவீன ஆராய்ச்சி சொல்லுது - இது உங்களுக்கு அபாரமா வேலை செய்யும்!
+
+
+
+ஆனா இதெல்லாம் - உடல்நலம், மன திறமை, வாழ்க்கையை சுலபமா சமாளிக்க முடிஞ்சது - இதெல்லாம் வெறும் பக்கவிளைவுகள் தான்; அசலான விஷயம் மெல்ல மெல்ல உருவாகிக்கிட்டிருக்கு. அது - வெளிப்பட்டா தான் நீங்க தெரிஞ்சுப்பீங்க. அதுக்கு முன்னாடி எதுவும் நடக்காத மாதிரியே தெரியும்.
+
+
+
+இது எப்படின்னா - உங்க வீட்டுல … ஒரு பூ செடி நட்டீங்க; அது வளருது - வெறும் இலை தான் வருது!
+
+
+
+பக்கத்து வீட்டுக்காரர் உங்களுக்கு சொல்வாங்க, "இதுல லாபம் இல்ல; பூன்னு சொன்னீங்க, இலை தான் வருது. வெட்டி தூக்கிடலாம், விறகுக்கு உதவும்."
+
+
+
+நீங்க சொல்வீங்க, "காத்துப் பார்க்கலாம், ஒருவேள நாளைக் காலையில பூத்திடும்!"
+
+
+
+மறுநாள் காலையில எதுவும் வரல.
+
+
+
+மறுபடி, "இன்னொரு நாள் பார்க்கலாம்" - இன்னொரு நாள், இன்னொரு நாள்... இப்படியே வருஷங்கள் கழிஞ்சு போகுது; இந்த செடி பூக்க எத்தனை நாள் ஆகும்னு உங்களுக்கு தெரியாம இருந்திருந்தா, ஒருவேள நூறு தடவை வெட்டி தூக்கி இருப்பீங்க.
+
+
+
+ஆனா அதை பராமரிச்சு கொண்டு போனா - ஒரு நாள் அது பூத்து, பூவால நிறைஞ்சிடும், அப்போ நீங்க புரிஞ்சுப்பீங்க - “இந்த செடி இலைகளுக்காக இல்ல... இது நிழலுக்காக இல்ல... இது கொஞ்சம் oxygen-க்காகவும் இல்ல”!
+
+
+
+பூ பூத்தா ‘இது’ சொல்ல முடியாத அளவு அழகா இருக்கும்!
+
+
+
+
+
+
+5. தியானம் உண்மையா வேலை செய்யுமா?
+
+
+
+இப்படி நினைக்காதீங்க - இன்னிக்கு சாதனை செஞ்சீங்க, "ஓ எனக்கு எதுவும் ஆகல!" அடுத்த நாள் சாதனை செஞ்சீங்க, "ஓ எனக்கு எதுவும் ஆகல!" எதுவும் நடக்க தேவை இல்ல, புரிஞ்சுதா? வெறும் செஞ்சுக்கிட்டே இருங்க! இதை ஒரு அர்ப்பணிப்பா செய்யுங்க, புரிஞ்சுதா?
+
+
+
+எதுவும் கிடைக்க தேவை இல்ல! வாழ்க்கையை வாழ்றதோட முறை இது இல்ல - "இதை செஞ்சேன், என்ன கிடைக்கும்? அதை செஞ்சேன், என்ன கிடைக்கும்?" - இது வாழ்றதோட முறை இல்ல.
+
+
+
+"எனக்கு என்ன கிடைக்கும்?" - இதை யார் நினைக்கிறாங்களோ, அவங்க வாழ்க்கையை தெரிஞ்சுக்க முடியாது. உங்களுக்கு ‘முக்கியமா தோணுது’ எது, அதை செஞ்சுக்கிட்டே இருங்க - வெறும் ஒரு அர்ப்பணிப்பா! ஆகவேண்டியது ஆகும்!
+
+
+
+ஆனா நீங்க ரொம்ப goal-oriented ஆயிட்டீங்க - மரம் வளர்ற முன்னாடியே உங்களுக்கு மாங்காய் வேணும்!
+
+
+
+இல்ல! மரத்தை வளர்க்குங்க, அதை பராமரிங்க... மாங்காய் உங்க தலைல விழும் - வேணாம்னு சொன்னாலும்!
+
+
+Focus area 2: Length of the Tamil segments:
+
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+
+
+Gap threshold = minimum 20 %
+Relative density threshold - 1.1
+
+
+
+that means if the gap after the segment is less than 20% of the length of the segment, then that segment is flagged for gap threshold.
+that means if the Relative number of syllables per second is greater than 1.3 times the average number of syllables per second, then that segment is flagged for gap threshold.
+
+Now
+
+Gap threshold flagged, density threshold flagged
+
+Case 1:
+Gap threshold flagged, density threshold flagged
+Action:
+need heavy compressing. Express the main idea by cutting as many additional details as possible. Just convey the main point in short and crisp way. And add tags [fast][/fast] around the corresponding Tamil segment so that ElevenLabs will render this segment in fast pace.
+
+Case 2:
+Gap threshold flagged, density threshold not flagged
+Action:
+Here the aim is to achieve at least some level of shortening, so that the Tamil fits in - as there is no gap after this.
+
+Apply all the shortening approaches mentioned above
+
+also use below Shortening approaches as well:
+
+You have three additional tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (புணர்ச்சி / Vowel Merging): Merge vowels and adjacent sounds where Tamil naturally permits it (e.g., "அது இருக்கிறது" → "அதிருக்கு"; "செய்கிறேன்" → "செய்றேன்"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+
+Samasa (சமாசம் / Compound Nouns): Instead of "உயிரின் அடையாளம்" (The signs of life), you use "உயிர்-அடையாளம்". It sounds tighter and cuts the length significantly.
+
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+Verb Fusing / Contracted Forms: Use contracted spoken forms — "செய்கிறேன்" → "செய்றேன்"; "போகிறேன்" → "போறேன்"; "ஆகிவிட்டது" → "ஆச்சு"; "ஆகையால்" → "அதனால". It turns a concept into a single action and matches natural Tamil colloquial speech.
+
+
+
+make sure the real intention being conveyed is not diluted. this is high priority. You aren't "diluting" the Master's words; you are "distilling" them. that means you are not skipping details, you are adjusting the structure.
+- Reduce verbosity while preserving meaning.
+- use context from previous and next segments
+- avoid repeating ideas already stated nearby
+- Do not remove key philosophical or logical meaning, Prefer simplifying structure over dropping whole concepts altogether.
+
+You should check if the segments tagged for shortening are able to be pronounced within The total time available for the dubbing segment. One way to check is the number of Akṣaras (syllabic units) in the Tamil segment must be almost same as the number of English syllables. For example, in செயல்முறை there are four syllabic units செ, யல், மு, றை.
+
+
+Case 3:
+Gap threshold not flagged, density threshold flagged
+Action:
+Make the Tamil crisp without losing any details.
+
+
+Case 4:
+Gap threshold not flagged, density threshold not flagged
+- no need to shorten
+
+
+
+
+Secondary: check if the segments can be spoken in the time in general, if any Tamil segment contains relatively large number of words or lengthy words compared to corresponding English segment, shorten them also.
+
+
+
+Additional requirement:
+
+if the original audio includes the promo part (few sentences from the talk shown at the start of the video to create interest in the viewer) then, Both the scripts should also include the promo part at the beginning.
+
+
+Also, if you have to truncate the output because mention that also at the beginning. and then give the actual translation asked above.
+
+Below is the formatted English script :

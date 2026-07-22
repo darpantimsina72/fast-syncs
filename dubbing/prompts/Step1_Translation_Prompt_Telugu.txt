@@ -1,0 +1,1210 @@
+### Target language: Telugu (తెలుగు)
+### Register: modern spoken Telugu
+### NOTE FROM PIPELINE: This prompt is fully localized for Telugu.
+### Structural rules (pause handling with `...`, hyphen `-` usage,
+### paragraph breaks, thought-unit mapping) apply UNCHANGED to Telugu.
+### All examples below are in Telugu's native script.
+### Telugu uses the Western full-stop `.` for sentence boundaries
+### (NOT the daṛi `।`).
+
+The goal is to generate a Telugu (తెలుగు) dubbing script for the English talk given by Sadhguru (Including any other speakers who question or converse with him). The SRT file text will be given at the bottom.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+
+The SRT Temporal Blueprint: Mapping Threads to Pulses
+
+Instead of a plain transcript, you are receiving an SRT file. This file acts as the absolute structural blueprint for the dubbing script. Think of the SRT timestamps as the rigid framework of the loom.
+
+On-Signals (Spoken Pulses / Containers): The actual text block within a subtitle timestamp. This is continuous speech.
+
+Off-Signals (Silence Gaps / Spaces): The time gap between the end timestamp of one subtitle and the start timestamp of the next. This is a physical pause.
+
+CRITICAL RULE: The temporal blueprint overrides grammatical intuition. You must map the White Threads (thought units) onto these pulses and dictate the placement of your Green Threads (punctuation) strictly based on the On/Off signals, handling the mapping in the following ways:
+
+Before assessing case 1 or 2 or 3, first you must analyze and create the groups of subtitles, so that each group denotes one meaningful chunk or one thought unit of a complete thought.
+
+
+Case 1: One thought unit stretched across multiple pulses (e.g., 1 meaningful chunk or thought unit spoken over 3 subtitles):
+Do not smooth this out. You must weave a Green Thread (specifically the ... indicating a pause) exactly where the temporal gap occurs between the subtitles, even if it awkwardly breaks a Telugu clause in half. The pause must reflect the speaker's hesitation or deliberate pacing.
+
+Note that, only in this case, you can re arrange the sequence of these non-meaningful words/phrases that are building blocks of the meaningful chunk or a thought unit that was spread across multiple pulses, so that the thought unit or the meaningful chunk is formed in a natural way. Here still the pulses are separated by ... but they are resequenced to form a natural flow to form the meaningful chunk or thought unit.
+
+This applies only inside of a meaningful chunk/thought unit. The sequence of the meaningful chunks and thought units that form a complete thought remains same.
+In short, The "Holistic Mapping" Rule for case 1:
+When one thought unit or meaningful chunk is stretched across multiple pulses (pulses separated by ...), do not translate pulse-by-pulse. Instead:
+
+Synthesize: First, translate the entire English thought unit into a natural, complete Telugu sentence or clause.
+
+Distribute: Take that complete Telugu translation and "pour" it into the available pulse containers (the SRT timestamps).
+
+Fragment Naturally: When distributing the Telugu text across pulses, ensure that the text within each pulse forms a natural phonetic chunk (a phrase or sub-part) in Telugu.
+
+Transposition: Since Telugu is a Subject-Object-Verb (SOV) language and English is SVO, you must rearrange the words across the ... markers so the verb lands in the appropriate pulse for the Telugu flow, while ensuring the overall meaning matches the duration of the total pulses used.
+
+The "Bridge" Principle: Each segment between the ... should feel like a natural "breath" or a logical sub-component of the thought, not a random collection of words.
+
+Example of how to handle the "broken" input:
+
+English Pulses: the worship of the ... divine ... in the feminine form ... was hugely prevalent
+
+Wrong (Literal): దాని ఆరాధన ... దేవుడిని ... స్త్రీ రూపంలో ... విస్తృతంగా వ్యాప్తిలో ఉంది (This feels broken).
+
+Correct (Mapped): దేవుడిని ... స్త్రీ రూపంలో ... ఆరాధించడం ... విస్తృతంగా వ్యాప్తిలో ఉంది (Each pulse now contains a logical Telugu phrase that builds toward the meaningful chunk/thought unit/conclusion).
+
+
+Case 2: Multiple thought units compressed into one pulse (e.g., 2-3 short sentences spoken rapidly in 1 subtitle):
+If the SRT shows continuous speech with no off-signal gaps, do not inject ... pauses just because the grammar suggests a new sentence. Translate the White Threads to flow rapidly together, using commas (,) in-between thought units and ; between different thoughts to maintain continuous structural phrasing to match the unbroken momentum of the speaker.
+
+Case 3: Overlapping boundaries (e.g., a pulse contains the end of thought A and the start of thought B):
+Translate the transition naturally with appropriate boundary punctuation, but reserve your heavy pause punctuation (... or -) only for where the actual SRT gap (Off-Signal) occurs.
+
+
+
+
+Now lets understand the requirement by an analogy.
+
+
+
+Its like weaving an art piece.
+
+
+
+The actual content itself is the white thread.
+
+The punctuation marks are the threads with green shades.
+
+… are the threads with pink shade.
+
+The paragraphs breaks are the threads with orange shades.
+
+The contextually perfect Telugu word choice is the thread of blue shades.
+
+The things that are not to be done are the red threads.
+
+
+
+Now as you start weaving the dubbing script you should carefully weave these color threads at appropriate places as per the instructions given below.
+
+
+
+Below is the information regarding the White threads:
+
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+"Life is not a problem to be solved…
+
+it is a reality to be experienced."
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction ("No…")
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels "broken".
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+"Do you want peace?
+
+Or do you want to control everything?"
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts can be changed to create the sub part in a meaningful way. the subparts remain in the same order.
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of 'Color A' when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of 'Color B' when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid. these are joined with …
+
+Now the 'Color A' set and the 'Color B' set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+
+
+In short: Each individual piece that can be identified as a separate part or sub part is the white thread.
+
+
+
+To the extent possible make sure these pieces occur in the same sequence especially the meaningful chunks (made up of sub parts and internal parts)
+
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the coloured sections remain, the pieces of the same color that forms that colored section within can be rearranged.
+
+
+Below is the information regarding the green threads:
+
+now as we weave the white threads to form the sentences, we want to weave in the green threads (punctuation marks) as per the below rules.
+
+
+
+… indicates a pause in between the parts that makes a meaningful chunk or a clause.
+
+, indicates a pause between meaningful chunks that make up the sentence.
+
+; indicates connected sentences.
+
+Hyphen (-) indicates additional information related to the main idea of the sentence.
+
+
+
+
+we connect building parts with … to make up the internal part.
+
+we connect the internal parts with - to make up the subpart.
+
+we connect the subparts with ; to make up the body part.
+
+
+
+for example, the punctuation marks should be weaved like this:
+
+building part …  building part (one internal part)- another internal part - one more internal part; internal part - building part …  building part (another internal part);
+
+internal part -  building part …  building part (one internal part)
+
+subpart; subpart; internal part - internal part; building part…building part…building part; subpart
+
+
+
+
+Placing (-):
+
+  To Set Off Parenthetical Information:
+
+  Example: This is a very important point - one that you shouldn't forget.
+
+ Telugu: ఇది చాలా ముఖ్యమైన విషయం - మీరు మర్చిపోకూడనిది.
+
+
+
+  Example: The students - all 35 of them - were excited for the field trip.
+
+  Telugu: విద్యార్థులు - వాళ్ళందరూ 35 మంది - field trip కి చాలా ఉత్సాహంగా ఉన్నారు.
+
+
+
+ To Introduce a List:
+
+    Example: She bought many things - clothes, shoes, and accessories.
+
+Telugu: ఆమె చాలా వస్తువులు కొన్నది - దుస్తులు, చెప్పులు, accessories అన్నీ.
+
+
+
+
+   To Introduce an additional Explanation after completion of one thought:
+
+    Example: The reason for the delay - traffic congestion - was unavoidable.
+
+Telugu: ఆలస్యానికి కారణం - traffic jam - తప్పించుకోలేనిది.
+
+
+
+    Example: He is my uncle - who is a 7 feet tall man.
+
+Telugu: ఆయన నా మామయ్య - ఏడు అడుగుల ఎత్తున్న మనిషి.
+
+
+
+
+ Example: Today is Sunday - which is a holiday.
+
+Telugu: ఈరోజు ఆదివారం - అంటే సెలవురోజు.
+
+
+
+    To Indicate an Abrupt Break or Change in Thought:
+
+    Example: I was about to leave - wait, there's someone at the door.
+
+Telugu: నేను వెళ్ళబోతున్నాను - ఆగండి, తలుపు దగ్గర ఎవరో వస్తున్నారు.
+
+
+
+
+To separate inserted thoughts that need a new modulation.
+
+
+
+Pattern: Main sentence - inserted phrase - continuation of the main sentence.
+
+
+
+    Example: The most important thing - and I can't stress this enough - is to be yourself.
+
+Telugu: చాలా ముఖ్యమైన విషయం - దీన్ని ఎంత చెప్పినా తక్కువే - మీరు మీరుగా ఉండటం.
+
+
+
+Example: After 100 years - only in 2010, I think - they figured it out... that this theorem describes the black holes... in the universe.
+
+Telugu: 100 సంవత్సరాల తర్వాత - 2010లో అనుకుంటా - వాళ్ళు కనుక్కున్నారు... ఈ theorem విశ్వంలోని black holes ని వివరిస్తుందని.
+
+
+
+To separate totally different details within a sentence.
+
+Pattern: Main Sentence - detail 1 - detail 2 - continuation of main sentence.
+
+Example: I must tell you this -  two, about maybe three, four years ago - a young woman of 33 or 34 years of age - in a city called Hyderabad in Southern India -  she was a television anchor - one day she did this thing.
+
+Telugu : నేను మీకు ఇది చెప్పాలి - ఏదో రెండు, మూడు కి నాలుగేళ్ళ క్రితం - 33 కి 34 సంవత్సరాల యువతి - దక్షిణ భారతంలో హైదరాబాద్ అనే నగరంలో - ఆమె ఒక television anchor - ఒక రోజు ఆమె ఈ పని చేసింది.
+
+In below situation:
+
+When a phrase completes, clarifies, justifies, or defines a key concept or item mentioned immediately before it, so that it indicates change in tone.
+
+replace the punctuation before that phrase with a hyphen ( - ).
+
+Example: so in urban areas it may not matter -  because you have insurance and this and that.
+
+Telugu : అందుకే పట్టణ ప్రాంతాల్లో ఇది పెద్ద విషయం కాదు - ఎందుకంటే మీకు insurance ఉంది, ఇది ఉంది, అది ఉంది.
+
+
+
+Use ( - ) specifically when The phrase reveals the actual components of a previously stated category to ensure that the tone would land and conclude the meaning, not continue a list.
+
+Example: "two things — your body and your mind"
+
+Telugu : రెండు విషయాలు - మీ శరీరం, మీ మనసు.
+
+
+
+
+Below is the information regarding the Pink threads:
+
+
+… should not occur in the text that belong to one single pulse. Even though grammatically it makes sense. Even though there are multiple thought units/phrases/sentences in it. because each pulse is a continuous speech, we don't want the gap in between the continuous pulse.
+
+… only to be placed when there is a pause in between pulses that make up a single thought unit or clause or sentence.
+
+
+
+Below is the information regarding the orange threads:
+
+
+
+Each orange thread is the paragraph break that happens in the dubbing script.
+
+Below are the rules where to weave in the orange thread.
+
+
+
+
+When the subject changes (e.g., from speaking about 'Nature' to 'Humans')
+
+When the focus moves from one concept to a completely new idea.
+
+Switch from Description to Reason
+
+Switch from one Context to another.
+
+Switch from Positive to Negative contrast
+
+Split the Question from its Answer.
+
+Before a quoted thought or dialogue starts.
+
+When a sentence structure repeats with a different subject.
+
+When the speaker or the person being quoted changes.
+
+When it changes from a core subject to its explanation using an example, illustration, or analogy.
+
+
+
+
+And the sentences that occur within one para can be made into one continuous paragraph. no need to keep them as separate lines within the paragraph.
+
+Example:
+
+రామరాజ్యం గురించి మాట్లాడతాం... ఎందుకంటే -
+
+రామరాజ్యం అంటే... కేవలం ఒక గొప్ప పాలన మాత్రమే కాదు;
+
+అది... న్యాయం, ధర్మం, నిస్వార్థత - వీటి ప్రతిబింబం.
+
+
+
+in the above it is one paragraph, but it is three lines in a paragraph. the linebreaks within the paragraph can be removed and it can be made into continuous sentences for ease of reading as shown below:
+
+రామరాజ్యం గురించి మాట్లాడతాం... ఎందుకంటే - రామరాజ్యం అంటే... కేవలం ఒక గొప్ప పాలన మాత్రమే కాదు; అది... న్యాయం, ధర్మం, నిస్వార్థత - వీటి ప్రతిబింబం.
+
+
+
+
+CRITICAL FORMATTING RULE: Continuous Text Blocks
+
+
+
+No Soft Breaks: Do not use line breaks or newlines within a paragraph for visual formatting.
+
+
+
+Single Line Constraint: Each paragraph block must be rendered as one single, continuous line of text.
+
+
+
+Separation: Use a double line break only between different paragraphs.
+
+
+
+
+Below is the information regarding the blue threads:
+
+
+
+There are the points where you have to identify the actual contextually best Telugu word or phrase; and identify the actual intention of sadhguru behind those words spoken by him. There are the places where literal word based translation fails. and you have to think deep and pick the appropriate Telugu expression that conveys the actual contextual point and intention.
+
+
+
+
+Need 1: Polishing the Script into a day to day spoken style:
+
+
+
+    Scenario 1.
+
+    In Telugu the translations for a, an and the are not needed - unless in specific cases.
+
+
+
+
+    Scenario 2.
+
+    In Telugu in many cases, an explicit pronoun can be dropped when context makes it clear, since the verb form or topic continuity carries the subject.
+
+
+
+
+    Scenario 3: Preferred word pairs
+
+    Dimension - పరిమాణం
+
+    You know - తెలుసా..
+
+    Life - జీవితం
+
+    People - జనం / మనుషులు
+
+    Intense - తీవ్రంగా
+
+    Lifetime - జన్మ
+
+    essentially - అసలు / మూలంగా
+
+    intense - తీవ్రంగా (not కఠినంగా in this context)
+
+    isn't it? - కదా?
+
+
+
+
+Scenario 4:
+
+This applies only to the segments that are lengthy in Telugu. In English, the segment is spoken with fewer words, but in Telugu, the written style contains more words which will exceed the time of the English segment. Mainly in such cases, we try to make the segment short by combining the words like we combine while talking (colloquial style). And in some cases, even though the words are more, Sadhguru speaks them fast. In such cases also shortening is needed. By analyzing the audio, please shorten the segments as and when necessary.
+
+
+
+CRITICAL: Remember we are not removing any segment, example, or list - we are trying to make it short by expressing the exact same content in fewer words / shorter syllables.
+
+
+
+
+    Example 1:
+
+    Fast spoken English segment: I'm not saying these things are wrong.
+
+    Telugu Lengthy sentence: ఇవి తప్పు అని నేను చెప్పడం లేదు.
+
+    Telugu Shortened Sentence: ఇవి తప్పని చెప్పట్లేదు.
+
+
+
+
+    Example 2:
+
+    Fast spoken English segment: Not some fanciful thing that I want to do or you want to do.
+
+    Telugu Lengthy sentence: ఇది నేను చేయాలనుకునే లేదా మీరు చేయాలనుకునే ఏదైనా ఊహల విషయం కాదు.
+
+    Telugu Shortened Sentence: నేను కి మీరు చేయాలనుకునే ఏదో ఊహల విషయం కాదు.
+
+
+
+
+    Example 3:
+
+    Fast spoken English segment: There are many others who would like to be you. 'Oh, I wish I was 20 and I wish I could think what to do.
+
+    Telugu Lengthy sentence: 'ఆహా, 20 ఏళ్ళకి ఏం చేయాలో ఆలోచించగలిగితే ఎంత బాగుండేది. అప్పుడు ఏదో చేసేవాడిని.' - ఇలా అనుకునే వాళ్ళు ఇక్కడ చాలామంది ఉన్నారు.
+
+    Telugu Shortened Sentence: 'ఆహా, 20లో ఏం చేయాలో ఆలోచించగలిగితే బాగుండేది. అప్పుడే ఏదో చేసేవాడిని.' - ఇలా అనుకునే వాళ్ళు ఇక్కడ చాలామంది.
+
+
+
+
+  Scenario 5:
+
+    Aspect: Missing Detail
+
+    English: So you must fix yourself, you must engineer yourself the way you think is the best way to be for a human being;
+
+    Basic Translation: అందువల్ల - మనిషిగా ఉండటానికి అత్యుత్తమ మార్గం ఏదో, ఆ విధంగా మీరే మిమ్మల్ని సరిచేసుకుని తీర్చిదిద్దుకోవాలి;
+
+    Optimized Translation: అందువల్ల - మనిషిగా ఉండటానికి అత్యుత్తమ మార్గం అని మీరు అనుకుంటారో, ఆ విధంగా మీరే మిమ్మల్ని రూపొందించుకోవాలి;
+
+    Details of optimization: 'మీరు అనుకుంటారో' is the detail for 'you think is'
+
+
+
+
+  Scenario 6:
+
+    Aspect: Thought Flow
+
+
+
+    English:
+
+    Living strong means your level of experience is intense and enormous.
+
+
+
+    Your level of experience will become enormous - only when your level of attention is absolute.
+
+    Basic Translation:
+
+     బలంగా జీవించడం అంటే - మీ అనుభవ స్థాయి తీవ్రంగా, గొప్పగా ఉండాలి.
+
+
+
+    మీ శ్రద్ధ సంపూర్ణంగా ఉన్నప్పుడే, మీ అనుభవ స్థాయి గొప్పగా అవుతుంది.
+
+
+
+    Optimized Translation:
+
+    బలంగా జీవించడం అంటే - మీ అనుభవ స్థాయి తీక్ష్ణంగా, గొప్పగా ఉండాలి.
+
+
+
+    మీ అనుభవ స్థాయి గొప్పగా అవుతుంది - ఎప్పుడంటే - మీ శ్రద్ధ సంపూర్ణంగా ఉన్నప్పుడే!
+
+    Details of optimization:
+
+    Let us take these two sentences as A and B.  'The enormity of experience' is in the ending portion of A  and is in the beginning portion of B. Thus ensuring a smooth flow of thoughts and connectivity.
+
+
+
+
+Scenario 7:
+
+   Aspect:  Exact detail without deviation
+
+
+
+    English:
+
+    Though I am known to be a yogi - very analytical and logical - essentially, I have always lived my life as a devotee.
+
+    Basic Translation:
+
+    అందరూ నన్ను చాలా విశ్లేషణాత్మక, తార్కిక యోగి అని అనుకుంటారు, కానీ నిజంగా చెప్పాలంటే నేను ఎప్పుడూ భక్తుడిగానే జీవించాను.
+
+    Optimized Translation:
+
+    అందరూ నన్ను చాలా విశ్లేషణాత్మక, తార్కిక యోగిగా చూసినా, అసలు, నేను ఎప్పుడూ భక్తుడిగానే జీవించాను.
+
+    Details of optimization:
+
+    'అనుకుంటారు' is a slight deviation from what is said. 'చూసినా' is closer to the actual detail 'known to be' in English.
+
+
+
+    'నిజంగా చెప్పాలంటే' conveys contradiction. 'అసలు' conveys different levels of things - this is for the word 'essentially'.
+
+
+
+
+Scenario 8:
+
+
+
+    Aspect:  Modulation Cues
+
+
+
+    English: I want you to understand... how difficult the spiritual process is going to be for you - is determined by you - not by nature and not by your guru.
+
+    Basic Translation:
+
+    మీరు ఒక విషయం అర్థం చేసుకోవాలి... ఆధ్యాత్మిక ప్రక్రియ మీకు ఎంత కఠినంగా ఉంటుందో... అది మీచేతే నిర్ణయించబడుతుంది, ప్రకృతిచేత కాదు, మీ గురువుచేత కాదు.
+
+    Optimized Translation:
+
+    మీరు ఒక విషయం అర్థం చేసుకోవాలి... ఆధ్యాత్మిక ప్రక్రియ మీకు ఎంత కఠినంగా ఉంటుందో... అది మీచేతే నిర్ణయించబడుతుంది - ప్రకృతిచేత కాదు, మీ గురువుచేత కాదు.
+
+    Details of optimization:
+
+    Once one thought is completed and next there is additional information, use - at the end of the main thought, so that the dubbing artist will complete that thought, and again add information after that - instead of reading the whole thing like a list of things.
+
+
+
+
+Scenario 9:
+
+
+
+Aspect: Modulation based ending
+
+Written: పట్టించుకోకపోవడం కాదు, <Refining>గమనించాలి - ఎవరు ఏం చెప్తున్నారో అని.</Refining>
+
+
+
+Tuned for Dubbing: పట్టించుకోకపోవడం కాదు, <Refining>గమనించాలి - ఎవరు ఏం చెప్తున్నారో!</Refining>
+
+
+
+
+scenario 10:
+
+Aspect: short notation while speaking
+
+
+
+Written: మీకు తెలుసా
+
+Tuned for Dubbing: తెలుసా..
+
+
+
+Written: తెలియకపోతే
+
+Tuned for Dubbing: తెలియకపోతే / తెలియకుంటే
+
+
+
+Written: ఏమేమో
+
+Tuned for Dubbing: ఏమేమో
+
+
+
+Written: అడుగుతున్నారు
+
+Tuned for Dubbing: అడుగుతున్నారు
+
+
+
+Written: <Refining>మీరు ఇక్కడ</Refining> ఏమీ తీసుకురాకుండా వచ్చారు
+
+Tuned for Dubbing: <Refining>ఇక్కడ వచ్చారు</Refining> ఏమీ తీసుకురాకుండా
+
+
+
+Written: భోజనం మీ నోట్లో ఎంత <Refining>ఎక్కువ సేపు ఉంటే</Refining>, మీ జీర్ణం అంత బాగా అవుతుంది;
+
+Tuned for Dubbing: భోజనం మీ నోట్లో ఎంత <Refining>సేపు ఉంటే</Refining>, జీర్ణం అంత బాగా అవుతుంది;
+
+
+
+Written: ఆధ్యాత్మిక మార్గంలో ఉన్నారంటే, మీ జీవితంలో ఏదైనా భయంకరంగా <Refining> జరిగేతీరుతుంది</Refining> - అని వాళ్ళు గట్టిగా నమ్ముతారు.
+
+Tuned for Dubbing: ఆధ్యాత్మిక మార్గంలో ఉన్నారంటే, మీ జీవితంలో ఏదైనా భయంకరంగా <Refining> జరుగుతుందే</Refining> - అని వాళ్ళు గట్టిగా నమ్ముతారు.
+
+
+
+scenario 11:
+
+Aspect: Not explicitly mentioning the redundant subject
+
+
+
+Written:  "ఓ <Refining>మీరు ఆశ్రమంలో ఉన్నారు</Refining>, అయితే, మీకేమి కష్టం?" అని అడుగుతున్నారు.
+
+Tuned for Dubbing:  "ఓ <Refining>ఆశ్రమంలో ఉన్నారు</Refining>, అయితే, మీకేమి కష్టం?" అని అడుగుతున్నారు.
+
+
+
+
+Explanation: in English the subject must be there, but in Telugu, when the verb form, the topic continuity, or context already conveys the subject, the explicit pronoun can be dropped in spoken style.
+
+
+
+Written:  <Refining>మీరు ఆధ్యాత్మిక మార్గంలో ఉన్నారంటే</Refining>, మీ జీవితంలో ఏదైనా భయంకరంగా జరిగేతీరుతుంది - అని వాళ్ళు గట్టిగా నమ్ముతారు.
+
+Tuned for Dubbing:  <Refining>ఆధ్యాత్మిక మార్గంలో ఉన్నారంటే</Refining>, మీ జీవితంలో ఏదైనా భయంకరంగా జరిగేతీరుతుంది - అని వాళ్ళు గట్టిగా నమ్ముతారు.
+
+
+
+
+Written:
+
+ అలా చేస్తే... కనీసం 30 నుండి 40% జీర్ణం నోట్లోనే అయిపోతుంది - అప్పుడే, అది తయారవుతుంది; ఇప్పుడు భోజనం నోట్లోనే బాగా తయారయి ఉంటుంది; <Refining>అది లోపల వెళ్ళినప్పుడు... కడుపుకు అదే కావాలి - సగం జీర్ణమైన భోజనం!</Refining>
+
+Tuned for Dubbing:
+
+ అలా చేస్తే... కనీసం 30 నుండి 40% జీర్ణం నోట్లోనే అయిపోతుంది - అప్పుడే, అది తయారవుతుంది; ఇప్పుడు భోజనం నోట్లోనే బాగా తయారయి ఉంటుంది; <Refining> లోపల వెళ్ళినప్పుడు... కడుపుకు అదే కావాలి - సగం జీర్ణమైన భోజనం!</Refining>
+
+
+
+Explanation: in English the subject must be there, but in Telugu sentences can be formed without the subject. Here the tagged part is the continuation of the first part, the subject is already established in the first part. In the second part which is a follow-up, in Telugu we can skip mentioning the subject again. In spoken style, the subject is implied here.
+
+
+
+Scenario 12:
+
+While quoting what someone spoke:
+
+Please place the quoted text in the double quotes and Bring the verb part to the end of the sentence while quoting someone's words or while expressing internal thought process.
+
+
+
+
+Examples:
+
+
+
+Example:
+
+
+
+Original : వాళ్ళు <T3>అనుకుంటున్నారు<T3> ఇప్పుడు ఆధ్యాత్మికత అంటే హిమాలయాలకు వెళ్ళాలి లేదా కాశీకి వెళ్ళాలి... లేదా అన్నీ వదిలేయాలి
+
+
+
+optimized : వాళ్ళు "ఇప్పుడు ఆధ్యాత్మికత అంటే హిమాలయాలకు వెళ్ళాలి లేదా కాశీకి వెళ్ళాలి... లేదా అన్నీ వదిలేయాలి" - అని <T3>అనుకుంటున్నారు<T3>
+
+
+
+description:
+
+Here the structure is subject then comma then the thought or the words spoken by the subject in quotes then the verb that conveys saying or thinking and then period or question mark or other punctuation as per the need. Remember the … and - and ; within the quoted portion are still preserved.
+
+
+
+Example:
+
+Original
+
+అందరూ <T3>అడుగుతున్నారు<T3>, "సద్గురూ, మీరు దీని గురించి ఎందుకు ఇంత తల పెట్టుకుంటున్నారు?"
+
+
+
+optimized :
+
+అందరూ, "సద్గురూ, మీరు దీని గురించి ఎందుకు ఇంత తల పెట్టుకుంటున్నారు?" - అని <T3>అడుగుతున్నారు<T3>.
+
+
+
+
+Example:
+
+Original
+
+<T3>నేను చెప్పాను<T3>, వాళ్ళకు తాగే నీళ్ళే లేకపోతే... అప్పుడు నేను వాళ్ళకు ధ్యానం చేయమని ఎలా చెప్పను?
+
+
+
+
+Optimized:
+
+<T3>నేను<T3>, "వాళ్ళకు తాగే నీళ్ళే లేకపోతే... అప్పుడు నేను వాళ్ళకు ధ్యానం చేయమని ఎలా చెప్పను?" - <T3>చెప్పాను<T3>
+
+
+
+description:
+
+Here the subject who spoke and the verb that conveys the speaking are in one word. we have separated them, and placed the subject before the quoted part and the verb after the quoted part.
+
+
+
+
+Original:
+
+జనాలు నన్ను <T3>అడుగుతూనే ఉన్నారు<T3>, "సద్గురూ, ఈ దేశంలో ఆధ్యాత్మిక ప్రక్రియను తిరిగి నిలబెట్టే మార్గం ఏమిటి?"
+
+
+
+Optimized:
+
+జనాలు నన్ను <T3>ఇలా<T3> అడుగుతూనే ఉన్నారు, "సద్గురూ, ఈ దేశంలో ఆధ్యాత్మిక ప్రక్రియను తిరిగి నిలబెట్టే మార్గం ఏమిటి?" <T3>అని చెప్తున్నారు.<T3>
+
+
+
+ description:
+
+Here the subject part is long, bringing the whole long phrase to the end may make sync loss while dubbing. So what we did is, we added the verb that conveys asking again at the end to make it end in a natural way of spoken Telugu. also note that we have added the word ఇలా as a cataphoric adverb / discourse-bridging adverb.
+
+
+
+
+In Short below is the instruction in summary:
+
+Primary Directive: Create a Dubbing Performance Script
+
+Your goal is not just to translate, but to create a performance script for a dubbing artist. This means capturing the speaker's exact timing, rhythm, and pauses is your highest priority, even if it occasionally makes the sentence structure feel less conventional than written text.
+
+CRITICAL RULE: Meticulous Pause Transcription
+
+Non-Negotiable Pauses: You must use ... to mark every noticeable pause or hesitation in the speaker's delivery. This is the single most important rule.
+
+Priority Over Flow: If a choice must be made between a perfectly natural sentence flow and accurately placing a ... to match the speaker's timing, always prioritize matching the pause. It is better to have a slightly unusual sentence structure that syncs perfectly than a smooth sentence that doesn't.
+
+Review for Pauses: Before finalizing your output, perform a final mental check specifically for this rule: "Have I captured all the short, rhythmic pauses, or have I smoothed them over?"
+
+
+
+
+Below is the information regarding Red threads:
+
+Do not hallucinate.
+
+Do not remove or summarize the units.
+
+Do not add information that is not actually spoken.
+
+Do not re arrange the sentences or clauses just to prioritize the flow within the sentence. this will break the flow between the sentences.
+
+Do not skip the portions that are not spoken by sadhguru. Should include other speakers translation also.
+
+Do not skip the promo part.
+
+Do not explicitly create promo part if it is not there in english. if it's not there in english, in Telugu also it should not be there.
+
+Do not skip the part in the main talk just because it has already come in the promo part/previous parts.
+
+Do not skip English sentences or phrases thinking they are redundant or irrelevant or secondary details. Every thing said in English should be reflected in Telugu.
+
+THIS IS NOT A SUMMARY, THIS IS A DUBBING SCRIPT WHERE DIALOGUES ARE DUBBED AND ATTACHED TO THE ORIGINAL VIDEO. SO NO SKIPPING PARTS OR PHRASES OR DETAILS.
+
+
+
+
+Below are the must do:
+
+Keep every redundant phrase.
+
+Keep every repetition.
+
+keep every redundant detail.
+
+keep every insignificant detail.
+
+in the middle of a sentence, if he adds additional sentence or a secondary information, do not skip it, reflect every minute detail spoken just place a - before those parts.
+
+
+
+
+Below are example Telugu scripts weaved using all the color threads:
+
+
+
+1. నేను ఇంతవరకూ ధ్యానం చేయలేదు...
+
+
+
+
+సద్గురు:
+
+"ఓ నేను ఇంతవరకూ ధ్యానం చేయలేదు; ధ్యానం ఎలా చేయాలి!" - అది మంచి విషయమే, ఇంతవరకూ ధ్యానం చేయకపోయి ఉంటే!
+
+
+
+ధ్యానానికి ఏ ప్రత్యేక నైపుణ్యం అక్కర్లేదు; ఏ అభ్యాసమూ అక్కర్లేదు; ఏ సీనియారిటీ అక్కర్లేదు; ఏ అనుభవమూ అక్కర్లేదు; కావాల్సింది కేవలం 'కోరిక' … అంతే!
+
+
+
+'పూర్తి కోరికతో ఉండటం' - ధ్యానానికి ఇది మాత్రమే కావాలి!
+
+
+
+ఇంకో విషయం, మీరు ఒక్క విషయం నేర్చుకోవాలి - ఎప్పుడూ అనుభవజ్ఞుడైన ధ్యాని అయిపోకండి - అయితే, మిమ్మల్ని మీరు ఒక చిక్కులో పెట్టుకుంటారు!
+
+
+
+ 'ధ్యానం' ప్రతిసారీ కొత్తగా వికసించినట్లు! ప్రతిసారీ ఇది ఒక కొత్త అవకాశం.
+
+
+
+అలా కాకుండా, …   "నేను ఇరవై సంవత్సరాలు ధ్యానం చేశాను, అందువల్ల నేను అనుభవజ్ఞుడైన ధ్యానిని!" …   అలాంటిది ఏమీ లేదు.
+
+
+
+ఉదాహరణకు - అనుకోండి, మీరు గత పది సంవత్సరాలుగా తోట పెంచుతున్నారు; అంటే - ఈసారి, ఈ సీజన్‌లో, 'మొక్కలు నాటకుండానే, తోటలో పూలు తమంతట తాముగా పూస్తాయి'? లేదా 'నీళ్ళు పోయకుండానే, తోటలో పూలు తమంతట తాముగా పూస్తాయి'? చూసుకోకుండానే, పూలు తమంతట తాముగా పూస్తాయి - ఎందుకంటే మీకు అనుభవం ఉంది!? - అలా జరుగుతుందా?
+
+
+
+లేదు, ఈసారీ అన్నీ సరిగ్గా చేయాలి. అప్పుడే పూలు పూస్తాయి; కదా?
+
+
+
+బహుశా... మట్టి ఎలా పెట్టాలో... ఎంత నీళ్ళు పోయాలో … తోట ఎలా నడపాలో - ఇవి బహుశా అనుభవం వల్ల ఉపయోగపడుతుంది; అలా కాకుంటే పూలు తమంతట తాముగా పూయవు - మీకు అనుభవం ఉంది కదా అని! జీవితంలో ఏ విషయమూ - అనుభవం ఉంది కదా అని తమంతట తాముగా జరగవు. ఈసారీ అన్నీ సరిగ్గా చేయాలి, కదా?
+
+
+
+ఆఁ?
+
+
+
+ధ్యానంలో కూడా అలాగే, ఎప్పుడూ సీనియర్ ధ్యాని అయిపోకండి. ధ్యానంలో కూర్చున్న ప్రతిసారీ, జీవితంలో ఇది మొదటిసారి కూర్చుంటున్నాను - అలా కూర్చోండి. అప్పుడే ఇది అద్భుతంగా పని చేస్తుంది.
+
+
+
+
+2. నా ఆలోచనలను ఎలా నియంత్రించాలి?
+
+
+
+సద్గురు:
+
+మనసులో .. అదుపు లేని ఆలోచనలు, భావాలు వస్తే, మొదట మీరు చేయాల్సింది - వాటిని ఉన్నవి ఉన్నట్టుగా చూడండి; అడ్డుకోవడానికి వెళ్ళకండి, అడ్డుకుంటే - అవి క్షణంలో రెట్టింపు అవుతాయి.
+
+
+
+ఈ మనసులో వ్యవకలనం, భాగహారం లేదు; సంకలనం, గుణకారమే ఉంది.
+
+
+
+"నాకు ఈ భావం వద్దు" - అంటే, అది పెరుగుతుంది - ఒకటి రెండు అవుతుంది.
+
+
+
+"ఆహా, ఇది మళ్ళీ వస్తోంది; నాకు ఇది వద్దు, నాకు ఇది వద్దు" - అంటే, అది వందరెట్లు అవుతుంది. మీ మనసు స్వభావం ఇదే.
+
+
+
+మనసు నుండి ఏదీ బలవంతంగా తీయలేం. ఎవరూ ఏదీ మనసు నుండి బలవంతంగా తీయడానికి ఏ మార్గమూ లేదు.
+
+
+
+అందువల్ల మీరు చేయాల్సింది - ఇంత అర్థం చేసుకోండి - అదేమిటంటే, 'ఆలోచన, భావం' అంటే అంతకుముందు నిల్వ చేసుకున్న సమాచారాన్ని మళ్ళీ ఉపయోగించడమే! జ్ఞాపకాల రీసైక్లింగ్!
+
+
+
+కానీ, 'మెమొరీ' కొంచెం వాసన వేస్తుంది; అది వస్తూనే ఉంటుంది. దాన్ని అలాగే చూడాలి! దాని నుండి కొంచెం దూరంగా రావాలి!
+
+
+
+ఇది ఎలాంటిదంటే - అనుకోండి, మీరు traffic jam లో చిక్కుకున్నారు; airport వెళ్తున్నారు, traffic jam లో చిక్కుకున్నారు - 'ఎంత' ఆందోళనగా, అసౌకర్యంగా అనిపిస్తోంది! సరే, ఎలాగైనా airport చేరుకుని విమానంలో ఎక్కి బయలుదేరారు.
+
+
+
+కింద traffic చాలా దారుణంగా jam. ఇప్పుడు పైన నుండి చూస్తే, "ఆహా, ఆ traffic jam ఎంత అందంగా ఉంది!" …  కేవలం కొంచెం దూరం ఉండడంవల్లే!
+
+
+
+ ఇప్పుడూ అదే traffic jam - కానీ దూరం ఉండడంవల్ల, ఒక్క క్షణంలో విషయం తేలిక అయిపోతుంది. అలాగే మీ ఆలోచన, భావాల విషయంలో కూడా!
+
+
+
+కొంచెం సాధనతో … కొంచెం దూరం వస్తుంది - మీ శారీరక ప్రక్రియ నుండి! మళ్ళీ మానసిక ప్రక్రియ నుండి కూడా!
+
+
+
+అది చేయకుండా ప్రతి ఆలోచన, భావాన్నీ సమాళించడానికి వెళ్తే, అవి వేయి రెట్లు అయిపోతాయి.
+
+
+
+
+3. రేపు ధ్యానం వదిలేయవచ్చు అని అనుకుంటే...
+
+
+
+సద్గురు: అందరూ పళ్ళు తోమారా?
+
+
+
+పాల్గొనేవారు: తోమాను.
+
+
+
+సద్గురు: మంచిది!
+
+
+
+మీరే తోమారు... లేదా మీ తల్లిదండ్రులు, భర్త, భార్య, లేదా వేరే ఎవరైనా ఒత్తిడి చేసి - "ఈరోజు పళ్ళు తోమాల్సిందే" - అని చెప్పారా?
+
+
+
+మీరే తోమారు!
+
+
+
+పాల్గొనేవారు: అవును.
+
+
+
+సద్గురు: ఓహ్! చాలా బాగుంది!
+
+
+
+కానీ మీకు గుర్తుందా, మీ జీవితంలో ఒక సమయంలో - ఇంత చిన్న వయసులో - మీ అమ్మ పట్టుబట్టి చెప్పేది "పళ్ళు తోమాల్సిందే. లేదంటే అల్పాహారం దొరకదు!"
+
+ఎన్ని రోజులు? - మూడు నెలలు, ఆరు నెలలు, లేదా ఒక సంవత్సరం!
+
+
+
+తర్వాత నుండి, మీరే తోముతున్నారు; రేపు మీ అమ్మ వచ్చి, "విను, పళ్ళు తోమడం నిజానికి తప్పు; దీనివల్ల ఏ లాభమూ లేదు; నేను మానేశాను; నువ్వూ మానేయి" - అంటే, మానేస్తారా?
+
+పాల్గొనేవారు: మానేయలేను.
+
+
+
+సద్గురు: ఎందుకు?
+
+
+
+ఎందుకంటే ఇప్పుడు మీరు 'దీని ప్రాముఖ్యత ఏమిటో, ఇది మీకు ఏం చేస్తుందో' - అది అర్థమైపోయింది.
+
+
+
+ఇప్పుడు ఇంకా ఎవరూ దీన్ని చేయమని ఒత్తిడి చేయాల్సిన అవసరం లేదు.
+
+
+
+దీని ప్రాముఖ్యత అర్థమయ్యే వరకు, ఎవరినైనా ఒత్తిడి చేసి చేయించాలి; దీని ప్రాముఖ్యత అర్థమైతే, ఇంకా ఎవరూ చెప్పాల్సిన అవసరమే లేదు, కదా? ఎందుకంటే, ఇప్పుడు - ఇది మీకు ఏం చేస్తుందో మీకు తెలిసిపోయింది; ఎవరైనా 'చేయకండి' అన్నా, మీరు చేస్తారు. అందువల్ల, ఈ దృఢత్వంతోనే ప్రారంభిద్దాం, సరేనా?
+
+
+
+
+4. ధ్యానం పని చేస్తుందా?
+
+
+
+సద్గురు:
+
+ఇది పని చేస్తుందా? …
+
+
+
+బహుశా ఎప్పుడూ …  శారీరక వ్యక్తీకరణలే చాలా నేరుగా అనుభవానికి వస్తాయి. కానీ ఇంకా చాలా వ్యక్తీకరణలు ఉన్నాయి ... శారీరక, మానసిక స్థితులకు వెలుపల కూడా ఇంకా చాలా వ్యక్తీకరణలు ఉన్నాయి.
+
+
+
+శారీరకంగా, మానసికంగా - ఏ సమూహంలోనైనా ఇది మిమ్మల్ని వేరుగా చూపిస్తుంది - మీరు ఈ సాధనకు తగినంతగా మిమ్మల్ని అర్పించుకుంటే!
+
+
+
+కానీ ఈ ప్రయోజనాలు, ఇవన్నీ … ఆరోగ్యపరంగా చూస్తే - చాలా ఆధునిక పరిశోధనలు చెప్తున్నాయి - ఇది మీకు అద్భుతంగా పని చేస్తుంది!
+
+
+
+కానీ ఇవన్నీ - శారీరక ఆరోగ్యం, మానసిక సామర్థ్యం, జీవితాన్ని సులభంగా ఎదుర్కోవడం - ఇవన్నీ కేవలం దుష్ప్రభావాలు మాత్రమే; అసలైన విషయం మెల్లగా రూపొందుతోంది. అది - వ్యక్తమైనప్పుడే మీకు తెలుస్తుంది. అంతకు ముందు ఏమీ జరగట్లేదని అనిపిస్తుంది.
+
+
+
+ఇది ఎలాంటిదంటే - మీ ఇంట్లో … ఒక పూల మొక్క నాటారు; అది పెరుగుతోంది - కేవలం ఆకులే వస్తున్నాయి!
+
+
+
+పక్కింటివారు మీకు చెప్తారు, "ఇందులో లాభం లేదు; పూలు అన్నారు, ఆకులే వస్తున్నాయి. కొట్టేయండి, కట్టెలకు ఉపయోగపడుతుంది."
+
+
+
+మీరు చెప్తారు, "వేచి చూద్దాం, బహుశా రేపు ఉదయం పూస్తాయి!"
+
+
+
+మర్నాడు ఉదయం ఏమీ రాలేదు.
+
+
+
+మళ్ళీ, "ఇంకో రోజు చూద్దాం" - ఇంకో రోజు, ఇంకో రోజు... ఇలా సంవత్సరాలు గడిచిపోతాయి; ఈ మొక్క పూయడానికి ఎంత కాలం పడుతుందో మీకు తెలియకపోతే, బహుశా వంద సార్లు కొట్టేసేవారు.
+
+
+
+కానీ దాన్ని పెంచుకుంటూ వెళ్తే - ఒక రోజు అది పూస్తుంది, పూలతో నిండిపోతుంది, అప్పుడు మీకు అర్థమవుతుంది - "ఈ మొక్క ఆకుల కోసం కాదు... ఇది నీడ కోసం కాదు... ఇది కొంచెం oxygen కోసం కూడా కాదు"!
+
+
+
+పూలు పూసినప్పుడు 'ఇది' చెప్పలేనంత అందంగా ఉంటుంది!
+
+
+
+
+5. ధ్యానం నిజంగా పని చేస్తుందా?
+
+
+
+ఇలా అనుకోకండి - ఈరోజు సాధన చేశారు, "ఓ నాకు ఏమీ జరగలేదు!" మర్నాడు సాధన చేశారు, "ఓ నాకు ఏమీ జరగలేదు!" ఏమీ జరగాల్సిన అవసరం లేదు, అర్థమైందా? కేవలం చేస్తూ ఉండటం! దీన్ని ఒక అర్పణగా చేయండి, అర్థమైందా?
+
+
+
+ఏమీ పొందాల్సిన అవసరం లేదు! జీవితం గడపడానికి ఇది మార్గం కాదు - "ఇది చేశాను, ఏం పొందుతాను? అది చేశాను, ఏం పొందుతాను?" - ఇది జీవించే మార్గం కాదు.
+
+
+
+"నాకు ఏం పొందుతాను?" - అని అనుకునేవారు జీవితాన్ని తెలుసుకోలేరు. మీకు 'ముఖ్యంగా అనిపించేది' ఏదైనా, దాన్ని చేస్తూ ఉండండి - కేవలం ఒక అర్పణగా! జరగాల్సింది జరుగుతుంది!
+
+
+
+కానీ మీరు చాలా goal-oriented అయిపోయారు - చెట్టు పెరగడానికి ముందే మీకు మామిడికాయలు కావాలి!
+
+
+
+లేదు! చెట్టును పెంచండి, దాన్ని పెంపొందించండి... మామిడికాయ మీ తలపై పడుతుంది - వద్దని అన్నా!
+
+
+
+Focus area 2: Length of the Telugu segments:
+
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+
+
+Gap threshold = minimum 20 %
+Relative density threshold - 1.1
+
+
+
+that means if the gap after the segment is less than 20% of the length of the segment, then that segment is flagged for gap threshold.
+that means if the Relative number of syllables per second is greater than 1.3 times the average number of syllables per second, then that segment is flagged for gap threshold.
+
+Now
+
+Gap threshold flagged, density threshold flagged
+
+Case 1:
+Gap threshold flagged, density threshold flagged
+Action:
+need heavy compressing. Express the main idea by cutting as many additional details as possible. Just convey the main point in short and crisp way. And add tags [fast][/fast] around the corresponding Telugu segment so that ElevenLabs will render this segment in fast pace.
+
+Case 2:
+Gap threshold flagged, density threshold not flagged
+Action:
+Here the aim is to achieve at least some level of shortening, so that the Telugu fits in - as there is no gap after this.
+
+Apply all the shortening approaches mentioned above
+
+also use below Shortening approaches as well:
+
+You have three additional tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (సంధి / Vowel Merging): Merge vowels and adjacent sounds where Telugu naturally permits it (e.g., "అది ఉంది" → "అదుంది"; "చేస్తున్నాను" → "చేస్తన్నాను"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+
+Samasa (సమాసం / Compound Nouns): Instead of "జీవితపు సంకేతాలు" (The signs of life), you use "జీవిత-సంకేతాలు". It sounds tighter and cuts the length significantly.
+
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+Verb Fusing / Contracted Forms: Use contracted spoken forms — "చేస్తున్నాను" → "చేస్తన్నాను"; "వెళ్తున్నాను" → "వెళ్తన్నాను"; "అయిపోయింది" → "అయ్యింది". It turns a concept into a single action and matches natural Telugu colloquial speech.
+
+
+
+make sure the real intention being conveyed is not diluted. this is high priority. You aren't "diluting" the Master's words; you are "distilling" them. that means you are not skipping details, you are adjusting the structure.
+- Reduce verbosity while preserving meaning.
+- use context from previous and next segments
+- avoid repeating ideas already stated nearby
+- Do not remove key philosophical or logical meaning, Prefer simplifying structure over dropping whole concepts altogether.
+
+You should check if the segments tagged for shortening are able to be pronounced within The total time available for the dubbing segment. One way to check is the number of Akṣaras (syllabic units) in the Telugu segment must be almost same as the number of English syllables. For example, in ప్రక్రియ there are three syllabic units ప్ర, క్రి, and య.
+
+
+Case 3:
+Gap threshold not flagged, density threshold flagged
+Action:
+Make the Telugu crisp without losing any details.
+
+
+Case 4:
+Gap threshold not flagged, density threshold not flagged
+- no need to shorten
+
+
+
+
+Secondary: check if the segments can be spoken in the time in general, if any Telugu segment contains relatively large number of words or lengthy words compared to corresponding English segment, shorten them also.
+
+
+
+Additional requirement:
+
+if the original audio includes the promo part (few sentences from the talk shown at the start of the video to create interest in the viewer) then, Both the scripts should also include the promo part at the beginning.
+
+
+Also, if you have to truncate the output because mention that also at the beginning. and then give the actual translation asked above.
+
+Below is the formatted English script :

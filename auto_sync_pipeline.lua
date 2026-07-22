@@ -23,6 +23,15 @@
 --   Select this file, then Run
 -- ============================================================
 
+-- Dual-mode (v0.5): normally this file is a standalone REAPER action with
+-- its own window. The dubbing panel dofile()s it with __FASTSYNC_EMBED set,
+-- which turns it into a MODULE: no window/context/defer/ClearConsole of its
+-- own — it returns a table whose render()/poll() the dub panel drives inside
+-- its "Auto Sync" tab, sharing the dub panel's ImGui context. Because it is
+-- dofile'd, this whole file is its own Lua chunk with a fresh 200-local
+-- budget (the dub panel is already at that limit).
+local EMBED = (rawget(_G, "__FASTSYNC_EMBED") == true)
+
 -- ── DEFAULT SETTINGS  (dialog lets you change these) ─────
 local TRACK_VO_NAME    = "Dialogue VO"
 local TRACK_DUB_NAME   = "Dub"
@@ -590,7 +599,7 @@ end
 -- ═══════════════════════════════════════════════════════════
 
 local function log(msg)
-  reaper.ShowConsoleMsg(msg .. "\n")
+  if not EMBED then reaper.ShowConsoleMsg(msg .. "\n") end
   log_append(msg)   -- mirror into the GUI Logs tab
 end
 
@@ -745,6 +754,50 @@ local function find_python()
   return nil
 end
 
+-- Open a setup/update script in a visible terminal WITHOUT relying on macOS
+-- AppleEvents. The old `osascript -e 'tell application "Terminal"...'` route
+-- needs Automation permission (REAPER → Terminal); when that was never
+-- granted — or was denied — the call fails SILENTLY and the button looks
+-- dead. That was the #1 "Update/Setup does nothing" report on macOS.
+--   macOS: write a .command wrapper to the temp dir and `open` it. `open`
+--          needs no special permission, and a locally-written file carries
+--          no Gatekeeper quarantine, so it just runs in Terminal.
+--   Windows: `start "" "<script>"` runs the .bat in a NEW console that stays
+--          up (our .bat scripts end with `pause`). Empty title so a path
+--          with spaces (…/fast syncs/…) is treated as the program, not the
+--          window title. This replaces the fragile nested-quote `cmd /k`.
+-- Returns the shell command actually run (shown as a manual fallback).
+local function _spawn_terminal_script(script_path, extra_args)
+  extra_args = (extra_args and extra_args ~= "") and (" " .. extra_args) or ""
+  if _is_windows() then
+    local cmd = 'start "" "' .. script_path .. '"' .. extra_args
+    os.execute(cmd)
+    return cmd
+  end
+  local osname = reaper.GetOS() or ""
+  local opener = (osname:match("OSX") or osname:match("[Mm]ac")) and "open"
+                 or "xdg-open"
+  local tmp = (os.getenv("TMPDIR") or "/tmp"):gsub("/+$", "")
+  local tag = (script_path:match("([^/\\]+)$") or "run"):gsub("[^%w%-_.]", "_")
+  local wrapper = tmp .. "/fs_" .. tag .. ".command"
+  local dir = script_path:match("^(.*)[/\\][^/\\]*$") or "."
+  local f = io.open(wrapper, "wb")
+  if f then
+    f:write("#!/bin/bash\n")
+    f:write('cd "' .. dir .. '"\n')
+    f:write('bash "' .. script_path .. '"' .. extra_args .. "\n")
+    f:write('status=$?\n')
+    f:write('echo; echo "[Finished (exit $status) — press Return to close.]"; read _\n')
+    f:close()
+    os.execute('chmod +x "' .. wrapper .. '"')
+    os.execute(opener .. ' "' .. wrapper .. '"')
+    return opener .. ' "' .. wrapper .. '"'
+  end
+  -- Fallback: open the script directly (may open in an editor on some setups).
+  os.execute(opener .. ' "' .. script_path .. '"')
+  return opener .. ' "' .. script_path .. '"'
+end
+
 -- Run setup.sh if the local venv is missing (first-time install for a new user).
 local function ensure_setup()
   local script_dir = get_script_dir()
@@ -760,72 +813,44 @@ local function ensure_setup()
     "Auto Sync Pipeline — Setup", 1)
   if choice ~= 1 then return false end
 
-  if _is_windows() then
-    local setup_bat = script_dir .. "\\setup.bat"
-    if not file_exists(setup_bat) then
-      reaper.MB("setup.bat missing — please run it manually:\n\n" ..
-                "  double-click setup.bat in:\n  " .. script_dir,
-                "Setup script not found", 0)
-      return false
-    end
-    reaper.MB("Setup will open in a new window. When it says 'Setup complete', " ..
-              "close it and run this script again.", "Setup running", 0)
-    -- If this install was made with --direct, rebuild it the same way
-    -- (setup.bat --direct writes the .direct-mode marker).
-    local extra = file_exists(script_dir .. "\\.direct-mode") and " --direct" or ""
-    -- start "<title>" cmd /k "<bat>"  → opens a console that stays up so the
-    -- user can read progress/errors (setup.bat ends with pause too).
-    os.execute('start "fast-syncs setup" cmd /k "\"' .. setup_bat .. '\"' ..
-               extra .. '"')
-    return false
-  end
-
-  local setup_sh = script_dir .. "/setup.sh"
-  if not file_exists(setup_sh) then
-    reaper.MB("setup.sh missing — please run it manually:\n\n" ..
-              "  cd \"" .. script_dir .. "\"\n  bash setup.sh",
+  local setup = script_dir .. (_is_windows() and "\\setup.bat" or "/setup.sh")
+  if not file_exists(setup) then
+    reaper.MB("Setup script missing — run it manually:\n\n  " ..
+              (_is_windows() and ("double-click setup.bat in:\n  " .. script_dir)
+                              or ('cd "' .. script_dir .. '"\n  bash setup.sh')),
               "Setup script not found", 0)
     return false
   end
-  reaper.MB("Setup is running in Terminal. Once it finishes, click OK to continue.",
+  -- Rebuild --direct installs the same way (setup writes the .direct-mode marker).
+  local direct = file_exists(script_dir .. (_is_windows() and "\\.direct-mode"
+                                                            or "/.direct-mode"))
+  local cmd = _spawn_terminal_script(setup, direct and "--direct" or "")
+  reaper.MB("Setup is opening in a new terminal window.\n\n" ..
+            "When it says 'Setup complete', close it and run this script " ..
+            "again.\n\nIf no window appeared, run this manually:\n  " .. cmd,
             "Setup running", 0)
-  local extra = file_exists(script_dir .. "/.direct-mode") and " --direct" or ""
-  os.execute('osascript -e \'tell application "Terminal" to do script "bash \\"' ..
-             setup_sh .. '\\"' .. extra .. '"\'')
-  -- We can't easily wait for the Terminal session to finish; tell user to retry.
-  reaper.MB("After setup completes in the Terminal window, run this script again.",
-            "Re-run after setup", 0)
   return false
 end
 
--- Launch update.bat / update.sh in a terminal window (same pattern as
--- ensure_setup). Pulls the latest version (git) or downloads the latest
--- ZIP from GitHub, then refreshes the venv. User re-runs the script after.
+-- Launch update.bat / update.sh in a terminal window. Pulls the latest
+-- version (git) or downloads the latest ZIP from GitHub, then refreshes the
+-- venv. User re-runs the script after.
 local function run_updater()
   local script_dir = get_script_dir()
-  if _is_windows() then
-    local bat = script_dir .. "\\update.bat"
-    if not file_exists(bat) then
-      reaper.MB("update.bat is missing from:\n  " .. script_dir ..
-                "\n\nRe-download the project from GitHub to update.",
-                "Updater not found", 0)
-      return
-    end
-    os.execute('start "fast-syncs update" cmd /k "\"' .. bat .. '\""')
-  else
-    local sh = script_dir .. "/update.sh"
-    if not file_exists(sh) then
-      reaper.MB("update.sh is missing from:\n  " .. script_dir ..
-                "\n\nRe-download the project from GitHub to update.",
-                "Updater not found", 0)
-      return
-    end
-    os.execute('osascript -e \'tell application "Terminal" to do script "bash \\"' ..
-               sh .. '\\""\'')
+  local updater = script_dir .. (_is_windows() and "\\update.bat" or "/update.sh")
+  if not file_exists(updater) then
+    reaper.MB((_is_windows() and "update.bat" or "update.sh") ..
+              " is missing from:\n  " .. script_dir ..
+              "\n\nRe-download the project from GitHub to update.",
+              "Updater not found", 0)
+    return
   end
-  reaper.MB("The updater is running in a separate window.\n\n" ..
-            "When it says 'Update complete', close this window and run the " ..
-            "script again to load the new version.", "Updating", 0)
+  local cmd = _spawn_terminal_script(updater)
+  reaper.MB("The updater is opening in a separate terminal window.\n\n" ..
+            "When it says 'Update complete', close it and run the script " ..
+            "again to load the new version.\n\nIf no window appeared, run " ..
+            "this manually:\n  " .. cmd,
+            "Updating", 0)
 end
 
 
@@ -1370,6 +1395,43 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
       'Get the latest version (runs update.bat / update.sh in a terminal).')
   end
 
+  -- Bundled dubbing app (dubbing/): register its panel as an action on
+  -- first click, then run it. Ships with Update... — see dubbing/README.md.
+  -- Hidden when EMBED: we are already INSIDE the dub panel's Auto Sync tab,
+  -- so opening the dub panel again would be circular.
+  if not EMBED then
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, 'Dubbing...') then
+    local psep = package.config:sub(1, 1)
+    local panel = get_script_dir() .. psep .. "dubbing" .. psep .. "reaper"
+                  .. psep .. "Dub_Pipeline_Panel.lua"
+    if not file_exists(panel) then
+      reaper.MB("Dubbing panel not found at:\n  " .. panel ..
+                "\n\nClick Update... first — the dubbing app ships with " ..
+                "the latest fast-syncs version.",
+                "Dubbing app not installed", 0)
+    elseif not reaper.AddRemoveReaScript then
+      reaper.MB("This REAPER is too old for automatic action " ..
+                "registration.\nLoad it manually: Actions → Show action " ..
+                "list → New action → Load ReaScript...\n  " .. panel,
+                "Dubbing", 0)
+    else
+      local dubcmd = reaper.AddRemoveReaScript(true, 0, panel, true)
+      if dubcmd and dubcmd ~= 0 then
+        reaper.Main_OnCommand(dubcmd, 0)
+      else
+        reaper.MB("Could not register the dubbing panel script:\n  " ..
+                  panel, "Dubbing", 0)
+      end
+    end
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      'Open the Dub Pipeline panel — translate, TTS and time-sync a ' ..
+      'voice recording (bundled dubbing/ app).')
+  end
+  end
+
   reaper.ImGui_PopStyleVar(ctx, 4)
 end
 
@@ -1627,7 +1689,7 @@ local function poll_python_step()
       local new_text = content:sub(_poll_last_size + 1)
       for line in new_text:gmatch("([^\n]*)\n?") do
         if line and line ~= "" then
-          reaper.ShowConsoleMsg("  " .. line .. "\n")
+          if not EMBED then reaper.ShowConsoleMsg("  " .. line .. "\n") end
           log_append("  " .. line)
           if line:find("STEP 1", 1, true) then
             _ui_step_idx = math.max(_ui_step_idx, 1); _poll_step_phase = 1
@@ -1678,7 +1740,7 @@ local function poll_python_step()
         if final and #final > _poll_last_size then
           for line in final:sub(_poll_last_size + 1):gmatch("([^\n]*)\n?") do
             if line and line ~= "" then
-              reaper.ShowConsoleMsg("  " .. line .. "\n")
+              if not EMBED then reaper.ShowConsoleMsg("  " .. line .. "\n") end
               log_append("  " .. line)
             end
           end
@@ -1737,7 +1799,9 @@ local function start_sync_run()
   ui_clear_banner()
   _apply_conn_mode()   -- ensure API_BASE / GEMINI_BACKEND match the chosen mode
   save_settings()
-  reaper.ClearConsole()
+  -- Embedded: don't wipe the shared REAPER console (the dub panel and the
+  -- user may be relying on it). The run's own log lives in _log_buffer.
+  if not EMBED then reaper.ClearConsole() end
   _log_buffer = {}
 
   -- ── Auto-detect Python ────────────────────────────────
@@ -1896,6 +1960,26 @@ end
 -- MAIN — single ReaImGui frame loop drives all phases
 -- ═══════════════════════════════════════════════════════════
 
+-- Render whichever phase is active into `ctx`. Shared by the standalone
+-- window (main's frame) and the embedded "Auto Sync" tab in the dub panel.
+-- `on_close` fires from the setup Cancel and the success/failure Close
+-- buttons (standalone → closes the window; embedded → closes the dub panel).
+-- The running phase owns its own Cancel button (→ cancel_python), so it
+-- takes no on_close.
+local function render_active_phase(ctx, on_close)
+  on_close = on_close or function() end
+  if _ui_phase == "setup" then
+    ui_phase_setup(ctx, start_sync_run, on_close)
+  elseif _ui_phase == "running" then
+    local elapsed = os.time() - _poll_start_time
+    ui_phase_running(ctx, elapsed)
+  elseif _ui_phase == "success" then
+    ui_phase_success(ctx, on_close)
+  elseif _ui_phase == "failure" then
+    ui_phase_failure(ctx, on_close)
+  end
+end
+
 local function main()
   -- ReaImGui is required. Show a one-time install prompt and exit if missing.
   if not imgui_available() then
@@ -2005,17 +2089,10 @@ local function main()
     local visible, open = reaper.ImGui_Begin(_ui_ctx, 'Auto Sync Pipeline',
       true, reaper.ImGui_WindowFlags_NoCollapse())
     if visible then
-      if _ui_phase == "setup" then
-        ui_phase_setup(_ui_ctx, function() start_sync_run() end, close_window)
-      elseif _ui_phase == "running" then
+      if _ui_phase == "running" then
         poll_python_step()   -- refresh log/progress before rendering
-        local elapsed = os.time() - _poll_start_time
-        ui_phase_running(_ui_ctx, elapsed)
-      elseif _ui_phase == "success" then
-        ui_phase_success(_ui_ctx, close_window)
-      elseif _ui_phase == "failure" then
-        ui_phase_failure(_ui_ctx, close_window)
       end
+      render_active_phase(_ui_ctx, close_window)
     end
     reaper.ImGui_End(_ui_ctx)   -- always paired with Begin()
     _ui_window_open = _ui_window_open and open
@@ -2029,4 +2106,18 @@ local function main()
   reaper.defer(frame)
 end
 
-reaper.defer(main)
+if EMBED then
+  -- Module for the dubbing panel's "Auto Sync" tab. It shares the dub
+  -- panel's ImGui context (passed to render each frame); it never creates a
+  -- window, context, font, or defer loop of its own. Settings were already
+  -- loaded above (load_settings at file load). poll() must run every frame
+  -- so a sync run keeps progressing even when another tab is showing.
+  return {
+    render = function(ctx, on_close) render_active_phase(ctx, on_close) end,
+    poll   = function() if _ui_phase == "running" then poll_python_step() end end,
+    is_running = function() return _ui_phase == "running" end,
+    reload_settings = function() load_settings() end,
+  }
+else
+  reaper.defer(main)
+end

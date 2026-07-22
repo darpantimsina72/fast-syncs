@@ -1,0 +1,16 @@
+# Reaper Dubbing App — engine dependencies (contract v0.3).
+# Install into the project-local venv:  python3 -m venv venv && venv/bin/pip install -r requirements.txt
+# Nothing UI-related belongs here (no tkinter/matplotlib/sounddevice/opencv).
+numpy
+librosa
+pydub
+google-genai
+google-cloud-texttospeech
+google-auth
+pyphen
+
+# Optional: SpaCy enables meaningful-chunk splitting of the English sync SRT
+# (better subtitle boundaries). The pipeline runs fine without it — regions
+# are then used unsplit. To enable:
+#   pip install spacy && python -m spacy download en_core_web_sm
+# spacy

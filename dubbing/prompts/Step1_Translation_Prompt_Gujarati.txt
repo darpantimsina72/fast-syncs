@@ -1,0 +1,1236 @@
+### Target language: Gujarati (ગુજરાતી)
+### Register: modern spoken Gujarati (બોલચાલની ભાષા), not literary
+### NOTE FROM PIPELINE: This prompt is fully localized for Gujarati.
+### Structural rules (pause handling with `...`, hyphen `-` usage,
+### paragraph breaks, thought-unit mapping) apply UNCHANGED to Gujarati.
+### All examples below are in Gujarati's native script.
+### Gujarati uses the Western full-stop `.` for sentence boundaries
+### (NOT the daṛi `।`).
+
+The goal is to generate a Gujarati (ગુજરાતી) dubbing script for the English talk given by Sadhguru (Including any other speakers who question or converse with him). The SRT file text will be given at the bottom.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+
+The SRT Temporal Blueprint: Mapping Threads to Pulses
+
+Instead of a plain transcript, you are receiving an SRT file. This file acts as the absolute structural blueprint for the dubbing script. Think of the SRT timestamps as the rigid framework of the loom.
+
+On-Signals (Spoken Pulses / Containers): The actual text block within a subtitle timestamp. This is continuous speech.
+
+Off-Signals (Silence Gaps / Spaces): The time gap between the end timestamp of one subtitle and the start timestamp of the next. This is a physical pause.
+
+CRITICAL RULE: The temporal blueprint overrides grammatical intuition. You must map the White Threads (thought units) onto these pulses and dictate the placement of your Green Threads (punctuation) strictly based on the On/Off signals, handling the mapping in the following ways:
+
+Before assessing case 1 or 2 or 3, first you must analyze and create the groups of subtitles, so that each group denotes one meaningful chunk or one thought unit of a complete thought.
+
+
+Case 1: One thought unit stretched across multiple pulses (e.g., 1 meaningful chunk or thought unit spoken over 3 subtitles):
+Do not smooth this out. You must weave a Green Thread (specifically the ... indicating a pause) exactly where the temporal gap occurs between the subtitles, even if it awkwardly breaks a Gujarati clause in half. The pause must reflect the speaker's hesitation or deliberate pacing.
+
+Note that, only in this case, you can re arrange the sequence of these non-meaningful words/phrases that are building blocks of the meaningful chunk or a thought unit that was spread across multiple pulses, so that the thought unit or the meaningful chunk is formed in a natural way. Here still the pulses are separated by ... but they are resequenced to form a natural flow to form the meaningful chunk or thought unit.
+
+This applies only inside of a meaningful chunk/thought unit. The sequence of the meaningful chunks and thought units that form a complete thought remains same.
+In short, The "Holistic Mapping" Rule for case 1:
+When one thought unit or meaningful chunk is stretched across multiple pulses (pulses separated by ...), do not translate pulse-by-pulse. Instead:
+
+Synthesize: First, translate the entire English thought unit into a natural, complete Gujarati sentence or clause.
+
+Distribute: Take that complete Gujarati translation and "pour" it into the available pulse containers (the SRT timestamps).
+
+Fragment Naturally: When distributing the Gujarati text across pulses, ensure that the text within each pulse forms a natural phonetic chunk (a phrase or sub-part) in Gujarati.
+
+Transposition: Since Gujarati is a Subject-Object-Verb (SOV) language and English is SVO, you must rearrange the words across the ... markers so the verb lands in the appropriate pulse for the Gujarati flow, while ensuring the overall meaning matches the duration of the total pulses used.
+
+The "Bridge" Principle: Each segment between the ... should feel like a natural "breath" or a logical sub-component of the thought, not a random collection of words.
+
+Example of how to handle the "broken" input:
+
+English Pulses: the worship of the ... divine ... in the feminine form ... was hugely prevalent
+
+Wrong (Literal): એની ઉપાસના ... ઈશ્વરની ... સ્ત્રી રૂપે ... ખૂબ પ્રચલિત હતી (This feels broken).
+
+Correct (Mapped): ઈશ્વરની ... સ્ત્રી રૂપે ... ઉપાસના કરવી ... ખૂબ પ્રચલિત હતી (Each pulse now contains a logical Gujarati phrase that builds toward the meaningful chunk/thought unit/conclusion).
+
+
+Case 2: Multiple thought units compressed into one pulse (e.g., 2-3 short sentences spoken rapidly in 1 subtitle):
+If the SRT shows continuous speech with no off-signal gaps, do not inject ... pauses just because the grammar suggests a new sentence. Translate the White Threads to flow rapidly together, using commas (,) in-between thought units and ; between different thoughts to maintain continuous structural phrasing to match the unbroken momentum of the speaker.
+
+Case 3: Overlapping boundaries (e.g., a pulse contains the end of thought A and the start of thought B):
+Translate the transition naturally with appropriate boundary punctuation, but reserve your heavy pause punctuation (... or -) only for where the actual SRT gap (Off-Signal) occurs.
+
+
+
+
+Now lets understand the requirement by an analogy.
+
+
+
+Its like weaving an art piece.
+
+
+
+The actual content itself is the white thread.
+
+The punctuation marks are the threads with green shades.
+
+… are the threads with pink shade.
+
+The paragraphs breaks are the threads with orange shades.
+
+The contextually perfect Gujarati word choice is the thread of blue shades.
+
+The things that are not to be done are the red threads.
+
+
+
+Now as you start weaving the dubbing script you should carefully weave these color threads at appropriate places as per the instructions given below.
+
+
+
+Below is the information regarding the White threads:
+
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+“Life is not a problem to be solved…
+
+it is a reality to be experienced.”
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction (“No…”)
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels “broken”.
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+“Do you want peace?
+
+Or do you want to control everything?”
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts can be changed to create the sub part in a meaningful way. the subparts remain in the same order.
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of ‘Color A’ when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of ‘Color B’ when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid. these are joined with …
+
+Now the ‘Color A’ set and the ‘Color B’ set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+
+
+In short: Each individual piece that can be identified as a separate part or sub part is the white thread.
+
+
+
+To the extent possible make sure these pieces occur in the same sequence especially the meaningful chunks (made up of sub parts and internal parts)
+
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the coloured sections remain, the pieces of the same color that forms that colored section within can be rearranged.
+
+
+Below is the information regarding the green threads:
+
+now as we weave the white threads to form the sentences, we want to weave in the green threads (punctuation marks) as per the below rules.
+
+
+
+… indicates a pause in between the parts that makes a meaningful chunk or a clause.
+
+, indicates a pause between meaningful chunks that make up the sentence.
+
+; indicates connected sentences.
+
+Hyphen (-) indicates additional information related to the main idea of the sentence.
+
+
+
+
+we connect building parts with … to make up the internal part.
+
+we connect the internal parts with - to make up the subpart.
+
+we connect the subparts with ; to make up the body part.
+
+
+
+for example, the punctuation marks should be weaved like this:
+
+building part …  building part (one internal part)- another internal part - one more internal part; internal part - building part …  building part (another internal part);
+
+internal part -  building part …  building part (one internal part)
+
+subpart; subpart; internal part - internal part; building part…building part…building part; subpart
+
+
+
+
+Placing (-):
+
+  To Set Off Parenthetical Information:
+
+  Example: This is a very important point - one that you shouldn't forget.
+
+ Gujarati: આ ખૂબ જ મહત્વનો મુદ્દો છે - જે તમારે ભૂલવો ન જોઈએ.
+
+
+
+  Example: The students - all 35 of them - were excited for the field trip.
+
+  Gujarati: વિદ્યાર્થીઓ - બધા 35 જણ - ફિલ્ડ ટ્રીપ માટે ઉત્સાહિત હતા.
+
+
+
+ To Introduce a List:
+
+    Example: She bought many things - clothes, shoes, and accessories.
+
+Gujarati: એણે ઘણી વસ્તુઓ ખરીદી - કપડાં, જૂતાં, અને બીજો સામાન.
+
+
+
+
+   To Introduce an additional Explanation after completion of one thought:
+
+    Example: The reason for the delay - traffic congestion - was unavoidable.
+
+Gujarati: મોડું થવાનું કારણ - ટ્રાફિક જામ - ટાળી શકાય એમ નહોતું.
+
+
+
+    Example: He is my uncle - who is a 7 feet tall man.
+
+Gujarati: એ મારા કાકા છે - સાત ફૂટ ઊંચા માણસ.
+
+
+
+
+ Example: Today is Sunday - which is a holiday.
+
+Gujarati: આજે રવિવાર છે - એટલે રજાનો દિવસ.
+
+
+
+    To Indicate an Abrupt Break or Change in Thought:
+
+    Example: I was about to leave - wait, there's someone at the door.
+
+Gujarati: હું નીકળવાનો જ હતો - ઊભા રહો, બારણે કોઈક આવ્યું છે.
+
+
+
+
+To separate inserted thoughts that need a new modulation.
+
+
+
+Pattern: Main sentence - inserted phrase - continuation of the main sentence.
+
+
+
+    Example: The most important thing - and I can't stress this enough - is to be yourself.
+
+Gujarati: સૌથી મહત્વની વાત - જેટલું ભાર દઈને કહું એટલું ઓછું પડે - પોતાના જેવા જ રહેવું.
+
+
+
+Example: After 100 years - only in 2010, I think - they figured it out... that this theorem describes the black holes... in the universe.
+
+Gujarati: 100 વર્ષ પછી - કદાચ 2010 માં મને લાગે છે - એમણે આ શોધી કાઢ્યું... કે આ સિદ્ધાંત બ્રહ્માંડના કૃષ્ણવિવરોને વર્ણવે છે.
+
+
+
+To separate totally different details within a sentence.
+
+Pattern: Main Sentence - detail 1 - detail 2 - continuation of main sentence.
+
+Example: I must tell you this -  two, about maybe three, four years ago - a young woman of 33 or 34 years of age - in a city called Hyderabad in Southern India -  she was a television anchor - one day she did this thing.
+
+Gujarati : મારે તમને આ કહેવું જ જોઈએ - લગભગ બે, ત્રણ કે ચાર વર્ષ પહેલાં - 33 કે 34 વર્ષની એક યુવતી - દક્ષિણ ભારતના હૈદરાબાદ નામના શહેરમાં - એ ટેલિવિઝન એન્કર હતી - એક દિવસ એણે આ કામ કર્યું.
+
+In below situation:
+
+When a phrase completes, clarifies, justifies, or defines a key concept or item mentioned immediately before it, so that it indicates change in tone.
+
+replace the punctuation before that phrase with a hyphen ( - ).
+
+Example: so in urban areas it may not matter -  because you have insurance and this and that.
+
+Gujarati : એટલે શહેરી વિસ્તારોમાં કદાચ આ મોટી વાત નથી - કારણ કે તમારી પાસે ઇન્સ્યોરન્સ છે, આ છે, તે છે, બધું છે.
+
+
+
+Use ( - ) specifically when The phrase reveals the actual components of a previously stated category to ensure that the tone would land and conclude the meaning, not continue a list.
+
+Example: “two things — your body and your mind”
+
+Gujarati : બે વસ્તુ - તમારું શરીર, તમારું મન.
+
+
+
+
+Below is the information regarding the Pink threads:
+
+
+… should not occur in the text that belong to one single pulse. Even though grammatically it makes sense. Even though there are multiple thought units/phrases/sentences in it. because each pulse is a continuous speech, we don't want the gap in between the continuous pulse.
+
+… only to be placed when there is a pause in between pulses that make up a single thought unit or clause or sentence.
+
+
+
+Below is the information regarding the orange threads:
+
+
+
+Each orange thread is the paragraph break that happens in the dubbing script.
+
+Below are the rules where to weave in the orange thread.
+
+
+
+
+
+When the subject changes (e.g., from speaking about 'Nature' to 'Humans')
+
+When the focus moves from one concept to a completely new idea.
+
+Switch from Description to Reason
+
+Switch from one Context to another.
+
+Switch from Positive to Negative contrast
+
+Split the Question from its Answer.
+
+Before a quoted thought or dialogue starts.
+
+When a sentence structure repeats with a different subject.
+
+When the speaker or the person being quoted changes.
+
+When it changes from a core subject to its explanation using an example, illustration, or analogy.
+
+
+
+
+
+And the sentences that occur within one para can be made into one continuous paragraph. no need to keep them as separate lines within the paragraph.
+
+Example:
+
+આપણે રામરાજ્યની વાત કરીએ છીએ... કારણ કે -
+
+રામરાજ્ય એટલે... માત્ર એક મહાન શાસન નહીં;
+
+એ... ન્યાય, ધર્મ, નિઃસ્વાર્થતાનું એક પ્રતિબિંબ છે.
+
+
+
+in the above it is one paragraph, but it is three lines in a paragraph. the linebreaks within the paragraph can be removed and it can be made into continuous sentences for ease of reading as shown below:
+
+આપણે રામરાજ્યની વાત કરીએ છીએ... કારણ કે - રામરાજ્ય એટલે... માત્ર એક મહાન શાસન નહીં; એ... ન્યાય, ધર્મ, નિઃસ્વાર્થતાનું એક પ્રતિબિંબ છે.
+
+
+
+
+CRITICAL FORMATTING RULE: Continuous Text Blocks
+
+
+
+No Soft Breaks: Do not use line breaks or newlines within a paragraph for visual formatting.
+
+
+
+Single Line Constraint: Each paragraph block must be rendered as one single, continuous line of text.
+
+
+
+Separation: Use a double line break only between different paragraphs.
+
+
+
+
+
+
+
+Below is the information regarding the blue threads:
+
+
+
+There are the points where you have to identify the actual contextually best Gujarati word or phrase; and identify the actual intention of sadhguru behind those words spoken by him. There are the places where literal word based translation fails. and you have to think deep and pick the appropriate Gujarati expression that conveys the actual contextual point and intention.
+
+
+
+
+
+
+
+Need 1: Polishing the Script into a day to day spoken style:
+
+
+
+    Scenario 1.
+
+    In Gujarati the translations for a, an and the are not needed - unless in specific cases.
+
+
+
+
+
+
+
+    Scenario 2.
+
+    In Gujarati in many cases, an explicit pronoun can be dropped when context makes it clear, since the verb form or topic continuity carries the subject.
+
+
+
+
+    Scenario 3: Preferred word pairs
+
+    Dimension - પરિમાણ
+
+    You know - ખબર છે ને..
+
+    Life - જીવન
+
+    People - લોકો / માણસો
+
+    Intense - તીવ્રતા
+
+    Lifetime - જન્મ
+
+    essentially - મૂળભૂત રીતે
+
+    intense - તીવ્રતા (not પ્રચંડતા in this context)
+
+    isn’t it? - નહીં?
+
+
+
+
+Scenario 4:
+
+This applies only to the segments that are lengthy in Gujarati. In English, the segment is spoken with fewer words, but in Gujarati, the written style contains more words which will exceed the time of the English segment. Mainly in such cases, we try to make the segment short by combining the words like we combine while talking (colloquial style). And in some cases, even though the words are more, Sadhguru speaks them fast. In such cases also shortening is needed. By analyzing the audio, please shorten the segments as and when necessary.
+
+
+
+CRITICAL: Remember we are not removing any segment, example, or list - we are trying to make it short by expressing the exact same content in fewer words / shorter syllables.
+
+
+
+
+
+    Example 1:
+
+    Fast spoken English segment: I'm not saying these things are wrong.
+
+    Gujarati Lengthy sentence: હું એમ નથી કહેતો કે આ બધું ખોટું છે.
+
+    Gujarati Shortened Sentence: આ ખોટું છે એમ નથી કહેતો.
+
+
+
+
+    Example 2:
+
+    Fast spoken English segment: Not some fanciful thing that I want to do or you want to do.
+
+    Gujarati Lengthy sentence: એવી કોઈ કાલ્પનિક વાત નથી જે હું કરવા માગું છું કે તમે કરવા માગો છો.
+
+    Gujarati Shortened Sentence: મારી કે તમારી કરવાની કોઈ કાલ્પનિક વાત નથી.
+
+
+
+
+
+
+    Example 3:
+
+    Fast spoken English segment: There are many others who would like to be you. 'Oh, I wish I was 20 and I wish I could think what to do.
+
+    Gujarati Lengthy sentence: 'આહા, 20 વર્ષની ઉંમરે શું કરવું એ વિચારી શક્યો હોત તો કેટલું સારું થાત. એ સમયે હું કંઈક કરી જ નાખત.' - એવું વિચારનાર માણસો અહીં ઘણા છે.
+
+    Gujarati Shortened Sentence: 'આહા, 20-એ શું કરવું વિચારી શકાત તો સારું થાત. ત્યારે જ કંઈક કરી નાખત.' - એમ વિચારનારા ઘણા છે અહીં.
+
+
+
+
+  Scenario 5:
+
+    Aspect: Missing Detail
+
+    English: So you must fix yourself, you must engineer yourself the way you think is the best way to be for a human being;
+
+    Basic Translation: એટલે - માણસ તરીકે રહેવાની શ્રેષ્ઠ રીત જે છે, એ રીતે જ પોતાને ઘડવો પડશે;
+
+    Optimized Translation: એટલે - માણસ તરીકે રહેવાની શ્રેષ્ઠ રીત જે લાગે, એ રીતે જ પોતાને ઘડી-પીટીને તૈયાર કરવો પડશે;
+
+    Details of optimization: ‘લાગે’ is the detail for ‘you think is’
+
+
+
+
+
+
+
+
+  Scenario 6:
+
+    Aspect: Thought Flow
+
+
+
+    English:
+
+    Living strong means your level of experience is intense and enormous.
+
+
+
+    Your level of experience will become enormous - only when your level of attention is absolute.
+
+    Basic Translation:
+
+     મજબૂત રીતે જીવવું એટલે - તમારી અનુભૂતિનું સ્તર તીવ્ર અને વિશાળ હોવું.
+
+
+
+    જ્યારે તમારું ધ્યાન સંપૂર્ણ થશે, ત્યારે જ તમારી અનુભૂતિનું સ્તર પણ વિશાળ થશે.
+
+
+
+    Optimized Translation:
+
+    મજબૂત રીતે જીવવું એટલે - તમારી અનુભૂતિનું સ્તર તીક્ષ્ણ અને વિશાળ હોવું.
+
+
+
+    તમારી અનુભૂતિનું સ્તર વિશાળ બને છે, ત્યારે જ - જ્યારે તમારું ધ્યાન સંપૂર્ણ હોય!
+
+    Details of optimization:
+
+    Let us take these two sentences as A and B.  'The enormity of experience’ is in the ending portion of A  and is in the beginning portion of B. Thus ensuring a smooth flow of thoughts and connectivity.
+
+
+
+
+Scenario 7:
+
+   Aspect:  Exact detail without deviation
+
+
+
+    English:
+
+    Though I am known to be a yogi - very analytical and logical - essentially, I have always lived my life as a devotee.
+
+    Basic Translation:
+
+    બધા મને ખૂબ વિશ્લેષણાત્મક, તાર્કિક યોગી માને છે, પણ સાચું કહું તો હું હંમેશા એક ભક્ત તરીકે જ મારું જીવન જીવ્યો છું.
+
+    Optimized Translation:
+
+    બધા મને ખૂબ વિશ્લેષણાત્મક, તાર્કિક યોગી તરીકે જોતા હોવા છતાં, મૂળભૂત રીતે, હું હંમેશા એક ભક્ત તરીકે જ મારું જીવન જીવ્યો છું.
+
+    Details of optimization:
+
+    ‘માને છે’ is a slight deviation from what is said. ‘જોતા હોવા છતાં’ is closer to the actual detail ‘known to be’ in English.
+
+
+
+    ‘સાચું કહું તો’ conveys contradiction. ‘મૂળભૂત રીતે’ conveys different levels of things - this is for the word ‘essentially’.
+
+
+
+
+Scenario 8:
+
+
+
+    Aspect:  Modulation Cues
+
+
+
+    English: I want you to understand... how difficult the spiritual process is going to be for you - is determined by you - not by nature and not by your guru.
+
+    Basic Translation:
+
+    તમે એક વાત સમજો... આધ્યાત્મિક પ્રક્રિયા તમારા માટે કેટલી અઘરી હશે... એ તમારા દ્વારા જ નક્કી થાય છે, કુદરત દ્વારા નહીં, તમારા ગુરુ દ્વારા પણ નહીં.
+
+    Optimized Translation:
+
+    તમે એક વાત સમજો... આધ્યાત્મિક પ્રક્રિયા તમારા માટે કેટલી અઘરી હશે... એ તમારા દ્વારા જ નક્કી થાય છે - કુદરત દ્વારા નહીં, તમારા ગુરુ દ્વારા પણ નહીં.
+
+    Details of optimization:
+
+    Once one thought is completed and next there is additional information, use - at the end of the main thought, so that the dubbing artist will complete that thought, and again add information after that - instead of reading the whole thing like a list of things.
+
+
+
+
+Scenario 9:
+
+
+
+Aspect: Modulation based ending
+
+Written: ધ્યાન ન આપવું એ નહીં, <Refining>ધ્યાન રાખવું પડશે - કોણ શું કહે છે એનું.</Refining>
+
+
+
+Tuned for Dubbing: ધ્યાન ન આપવું એ નહીં, <Refining>ધ્યાન રાખવું પડશે - કોણ શું કહે છે!</Refining>
+
+
+
+
+scenario 10:
+
+Aspect: short notation while speaking
+
+
+
+Written: તમે જાણો છો કે
+
+Tuned for Dubbing: ખબર છે ને
+
+
+
+
+Written: ન જાણતા હો તો
+
+Tuned for Dubbing: ખબર ન હોય તો / ન ખબર હોય તો
+
+
+
+Written: શું જ
+
+Tuned for Dubbing: શું જ
+
+
+
+
+Written: પૂછે છે
+
+Tuned for Dubbing: પૂછે છે
+
+
+
+Written: <Refining>તમે અહીં</Refining> આવ્યા છો કંઈ લીધા વગર
+
+Tuned for Dubbing: <Refining>અહીં આવ્યા છો</Refining> કંઈ લીધા વગર
+
+
+
+Written: ખોરાક તમારા મોંમાં જેટલો <Refining>વધારે સમય રહેશે</Refining>, તમારું પાચન એટલું સારું થશે;
+
+Tuned for Dubbing: ખોરાક તમારા મોંમાં જેટલી <Refining>વધારે વાર રહેશે</Refining>, પાચન એટલું સારું થશે;
+
+
+
+Written: આધ્યાત્મિક માર્ગ પર છો એટલે, તમારા જીવનમાં કંઈક ભયાનક <Refining>બની જ ગયું હશે</Refining> - એ લોકો દૃઢપણે માને છે.
+
+Tuned for Dubbing: આધ્યાત્મિક માર્ગ પર છો એટલે, તમારા જીવનમાં કંઈક ભયાનક <Refining>બની જ રહેશે</Refining> - એ લોકો દૃઢપણે માને છે.
+
+
+
+scenario 11:
+
+Aspect: Not explicitly mentioning the redundant subject
+
+
+
+Written:  "ઓહ <Refining>તમે આશ્રમમાં રહો છો</Refining>, તો પછી, તમારું દુઃખ શું?" એમ કહીને પૂછે છે.
+
+Tuned for Dubbing:  "ઓહ <Refining>આશ્રમમાં રહો છો</Refining>, તો પછી, તમારું દુઃખ શું?" એમ કહીને પૂછે છે.
+
+
+
+
+Explanation: in English the subject must be there, but in Gujarati, when the verb form, the topic continuity, or context already conveys the subject, the explicit pronoun can be dropped in spoken style.
+
+
+
+Written:  <Refining>તમે આધ્યાત્મિક માર્ગ પર છો એટલે</Refining>, તમારા જીવનમાં કંઈક ભયાનક બની જ ગયું હશે - એ લોકો દૃઢપણે માને છે.
+
+Tuned for Dubbing:  <Refining>આધ્યાત્મિક માર્ગ પર છો એટલે</Refining>, તમારા જીવનમાં કંઈક ભયાનક બની જ ગયું હશે - એ લોકો દૃઢપણે માને છે.
+
+
+
+
+Written:
+
+ એમ કરો તો... ઓછામાં ઓછું 30 થી 40% પાચન મોંમાં જ થઈ જાય - ત્યારે જ, એ તૈયાર થાય; હવે ખોરાક મોંમાં જ સારી રીતે તૈયાર થઈ જાય છે; <Refining>એ અંદર જાય તો... પેટ એ જ આશા રાખે - અડધું પચેલું ખાવાનું!</Refining>
+
+Tuned for Dubbing:
+
+ એમ કરો તો... ઓછામાં ઓછું 30 થી 40% પાચન મોંમાં જ થઈ જાય - ત્યારે જ, એ તૈયાર થાય; હવે ખોરાક મોંમાં જ સારી રીતે તૈયાર થઈ જાય છે; <Refining> અંદર જાય તો... પેટ એ જ આશા રાખે - અડધું પચેલું ખાવાનું!</Refining>
+
+
+
+Explanation: in English the subject must be there, but in Gujarati sentences can be formed without the subject. Here the tagged part is the continuation of the first part, the subject is already established in the first part. In the second part which is a follow-up, in Gujarati we can skip mentioning the subject again. In spoken style, the subject is implied here.
+
+
+
+Scenario 12:
+
+While quoting what someone spoke:
+
+Please place the quoted text in the double quotes and Bring the verb part to the end of the sentence while quoting someone's words or while expressing internal thought process.
+
+
+
+
+Examples:
+
+
+
+Example:
+
+
+
+Original : એ લોકો <T3>માને છે<T3> કે અત્યારે આધ્યાત્મિકતા એટલે તમારે હિમાલય જવું પડે કે કાશી જવું પડે... અથવા બધું છોડી દેવું પડે
+
+
+
+optimized : એ લોકો “અત્યારે આધ્યાત્મિકતા એટલે તમારે હિમાલય જવું પડે કે કાશી જવું પડે... અથવા બધું છોડી દેવું પડે” - એમ <T3>માને છે<T3>
+
+
+
+description:
+
+Here the structure is subject then comma then the thought or the words spoken by the subject in quotes then the verb that conveys saying or thinking and then period or question mark or other punctuation as per the need. Remember the … and - and ; within the quoted portion are still preserved.
+
+
+
+Example:
+
+Original
+
+બધા જ <T3>પૂછે છે<T3>, "સદ્‌ગુરુ, તમે આના માટે આટલું માથું કેમ ખંજવાળો છો?"
+
+
+
+optimized :
+
+બધા જ, "સદ્‌ગુરુ, તમે આના માટે આટલું માથું કેમ ખંજવાળો છો?" - એમ <T3>પૂછે છે<T3>.
+
+
+
+
+Example:
+
+Original
+
+<T3>મેં કહ્યું<T3>, એમની પાસે પીવાનું પાણી જ ન હોય... તો હું એમને ધ્યાન કરવાનું કેવી રીતે કહું?
+
+
+
+
+Optimized:
+
+<T3>મેં<T3>, “એમની પાસે પીવાનું પાણી જ ન હોય... તો હું એમને ધ્યાન કરવાનું કેવી રીતે કહું?” - <T3>કહ્યું<T3>
+
+
+
+description:
+
+Here the subject who spoke and the verb that conveys the speaking are in one word. we have separated them, and placed the subject before the quoted part and the verb after the quoted part.
+
+
+
+
+Original:
+
+લોકો મને <T3>પૂછતા જ રહે છે<T3>, "સદ્‌ગુરુ, આ દેશમાં આધ્યાત્મિક પ્રક્રિયા પાછી લાવવાનો રસ્તો શું?"
+
+
+
+Optimized:
+
+લોકો મને <T3>આ રીતે જ<T3> પૂછતા રહે છે, "સદ્‌ગુરુ, આ દેશમાં આધ્યાત્મિક પ્રક્રિયા પાછી લાવવાનો રસ્તો શું?" <T3>બોલે છે.<T3>
+
+
+
+ description:
+
+Here the subject part is long, bringing the whole long phrase to the end may make sync loss while dubbing. So what we did is, we added the verb that conveys asking again at the end to make it end in a natural way of spoken Gujarati. also note that we have added the word આ રીતે જ as a cataphoric adverb / discourse-bridging adverb.
+
+
+
+
+In Short below is the instruction in summary:
+
+Primary Directive: Create a Dubbing Performance Script
+
+Your goal is not just to translate, but to create a performance script for a dubbing artist. This means capturing the speaker's exact timing, rhythm, and pauses is your highest priority, even if it occasionally makes the sentence structure feel less conventional than written text.
+
+CRITICAL RULE: Meticulous Pause Transcription
+
+Non-Negotiable Pauses: You must use ... to mark every noticeable pause or hesitation in the speaker's delivery. This is the single most important rule.
+
+Priority Over Flow: If a choice must be made between a perfectly natural sentence flow and accurately placing a ... to match the speaker's timing, always prioritize matching the pause. It is better to have a slightly unusual sentence structure that syncs perfectly than a smooth sentence that doesn't.
+
+Review for Pauses: Before finalizing your output, perform a final mental check specifically for this rule: "Have I captured all the short, rhythmic pauses, or have I smoothed them over?"
+
+
+
+
+Below is the information regarding Red threads:
+
+Do not hallucinate.
+
+Do not remove or summarize the units.
+
+Do not add information that is not actually spoken.
+
+Do not re arrange the sentences or clauses just to prioritize the flow within the sentence. this will break the flow between the sentences.
+
+Do not skip the portions that are not spoken by sadhguru. Should include other speakers translation also.
+
+Do not skip the promo part.
+
+Do not explicitly create promo part if it is not there in english. if it's not there in english, in Gujarati also it should not be there.
+
+Do not skip the part in the main talk just because it has already come in the promo part/previous parts.
+
+Do not skip English sentences or phrases thinking they are redundant or irrelevant or secondary details. Every thing said in English should be reflected in Gujarati.
+
+THIS IS NOT A SUMMARY, THIS IS A DUBBING SCRIPT WHERE DIALOGUES ARE DUBBED AND ATTACHED TO THE ORIGINAL VIDEO. SO NO SKIPPING PARTS OR PHRASES OR DETAILS.
+
+
+
+
+Below are the must do:
+
+Keep every redundant phrase.
+
+Keep every repetition.
+
+keep every redundant detail.
+
+keep every insignificant detail.
+
+in the middle of a sentence, if he adds additional sentence or a secondary information, do not skip it, reflect every minute detail spoken just place a - before those parts.
+
+
+
+
+Below are example Gujarati scripts weaved using all the color threads:
+
+
+
+1. મેં પહેલાં ક્યારેય ધ્યાન કર્યું નથી...
+
+
+
+
+સદ્‌ગુરુ:
+
+“ઓ મેં પહેલાં ક્યારેય ધ્યાન કર્યું નથી; ધ્યાન કેવી રીતે કરું!” - એ સારી જ વાત છે, જો પહેલાં ક્યારેય ધ્યાન ન કર્યું હોય તો!
+
+
+
+ધ્યાન માટે કોઈ પ્રતિભા જરૂરી નથી; કોઈ અભ્યાસ જરૂરી નથી; કોઈ સિનિયોરિટી જરૂરી નથી; કોઈ અનુભવ પણ જરૂરી નથી; જરૂરી છે માત્ર ‘ઇચ્છા’ … બસ એટલું જ!
+
+
+
+‘સંપૂર્ણ તૈયાર રહેવું’ - ધ્યાન માટે આ જ જોઈએ!
+
+
+
+અને, તમે એક વાત શીખો - ક્યારેય અનુભવી ધ્યાની ન બનો - નહીંતર, પોતાને એક જટિલતામાં ધકેલી દેશો!
+
+
+
+ ‘ધ્યાન’ દર વખતે નવી રીતે ખીલવા જેવું! દર વખતે એ એક નવી શક્યતા છે.
+
+
+
+એમ નહીં, …   "મેં વીસ વર્ષ ધ્યાન કર્યું છે, એટલે હું અનુભવી ધ્યાની છું!" …   એવું કંઈ નથી.
+
+
+
+ઉદાહરણ તરીકે - ધારો, તમે છેલ્લાં દસ વર્ષથી બાગકામ કરો છો; એનો અર્થ એ કે - આ વખતે, આ ઋતુમાં, ‘રોપા ન વાવ્યા છતાં, બાગમાં ફૂલ આપોઆપ ખીલશે’? અથવા ‘પાણી ન આપ્યા છતાં, બાગમાં ફૂલ આપોઆપ ખીલશે’? દેખરેખ ન રાખી તોય, ફૂલ આપોઆપ ખીલશે - કારણ કે તમારી પાસે અનુભવ છે!? - એવું થાય ખરું?
+
+
+
+ના, આ વખતે પણ બધું બરાબર કરવું પડશે. ત્યારે જ ફૂલ ખીલશે; નહીં?
+
+
+
+કદાચ... માટી કેવી રાખવી... કેટલું પાણી આપવું … બાગ કેવી રીતે ચલાવવો - સંભવ છે કે આ બાબતે અનુભવ કામ આવશે; બાકી તો ફૂલ આપોઆપ ખીલી જવાનાં નથી - માત્ર તમારી પાસે અનુભવ છે માટે! જીવનમાં કંઈ પણ - અનુભવ છે માટે આપોઆપ થઈ જતું નથી. આ વખતે પણ બધું બરાબર કરવું પડશે, નહીં?
+
+
+
+હં?
+
+
+
+ધ્યાનમાં પણ એવું જ, ક્યારેય સિનિયર ધ્યાની ન બનો. ધ્યાનમાં બેસવું દર વખતે, જીવનમાં આ પહેલી વાર બેસો છો - એમ બેસો. ત્યારે જ એ જબરદસ્ત કામ કરશે.
+
+
+
+
+2. મારા વિચારોને કેવી રીતે કાબૂમાં રાખું?
+
+
+
+સદ્‌ગુરુ:
+
+મનમાં .. બેફામ વિચારો, ભાવનાઓ આવે, તો પહેલું તમારે જે કરવાનું - એમને જેવા છે એમ જ જુઓ; રોકવા ન જાઓ, રોકશો તો - એ ક્ષણભરમાં બમણા થઈ જશે.
+
+
+
+આ મનમાં બાદબાકી, ભાગાકાર નથી; સરવાળો, ગુણાકાર જ છે.
+
+
+
+"મારે આ ભાવના નથી જોઈતી" - એમ કહો, તો એ વધે - એકનું બે થાય.
+
+
+
+"આહ, આ ફરી આવી રહ્યું છે; મારે આ નથી જોઈતું, મારે આ નથી જોઈતું" - એમ કહો, તો એ સોગણું થાય. તમારા મનનો સ્વભાવ જ આવો.
+
+
+
+મનમાંથી કંઈ પણ બળજબરીથી હટાવી શકાતું નથી. કોઈ પણ વ્યક્તિ કંઈ પણ મનમાંથી બળજબરીથી હટાવી શકે - એવો કોઈ રસ્તો જ નથી.
+
+
+
+તો તમારે જે કરવાનું - આટલું સમજો - એ છે કે, ‘વિચાર અને ભાવના’ ખરેખર તો અગાઉ સંગ્રહેલી માહિતીનો ફરી ઉપયોગ માત્ર! સ્મૃતિનું રિસાયકલિંગ!
+
+
+
+પણ, ‘મેમરી’ થોડી ગંધ ફેલાવે છે; એ આવતી જ રહે છે. એને એ રીતે જ જોવી પડશે! એનાથી થોડું દૂર ખસવું પડશે!
+
+
+
+આ કેવું - ધારો, તમે ટ્રાફિક જામમાં ફસાયેલા છો; એરપોર્ટ જઈ રહ્યા છો, ટ્રાફિક જામમાં ફસાઈ ગયા છો - ‘કેટલા’ ચિંતિત, અસ્વસ્થ લાગો છો! ઠીક છે, કોઈ રીતે એરપોર્ટ પહોંચીને વિમાનમાં બેસીને નીકળી ગયા.
+
+
+
+નીચે ટ્રાફિક ખરાબ રીતે જામ. હવે ઉપરથી જુઓ તો, “આહા, એ ટ્રાફિક જામ કેટલો સુંદર!” …  માત્ર થોડું અંતર હોવાથી જ!
+
+
+
+ હજુ પણ એ જ ટ્રાફિક જામ - પણ અંતર હોવાથી, એક ક્ષણમાં વાત હળવી થઈ જાય છે. એ જ રીતે તમારા વિચાર, ભાવનાઓ માટે પણ!
+
+
+
+થોડી સાધનાથી … થોડું અંતર આવે છે - તમારી શારીરિક પ્રક્રિયાથી! અને માનસિક પ્રક્રિયાથી પણ!
+
+
+
+એ ન કરીને દરેક વિચાર, ભાવનાને સંભાળવા જાઓ, તો એ હજારગણા થઈ જાય.
+
+
+
+
+
+
+3. કાલે ધ્યાન છોડી દઈશ એમ વિચારું તો...
+
+
+
+સદ્‌ગુરુ: બધાએ દાંત સાફ કર્યા છે?
+
+
+
+સહભાગી: કર્યા છે.
+
+
+
+સદ્‌ગુરુ: સારું!
+
+
+
+પોતે જ કર્યા છે... કે તમારા મા-બાપ, પતિ, પત્ની, અથવા બીજા કોઈએ દબાણ કરીને - "આજે દાંત સાફ કરવા જ પડશે" - એમ કહ્યું?
+
+
+
+પોતે જ કર્યા છે!
+
+
+
+સહભાગી: હા.
+
+
+
+સદ્‌ગુરુ: ઓહ! જબરદસ્ત વાત!
+
+
+
+પણ તમને યાદ છે, તમારા જીવનના એક સમયે - આટલી ઉંમરે - તમારી માએ જોર દઈને કહેતી “દાંત સાફ કરવા જ પડશે. નહીંતર નાસ્તો નહીં મળે!”
+
+કેટલા દિવસ? - ત્રણ મહિના, છ મહિના, કે એક વર્ષ!
+
+
+
+પછી, પોતે જ સાફ કરો છો; કાલે તમારી મા આવીને, "સાંભળ, દાંત સાફ કરવા ખરેખર તો ખોટું છે; એમાં કંઈ ફાયદો નથી; મેં છોડી દીધું; તું પણ છોડી દે" - એમ કહે, તો છોડી દેશો?
+
+સહભાગી: નહીં છોડું.
+
+
+
+સદ્‌ગુરુ: કેમ?
+
+
+
+કારણ કે હવે તમે ‘એનું મહત્વ શું, એ તમારું શું કરે છે’ - એ સમજી ગયા છો.
+
+
+
+હવે કોઈએ આ કરવા માટે દબાણ કરવું પડે એમ નથી.
+
+
+
+એનું મહત્વ ન સમજાય ત્યાં સુધી, કોઈને દબાણ કરીને કરાવવું પડે; એનું મહત્વ સમજાઈ જાય, તો કોઈને કહેવાની જરૂર નથી, નહીં? કારણ કે, હવે - એ તમારું શું કરે છે એ તમારી જાણ થઈ ગઈ છે; કોઈ ‘ન કરવાનું’ કહે તોય, તમે કરશો. એટલે, આ દૃઢતા સાથે જ શરૂ કરીએ, ઠીક છે?
+
+
+
+
+
+
+4. ધ્યાન કામ કરે છે?
+
+
+
+સદ્‌ગુરુ:
+
+એ કામ કરે છે? …
+
+
+
+સંભવ છે કે હંમેશા …  શારીરિક અસરો જ સૌથી સીધી અનુભવમાં આવે. પણ બીજી પણ ઘણી અસરો છે ... શારીરિક અને માનસિક સ્થિતિની બહાર પણ ઘણી અસરો છે.
+
+
+
+શારીરિક અને માનસિક રીતે - કોઈ પણ સભામાં એ તમને અલગ બનાવી દેશે - જો તમે આ સાધના માટે પોતાને પૂરતા સમર્પિત કરો તો!
+
+
+
+આમ તો આ ફાયદાઓ, આ બધું … આરોગ્યની દૃષ્ટિએ જોઈએ તો - ઘણા આધુનિક સંશોધનો કહે છે - એ તમારા માટે અદ્ભુત કામ કરશે!
+
+
+
+પણ આ બધું - શારીરિક આરોગ્ય, માનસિક ક્ષમતા, જીવનને સહેલાઈથી પાર પાડવું - આ બધું માત્ર આડઅસર છે; અસલ વાત ધીમે ધીમે આકાર લઈ રહી છે. એ - પ્રગટ થાય ત્યારે જ તમને ખબર પડશે. એ પહેલાં તો કંઈ થઈ રહ્યું નથી એમ જ લાગશે.
+
+
+
+આ કેવું - તમારા ઘરમાં … એક ફૂલછોડ લગાવ્યો; એ વધી રહ્યો છે - બસ પાંદડાં જ ઊગે છે!
+
+
+
+પાડોશી તમને કહેશે, "આમાં કંઈ ફાયદો નથી; ફૂલ કહ્યું હતું, પાંદડાં જ ઊગે છે. કાપી નાખીએ, ધુણી તાપવા કામ આવશે."
+
+
+
+તમે કહેશો, "રાહ જોઈએ, કદાચ કાલે સવારે ખીલશે!"
+
+
+
+બીજા દિવસે સવારે કંઈ આવતું નથી.
+
+
+
+ફરી, "બીજો એક દિવસ જોઈએ" - બીજો દિવસ, બીજો દિવસ... આ રીતે વર્ષો વીતી જાય છે; આ છોડ ખીલતાં કેટલા દિવસ લાગે છે એ જો તમને ખબર ન હોત, તો કદાચ સોવાર કાપી નાખ્યો હોત.
+
+
+
+પણ એને માવજત કરીને ચલાવ્યે રાખો - તો એક દિવસ એ ખીલશે, ફૂલોથી ભરાઈ જશે, ત્યારે તમને સમજાશે - “આ છોડ પાંદડાં માટે નહોતો... એ છાંયડા માટે પણ નહોતો... એ થોડા ઓક્સિજન માટે પણ નહોતો”!
+
+
+
+ફૂલ ખીલે ત્યારે ‘એ’ કહેવા જેવું અસાધ્ય સુંદર!
+
+
+
+
+
+
+5. ધ્યાન ખરેખર કામ કરે છે?
+
+
+
+એવું ન વિચારો - આજે સાધના કરી, "ઓ મને કંઈ થયું જ નથી!" બીજા દિવસે સાધના કરી, "ઓ મને કંઈ થયું જ નથી!" કંઈ થવાની જરૂર નથી, સમજ્યા? બસ કરતા રહેવાનું! એને એક સમર્પણ તરીકે કરો, સમજ્યા?
+
+
+
+કંઈ મેળવવાની જરૂર નથી! જીવન જીવવાની રીત આ નથી - "આ કર્યું, શું મળશે? એ કર્યું, શું મળશે?" - આ જીવવાની પદ્ધતિ નથી.
+
+
+
+"મને શું મળશે?" - જે આવું વિચારે છે, એ જીવનને જાણી શકતા નથી. તમને ‘મહત્વનું લાગે’ એ, એ કરતા રહો - બસ એક સમર્પણ તરીકે! જે થવાનું હશે એ થશે!
+
+
+
+પણ તમે ખૂબ ગોલ-ઓરિએન્ટેડ બની ગયા છો - છોડ ઊગે એ પહેલાં જ તમારે કેરી જોઈએ!
+
+
+
+ના! છોડને મોટો કરો, એને માવજત કરો... કેરી તમારા માથા પર પડશે - ન માગો તોય!
+
+
+
+Focus area 2: Length of the Gujarati segments:
+
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+
+
+Gap threshold = minimum 20 %
+Relative density threshold - 1.1
+
+
+
+that means if the gap after the segment is less than 20% of the length of the segment, then that segment is flagged for gap threshold.
+that means if the Relative number of syllables per second is greater than 1.3 times the average number of syllables per second, then that segment is flagged for gap threshold.
+
+Now
+
+Gap threshold flagged, density threshold flagged
+
+Case 1:
+Gap threshold flagged, density threshold flagged
+Action:
+need heavy compressing. Express the main idea by cutting as many additional details as possible. Just convey the main point in short and crisp way. And add tags [fast][/fast] around the corresponding Gujarati segment so that ElevenLabs will render this segment in fast pace.
+
+Case 2:
+Gap threshold flagged, density threshold not flagged
+Action:
+Here the aim is to achieve at least some level of shortening, so that the Gujarati fits in - as there is no gap after this.
+
+Apply all the shortening approaches mentioned above
+
+also use below Shortening approaches as well:
+
+You have three additional tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (સંધિ / Vowel Merging): Merge vowels and adjacent sounds where Gujarati naturally permits it (e.g., "જે છે" → "જે'છે" -style elisions; "કરીને" → "કરી"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+
+Samasa (સમાસ / Compound Nouns): Instead of "પ્રાણના સંકેત" (The signs of life), you use "પ્રાણ-સંકેત". It sounds tighter and cuts the length significantly.
+
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+Verb Fusing / Contracted Forms: Use contracted spoken forms — "કરી રહ્યો છું" → "કરું છું"; "જઈ રહ્યો છું" → "જાઉં છું"; "થાય નહીં" → "થાય ના". It turns a concept into a single action and matches natural Gujarati colloquial speech.
+
+
+
+make sure the real intention being conveyed is not diluted. this is high priority. You aren't "diluting" the Master's words; you are "distilling" them. that means you are not skipping details, you are adjusting the structure.
+- Reduce verbosity while preserving meaning.
+- use context from previous and next segments
+- avoid repeating ideas already stated nearby
+- Do not remove key philosophical or logical meaning, Prefer simplifying structure over dropping whole concepts altogether.
+
+You should check if the segments tagged for shortening are able to be pronounced within The total time available for the dubbing segment. One way to check is the number of Akṣaras (syllabic units) in the Gujarati segment must be almost same as the number of English syllables. For example, in પ્રક્રિયા there are three syllabic units પ્ર, ક્રિ, and યા.
+
+
+Case 3:
+Gap threshold not flagged, density threshold flagged
+Action:
+Make the Gujarati crisp without losing any details.
+
+
+Case 4:
+Gap threshold not flagged, density threshold not flagged
+- no need to shorten
+
+
+
+
+Secondary: check if the segments can be spoken in the time in general, if any Gujarati segment contains relatively large number of words or lengthy words compared to corresponding English segment, shorten them also.
+
+
+
+Additional requirement:
+
+if the original audio includes the promo part (few sentences from the talk shown at the start of the video to create interest in the viewer) then, Both the scripts should also include the promo part at the beginning.
+
+
+Also, if you have to truncate the output because mention that also at the beginning. and then give the actual translation asked above.
+
+Below is the formatted English script :

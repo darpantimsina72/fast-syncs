@@ -1,0 +1,26 @@
+# Normalize text on commit, but pin line endings per platform-specific file
+# so a checkout on the "wrong" OS never breaks a script.
+
+# Default: let git normalize to LF in the repo, native on checkout.
+* text=auto
+
+# Windows batch files MUST be CRLF — cmd.exe mis-parses labels/loops with LF.
+*.bat            text eol=crlf
+
+# Unix shell scripts MUST stay LF — CRLF breaks the shebang / `\r` in vars.
+*.command        text eol=lf
+*.sh             text eol=lf
+
+# Cross-platform source: force LF everywhere for stable diffs.
+*.py             text eol=lf
+*.lua            text eol=lf
+*.txt            text eol=lf
+*.md             text eol=lf
+*.json           text eol=lf
+
+# Binary assets (none tracked today; guards future additions).
+*.wav            binary
+*.mp3            binary
+*.ttf            binary
+*.ttc            binary
+*.otf            binary

@@ -1,0 +1,200 @@
+The "Sadhguru Script Refiner" Prompt
+Background & Context:
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+“Life is not a problem to be solved…
+
+it is a reality to be experienced.”
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction (“No…”)
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels “broken”.
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+“Do you want peace?
+
+Or do you want to control everything?”
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of ‘Color A’ when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of ‘Color B’  when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid.  these are joined with …
+
+Now the ‘Color A’ set   and the ‘Color B’ set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+_______________
+
+The "Sadhguru Script Weaver" Master Prompt
+Context & Background:
+The provided Bengali (Bangla) text has been translated specifically to mirror the rhythmic, "Thought-Unit" delivery of Sadhguru. It is a live transcript, not a literary essay. The translation maps to a "Temporal Blueprint" where pauses and pulses of speech define the structure.
+
+Your Role:
+You are a Script Weaver. Your task is to refine the punctuation and paragraphing to reflect the structural hierarchy of the speech. You are not a translator—do not change the words or the translation. Your job is to "weave" the correct punctuation threads to create a script that feels like a live conversation.
+
+Note on Bengali punctuation: Bengali traditionally uses the daṛi ('।') as a sentence-ending mark instead of the period ('.'). For this dubbing-script context, treat the daṛi ('।') the same way standard punctuation rules below treat a period — i.e., wherever the rules below mention replacing or avoiding "periods (.)" at sentence ends, the same applies to daṛi ('।') in Bengali. Use ; or - in their place when the thought continues, exactly as described below.
+
+1. The Punctuation Hierarchy
+You must move away from standard sentence endings (. or ।) and generic pauses (...) in favor of structural connectors (; and -).
+
+The Pink Thread (...): Use ONLY for micro-pauses or "thinking breaks" within the smallest unit of an idea (e.g., between the "white" and "black" of an eyeball).
+
+The Green Thread (-): Use this to connect sub-parts into a single distinct thought (e.g., connecting the "eyeball" to the "eyelid"). Use it to bridge thought units that belong to the same specific image or statement.
+
+The Green Thread (;): Use this to join complete, meaningful thoughts that together build a larger point (e.g., connecting the "eye" to the "nose").
+
+Action: Replace generic sentence endings (. or ।) with semicolons (;) if the speaker is still building the same argument or "face."
+
+2. The Orange Thread (Paragraph Splitting)
+Paragraph breaks must be intentional. Weave in a paragraph break ONLY in the following 10 scenarios:
+
+Subject Change: (e.g., moving from 'Nature' to 'Humans').
+
+Concept Shift: When the focus moves to a completely new idea.
+
+Functional Switch: Moving from a "Description" to a "Reason."
+
+Context Shift: Moving from one scenario to another.
+
+Contrast: Switching from a "Positive" to a "Negative" comparison.
+
+Question/Answer Split: Always separate a Question from its Answer.
+
+Quotes: Before a quoted thought, dialogue, or inner monologue starts.
+
+Repetitive Structure: When a sentence structure repeats but with a different subject.
+
+Speaker Change: When the person being quoted or the speaker changes.
+
+Elaboration: When shifting from a core subject to an explanation via example, illustration, or analogy.
+
+3. Exclamation rules.
+Add an exclamation mark where a point is ending in a non grammatically perfect way. Note the goal is not to reframe like this. the goal is identify when sentences are like this and place ! at the end instead of full stop / daṛi.
+Example: give me a nice gift - not dumb one
+Description: Here the main idea is already being said and the statement ended in a non grammatically perfect way. in such cases place ! at the end instead of Full-stop / daṛi.
+Optimized punctuation: give me a nice gift - not dumb one!
+
+other Bengali examples:
+সে আমাকে আগেই জিজ্ঞেস করেছিল - “এটা কাজ করবে কি” - বলে!
+সংরক্ষণ আনা হয়েছিল - ওঁদের একটু ভালো সুযোগ দেওয়ার জন্যেই!
+তাহলে এই অসাম্য কীভাবে সংশোধন করবেন? ওঁদের একটু ভালো সুযোগ দিয়ে!
+সিরিয়াস হয়ে থাকলে... আপনার কাছে এই পৃথিবী আর থাকে না - শুধু আপনি, আর আপনার ফালতু চিন্তা ছাড়া!
+আপনার মধ্যে যথেষ্ট সরসতা না থেকে এগুলো মোকাবিলা করতে গেলে... সেই সমস্যার সমাধান করতে পারবেন - এমন ভাববেন না কখনই। ওই সমস্যার শিকার হবেন, সেটাই হবে!
+সেই কাজটা মজা করে না করলে... কাজ আপনাকে শেষ করে দেবে... সেটা যে কাজই হোক না কেন!
+একজন চুল ছিঁড়ে পাগল হয়ে যান... আরেকজন আরেকজনের ওপর ফেটে পড়েন; অন্য কেউ মাথা ঠুকতে থাকেন, আরেকজন নিজে কী করতে পারে সেটা দেখেন - এমন ঘটতে কখনো দেখেছেন কি? একই পরিস্থিতিতে!
+এটা সামলাতে... কোথায় গিয়ে পৌঁছাচ্ছেন - অনেকে পাগলাগারদেও পৌঁছে যাচ্ছেন... কেবল ওই সামান্য কাজের জন্যেই!
+তখনই আমি শ্মশানে বসেছিলাম... সেটা এখানে দেখা যাবে কিনা সেই আশায়!
+তাই আধঘণ্টা বা পঁয়তাল্লিশ মিনিট থেকে, কিছুক্ষণ পর চলে যান - দেহে পুরো আগুন লেগে যাওয়ার সঙ্গে সঙ্গেই!
+
+
+4. Formatting Rules (Continuous Flow)
+No Internal Line Breaks: Within a single paragraph, do not keep separate lines. The text should be a continuous, "wrapped" block of sentences for ease of reading.
+
+Preserve the "Broken" Rhythm: If a thought is grammatically "broken" or left hanging, do not fix it. Use the appropriate punctuation thread to show that it is part of a larger flow.
+
+Example of Transformation:
+
+Bad (Broken lines): আমরা রামরাজ্যের কথা বলি... কারণ -
+রামরাজ্য মানে... শুধুমাত্র একটি মহান শাসন নয়;
+
+Good (Continuous Block):
+আমরা রামরাজ্যের কথা বলি... কারণ - রামরাজ্য মানে... শুধুমাত্র একটি মহান শাসন নয়; এটা... ন্যায়, ধর্ম, নিঃস্বার্থতার এক প্রতিচ্ছবি।
+
+5. Strict Constraints (The Red Threads)
+
+DO NOT remove the fast tags [fast]/[fast] - they are indications for tts to read those tagged areas with fast pace.
+DO NOT change the translation or the choice of Bengali words.
+
+DO NOT fix the grammar of the words themselves.
+
+DO NOT default to periods (. or ।) at the end of every line. If the thought flows into the next line, use ; or -.
+
+REPLACE generic ellipses (...) with ; or - if the pause is actually a structural connection between ideas rather than a "thinking break."
+
+
+Note: In the results, don't give any additional information in English or Bengali. Just give the processed script. Because this processed script will directly go to dubbing Audio generator. So only the punctuated script should be present in the result.
+
+
+
+
+Below is the Bengali translation that mirrors the English spoken rhythm:
+

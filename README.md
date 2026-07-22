@@ -21,6 +21,7 @@ Works on **Windows** and **macOS**. The instructions below are Windows-first.
 | `setup.bat` / `setup.sh` | One-time installer (creates the Python virtualenv). |
 | `update.bat` / `update.sh` | Pull the latest version + refresh dependencies. |
 | `requirements*.txt` | Python dependencies (tiny for the default thin-client mode). |
+| `dubbing/` | **Bundled dubbing app**: translate + TTS + time-sync a voice recording into 11 Indian languages, driven from its own REAPER panel. See below. |
 
 ---
 
@@ -94,6 +95,46 @@ direct-mode extras, if you installed with `--direct`). When it says
 If the automatic ZIP download ever fails (offline / repo moved), fall back to
 manual: re-download the ZIP and unzip it **over** the old folder so your
 settings and `venv` carry over.
+
+**If the Update… button seems to do nothing** (reported on some Macs and
+Windows PCs): the button opens a terminal to run the updater. As of v0.5 it
+no longer relies on macOS "Automation" permission (the old cause of a silent
+no-op) — it opens a small `.command` wrapper instead. If a terminal still
+doesn't appear, the dialog now shows the exact command to run manually, or
+just run it yourself: **Windows** double-click `update.bat`; **macOS**
+`bash update.sh`. And a `git pull` that can't fast-forward (a checkout with
+local edits) now falls back to the ZIP overlay automatically instead of
+failing the whole update.
+
+---
+
+## Bundled dubbing app (`dubbing/`)
+
+The repo also ships the **Reaper Dubbing App**: take an English voice
+recording and get a translated, voice-synthesized, time-synced dub in one of
+11 Indian languages, imported straight onto the timeline. It arrives (and
+stays current) through the same **Update…** button as the sync tool.
+
+- **Open it**: click the **Dubbing...** button at the bottom of the sync
+  window (it registers + runs `dubbing/reaper/Dub_Pipeline_Panel.lua` for
+  you), or load that file manually via *Actions → Load ReaScript…*.
+- **First-time setup**: the panel offers to run it when needed, or run
+  `dubbing/setup_windows.bat` / `bash dubbing/setup_mac.command` yourself.
+  It creates a separate `dubbing/venv` (the dubbing deps are heavier, so
+  sync-only installs never pull them). Enter your API keys in the panel's
+  **Settings** tab.
+- **Panel tabs**: **Full Pipeline** (transcribe → translate → pauses for
+  your review of the script/translation → TTS → sync), **Paste
+  Translation** (bring your own translated script — skips the LLM),
+  **Auto Sync** (this sync tool, embedded right in the dub window — same
+  pipeline, no second window), **Regen Audio** (re-synthesize one chunk),
+  **Track Voice** (re-voice a whole track), **Logs**, and **Settings**
+  (keys, python override, and the shared Update… button).
+- **Two projects at once**: each REAPER project gets its own status folder
+  under `dubbing/engine/status/`, so you can run a second REAPER instance
+  (macOS: `open -na REAPER`, Windows: `reaper.exe -newinst`) and dub a
+  different project there while the first one runs.
+- Full docs: [`dubbing/README.md`](dubbing/README.md).
 
 ---
 

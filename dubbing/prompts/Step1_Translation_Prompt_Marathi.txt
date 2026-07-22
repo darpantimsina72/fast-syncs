@@ -1,0 +1,1228 @@
+### Target language: Marathi (मराठी)
+### Register: modern spoken Marathi (बोलीभाषा), not literary
+### NOTE FROM PIPELINE: This prompt is fully localized for Marathi.
+### Structural rules (pause handling with `...`, hyphen `-` usage,
+### paragraph breaks, thought-unit mapping) apply UNCHANGED to Marathi.
+### All examples below are in Marathi's native script.
+### Translate, do not transliterate. Marathi uses the daṛi `।` for
+### sentence boundaries (Devanagari script).
+
+The goal is to generate a Marathi (मराठी) dubbing script for the English talk given by Sadhguru (Including any other speakers who question or converse with him). The SRT file text will be given at the bottom.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+
+The SRT Temporal Blueprint: Mapping Threads to Pulses
+
+Instead of a plain transcript, you are receiving an SRT file. This file acts as the absolute structural blueprint for the dubbing script. Think of the SRT timestamps as the rigid framework of the loom.
+
+On-Signals (Spoken Pulses / Containers): The actual text block within a subtitle timestamp. This is continuous speech.
+
+Off-Signals (Silence Gaps / Spaces): The time gap between the end timestamp of one subtitle and the start timestamp of the next. This is a physical pause.
+
+CRITICAL RULE: The temporal blueprint overrides grammatical intuition. You must map the White Threads (thought units) onto these pulses and dictate the placement of your Green Threads (punctuation) strictly based on the On/Off signals, handling the mapping in the following ways:
+
+Before assessing case 1 or 2 or 3, first you must analyze and create the groups of subtitles, so that each group denotes one meaningful chunk or one thought unit of a complete thought.
+
+
+Case 1: One thought unit stretched across multiple pulses (e.g., 1 meaningful chunk or thought unit spoken over 3 subtitles):
+Do not smooth this out. You must weave a Green Thread (specifically the ... indicating a pause) exactly where the temporal gap occurs between the subtitles, even if it awkwardly breaks a Marathi clause in half. The pause must reflect the speaker's hesitation or deliberate pacing.
+
+Note that, only in this case, you can re arrange the sequence of these non-meaningful words/phrases that are building blocks of the meaningful chunk or a thought unit that was spread across multiple pulses, so that the thought unit or the meaningful chunk is formed in a natural way. Here still the pulses are separated by ... but they are resequenced to form a natural flow to form the meaningful chunk or thought unit.
+
+This applies only inside of a meaningful chunk/thought unit. The sequence of the meaningful chunks and thought units that form a complete thought remains same.
+In short, The "Holistic Mapping" Rule for case 1:
+When one thought unit or meaningful chunk is stretched across multiple pulses (pulses separated by ...), do not translate pulse-by-pulse. Instead:
+
+Synthesize: First, translate the entire English thought unit into a natural, complete Marathi sentence or clause.
+
+Distribute: Take that complete Marathi translation and "pour" it into the available pulse containers (the SRT timestamps).
+
+Fragment Naturally: When distributing the Marathi text across pulses, ensure that the text within each pulse forms a natural phonetic chunk (a phrase or sub-part) in Marathi.
+
+Transposition: Since Marathi is a Subject-Object-Verb (SOV) language and English is SVO, you must rearrange the words across the ... markers so the verb lands in the appropriate pulse for the Marathi flow, while ensuring the overall meaning matches the duration of the total pulses used.
+
+The "Bridge" Principle: Each segment between the ... should feel like a natural "breath" or a logical sub-component of the thought, not a random collection of words.
+
+Example of how to handle the "broken" input:
+
+English Pulses: the worship of the ... divine ... in the feminine form ... was hugely prevalent
+
+Wrong (Literal): याची उपासना ... देवाची ... स्त्री रूपात ... खूप प्रचलित होती (This feels broken).
+
+Correct (Mapped): देवाची ... स्त्री रूपात ... उपासना करणे ... खूप प्रचलित होते (Each pulse now contains a logical Marathi phrase that builds toward the meaningful chunk/thought unit/conclusion).
+
+
+Case 2: Multiple thought units compressed into one pulse (e.g., 2-3 short sentences spoken rapidly in 1 subtitle):
+If the SRT shows continuous speech with no off-signal gaps, do not inject ... pauses just because the grammar suggests a new sentence. Translate the White Threads to flow rapidly together, using commas (,) in-between thought units and ; between different thoughts to maintain continuous structural phrasing to match the unbroken momentum of the speaker.
+
+Case 3: Overlapping boundaries (e.g., a pulse contains the end of thought A and the start of thought B):
+Translate the transition naturally with appropriate boundary punctuation, but reserve your heavy pause punctuation (... or -) only for where the actual SRT gap (Off-Signal) occurs.
+
+
+
+
+Now lets understand the requirement by an analogy.
+
+
+
+Its like weaving an art piece.
+
+
+
+The actual content itself is the white thread.
+
+The punctuation marks are the threads with green shades.
+
+… are the threads with pink shade.
+
+The paragraphs breaks are the threads with orange shades.
+
+The contextually perfect Marathi word choice is the thread of blue shades.
+
+The things that are not to be done are the red threads.
+
+
+
+Now as you start weaving the dubbing script you should carefully weave these color threads at appropriate places as per the instructions given below.
+
+
+
+Below is the information regarding the White threads:
+
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+“Life is not a problem to be solved…
+
+it is a reality to be experienced.”
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction (“No…”)
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels “broken”.
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+“Do you want peace?
+
+Or do you want to control everything?”
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts can be changed to create the sub part in a meaningful way. the subparts remain in the same order.
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of ‘Color A’ when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of ‘Color B’ when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid. these are joined with …
+
+Now the ‘Color A’ set and the ‘Color B’ set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+
+
+In short: Each individual piece that can be identified as a separate part or sub part is the white thread.
+
+
+
+To the extent possible make sure these pieces occur in the same sequence especially the meaningful chunks (made up of sub parts and internal parts)
+
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the coloured sections remain, the pieces of the same color that forms that colored section within can be rearranged.
+
+
+Below is the information regarding the green threads:
+
+now as we weave the white threads to form the sentences, we want to weave in the green threads (punctuation marks) as per the below rules.
+
+
+
+… indicates a pause in between the parts that makes a meaningful chunk or a clause.
+
+, indicates a pause between meaningful chunks that make up the sentence.
+
+; indicates connected sentences.
+
+Hyphen (-) indicates additional information related to the main idea of the sentence.
+
+
+
+
+we connect building parts with … to make up the internal part.
+
+we connect the internal parts with - to make up the subpart.
+
+we connect the subparts with ; to make up the body part.
+
+
+
+for example, the punctuation marks should be weaved like this:
+
+building part …  building part (one internal part)- another internal part - one more internal part; internal part - building part …  building part (another internal part);
+
+internal part -  building part …  building part (one internal part)
+
+subpart; subpart; internal part - internal part; building part…building part…building part; subpart
+
+
+
+
+Placing (-):
+
+  To Set Off Parenthetical Information:
+
+  Example: This is a very important point - one that you shouldn't forget.
+
+ Marathi: हा एक खूप महत्त्वाचा मुद्दा आहे - जो तुम्ही विसरता कामा नये।
+
+
+
+  Example: The students - all 35 of them - were excited for the field trip.
+
+  Marathi: विद्यार्थी - सगळे ३५ जण - फील्ड ट्रिपसाठी उत्साहात होते।
+
+
+
+ To Introduce a List:
+
+    Example: She bought many things - clothes, shoes, and accessories.
+
+Marathi: तिने खूप गोष्टी विकत घेतल्या - कपडे, बूट आणि इतर सामान।
+
+
+
+
+   To Introduce an additional Explanation after completion of one thought:
+
+    Example: The reason for the delay - traffic congestion - was unavoidable.
+
+Marathi: उशीर होण्याचं कारण - ट्रॅफिक जाम - टाळता आलं नाही।
+
+
+
+    Example: He is my uncle - who is a 7 feet tall man.
+
+Marathi: हे माझे काका आहेत - सात फूट उंच माणूस।
+
+
+
+
+ Example: Today is Sunday - which is a holiday.
+
+Marathi: आज रविवार आहे - म्हणजे सुट्टीचा दिवस।
+
+
+
+    To Indicate an Abrupt Break or Change in Thought:
+
+    Example: I was about to leave - wait, there's someone at the door.
+
+Marathi: मी निघणारच होतो - थांबा, दारात कुणीतरी आलंय।
+
+
+
+
+To separate inserted thoughts that need a new modulation.
+
+
+
+Pattern: Main sentence - inserted phrase - continuation of the main sentence.
+
+
+
+    Example: The most important thing - and I can't stress this enough - is to be yourself.
+
+Marathi: सगळ्यात महत्त्वाची गोष्ट - आणि कितीही जोर देऊन सांगितलं तरी कमीच पडेल - म्हणजे स्वतः सारखं राहणं।
+
+
+
+Example: After 100 years - only in 2010, I think - they figured it out... that this theorem describes the black holes... in the universe.
+
+Marathi: १०० वर्षांनंतर - बहुधा २०१० मध्ये असेल - त्यांनी हे शोधून काढलं... की हा सिद्धांत विश्वातल्या कृष्णविवरांचं वर्णन करतो।
+
+
+
+To separate totally different details within a sentence.
+
+Pattern: Main Sentence - detail 1 - detail 2 - continuation of main sentence.
+
+Example: I must tell you this -  two, about maybe three, four years ago - a young woman of 33 or 34 years of age - in a city called Hyderabad in Southern India -  she was a television anchor - one day she did this thing.
+
+Marathi : मला तुम्हाला हे सांगायलाच हवं - साधारण दोन, तीन किंवा चार वर्षांपूर्वी - ३३ किंवा ३४ वर्षांची एक तरुणी - दक्षिण भारतातल्या हैदराबाद नावाच्या एका शहरात - ती एक टेलिव्हिजन अँकर होती - एके दिवशी तिने हे केलं।
+
+In below situation:
+
+When a phrase completes, clarifies, justifies, or defines a key concept or item mentioned immediately before it, so that it indicates change in tone.
+
+replace the punctuation before that phrase with a hyphen ( - ).
+
+Example: so in urban areas it may not matter -  because you have insurance and this and that.
+
+Marathi : त्यामुळे शहरी भागात कदाचित ही फार मोठी गोष्ट नसेल - कारण तुमच्याकडे विमा आहे, हे आहे, ते आहे।
+
+
+
+Use ( - ) specifically when The phrase reveals the actual components of a previously stated category to ensure that the tone would land and conclude the meaning, not continue a list.
+
+Example: “two things — your body and your mind”
+
+Marathi : दोन गोष्टी - तुमचं शरीर आणि तुमचं मन।
+
+
+
+
+Below is the information regarding the Pink threads:
+
+
+… should not occur in the text that belong to one single pulse. Even though grammatically it makes sense. Even though there are multiple thought units/phrases/sentences in it. because each pulse is a continuous speech, we don't want the gap in between the continuous pulse.
+
+… only to be placed when there is a pause in between pulses that make up a single thought unit or clause or sentence.
+
+
+
+Below is the information regarding the orange threads:
+
+
+
+Each orange thread is the paragraph break that happens in the dubbing script.
+
+Below are the rules where to weave in the orange thread.
+
+
+
+
+
+When the subject changes (e.g., from speaking about 'Nature' to 'Humans')
+
+When the focus moves from one concept to a completely new idea.
+
+Switch from Description to Reason
+
+Switch from one Context to another.
+
+Switch from Positive to Negative contrast
+
+Split the Question from its Answer.
+
+Before a quoted thought or dialogue starts.
+
+When a sentence structure repeats with a different subject.
+
+When the speaker or the person being quoted changes.
+
+When it changes from a core subject to its explanation using an example, illustration, or analogy.
+
+
+
+
+
+And the sentences that occur within one para can be made into one continuous paragraph. no need to keep them as separate lines within the paragraph.
+
+Example:
+
+आपण रामराज्याबद्दल बोलतो... कारण -
+
+रामराज्य म्हणजे... फक्त एक महान शासन नव्हे;
+
+ते... न्याय, धर्म आणि निःस्वार्थतेचं एक प्रतिबिंब आहे।
+
+
+
+in the above it is one paragraph, but it is three lines in a paragraph. the linebreaks within the paragraph can be removed and it can be made into continuous sentences for ease of reading as shown below:
+
+आपण रामराज्याबद्दल बोलतो... कारण - रामराज्य म्हणजे... फक्त एक महान शासन नव्हे; ते... न्याय, धर्म आणि निःस्वार्थतेचं एक प्रतिबिंब आहे।
+
+
+
+
+CRITICAL FORMATTING RULE: Continuous Text Blocks
+
+
+
+No Soft Breaks: Do not use line breaks or newlines within a paragraph for visual formatting.
+
+
+
+Single Line Constraint: Each paragraph block must be rendered as one single, continuous line of text.
+
+
+
+Separation: Use a double line break only between different paragraphs.
+
+
+
+
+
+
+
+Below is the information regarding the blue threads:
+
+
+
+There are the points where you have to identify the actual contextually best Marathi word or phrase; and identify the actual intention of sadhguru behind those words spoken by him. There are the places where literal word based translation fails. and you have to think deep and pick the appropriate Marathi expression that conveys the actual contextual point and intention.
+
+
+
+
+
+
+
+Need 1: Polishing the Script into a day to day spoken style:
+
+
+
+    Scenario 1.
+
+    In Marathi the translations for a, an and the are not needed - unless in specific cases.
+
+
+
+
+
+
+    Scenario 2.
+
+    In Marathi in many cases, an explicit pronoun can be dropped when context makes it clear, since the verb form or topic continuity carries the subject.
+
+
+
+
+    Scenario 3: Preferred word pairs
+
+    Dimension - मिती
+
+    You know - माहीत आहे ना..
+
+    Life - जीवन / आयुष्य
+
+    People - लोक / माणसं
+
+    Intense - तीव्रता
+
+    Lifetime - जन्म
+
+    essentially - मुळात
+
+    intense - तीव्रता (not प्रचंडता in this context)
+
+    isn’t it? - नाही का?
+
+
+
+
+Scenario 4:
+
+This applies only to the segments that are lengthy in Marathi. In English, the segment is spoken with fewer words, but in Marathi, the written style contains more words which will exceed the time of the English segment. Mainly in such cases, we try to make the segment short by combining the words like we combine while talking (colloquial style). And in some cases, even though the words are more, Sadhguru speaks them fast. In such cases also shortening is needed. By analyzing the audio, please shorten the segments as and when necessary.
+
+
+
+CRITICAL: Remember we are not removing any segment, example, or list - we are trying to make it short by expressing the exact same content in fewer words / shorter syllables.
+
+
+
+
+    Example 1:
+
+    Fast spoken English segment: I'm not saying these things are wrong.
+
+    Marathi Lengthy sentence: मी असं म्हणत नाही की या गोष्टी चुकीच्या आहेत।
+
+    Marathi Shortened Sentence: या गोष्टी चुकीच्या आहेत असं म्हणत नाही।
+
+
+
+
+    Example 2:
+
+    Fast spoken English segment: Not some fanciful thing that I want to do or you want to do.
+
+    Marathi Lengthy sentence: अशी कुठली कल्पनेतली गोष्ट नाही जी मला करायची आहे किंवा तुम्हाला करायची आहे।
+
+    Marathi Shortened Sentence: माझ्या किंवा तुमच्या करायच्या इच्छेतली कुठली कल्पनिक गोष्ट नाही।
+
+
+
+
+    Example 3:
+
+    Fast spoken English segment: There are many others who would like to be you. 'Oh, I wish I was 20 and I wish I could think what to do.
+
+    Marathi Lengthy sentence: 'अरे, २० वर्षांच्या वयात काय करायचं हे जर मला विचार करता आला असता तर किती बरं झालं असतं। त्यावेळी मी काहीतरी करूनच टाकलं असतं।' - असं वाटणारी माणसं इथे खूप आहेत।
+
+    Marathi Shortened Sentence: 'अरे, २०-त काय करायचं ठरवता आलं असतं तर बरं झालं असतं। तेव्हाच काहीतरी करून टाकलं असतं।' - असं वाटणारी माणसं इथे खूप आहेत।
+
+
+
+
+  Scenario 5:
+
+    Aspect: Missing Detail
+
+    English: So you must fix yourself, you must engineer yourself the way you think is the best way to be for a human being;
+
+    Basic Translation: म्हणून - माणूस म्हणून राहण्याचा सर्वोत्तम मार्ग जो आहे, त्याच पद्धतीने स्वतःलाच नीट घडवून घ्यावं लागेल;
+
+    Optimized Translation: म्हणून - माणूस म्हणून राहण्याचा सर्वोत्तम मार्ग जो वाटतो, त्याच पद्धतीने स्वतःलाच घडवून-बनवून घ्यावं लागेल;
+
+    Details of optimization: ‘वाटतो’ is the detail for ‘you think is’
+
+
+
+
+  Scenario 6:
+
+    Aspect: Thought Flow
+
+
+
+    English:
+
+    Living strong means your level of experience is intense and enormous.
+
+
+
+    Your level of experience will become enormous - only when your level of attention is absolute.
+
+    Basic Translation:
+
+     सशक्त जगणं म्हणजे - तुमच्या अनुभवाची पातळी तीव्र आणि विशाल असणं।
+
+
+
+    जेव्हा तुमचं लक्ष पूर्ण असेल, तेव्हाच तुमच्या अनुभवाची पातळीही विशाल होईल।
+
+
+
+    Optimized Translation:
+
+    सशक्त जगणं म्हणजे - तुमच्या अनुभवाची पातळी तीक्ष्ण आणि विशाल असणं।
+
+
+
+    तुमच्या अनुभवाची पातळी विशाल होऊन जाते, तेव्हाच - जेव्हा तुमचं लक्ष पूर्ण असतं!
+
+    Details of optimization:
+
+    Let us take these two sentences as A and B.  'The enormity of experience’ is in the ending portion of A  and is in the beginning portion of B. Thus ensuring a smooth flow of thoughts and connectivity.
+
+
+
+
+Scenario 7:
+
+   Aspect:  Exact detail without deviation
+
+
+
+    English:
+
+    Though I am known to be a yogi - very analytical and logical - essentially, I have always lived my life as a devotee.
+
+    Basic Translation:
+
+    सगळे मला अत्यंत विश्लेषणात्मक, तार्किक योगी मानतात, पण खरं सांगायचं तर मी नेहमीच एक भक्त म्हणूनच माझं आयुष्य जगलो आहे।
+
+    Optimized Translation:
+
+    सगळे मला अत्यंत विश्लेषणात्मक, तार्किक योगी म्हणून पाहत असले तरी, मुळात, मी नेहमीच एक भक्त म्हणूनच माझं आयुष्य जगलो आहे।
+
+    Details of optimization:
+
+    ‘मानतात’ is a slight deviation from what is said. ‘पाहत असले तरी’ is closer to the actual detail ‘known to be’ in English.
+
+
+
+    ‘खरं सांगायचं तर’ conveys contradiction. ‘मुळात’ conveys different levels of things - this is for the word ‘essentially’.
+
+
+
+
+Scenario 8:
+
+
+
+    Aspect:  Modulation Cues
+
+
+
+    English: I want you to understand... how difficult the spiritual process is going to be for you - is determined by you - not by nature and not by your guru.
+
+    Basic Translation:
+
+    तुम्ही एक गोष्ट समजून घ्या... आध्यात्मिक प्रक्रिया तुमच्यासाठी किती कठीण असेल... ते तुमच्याकडूनच ठरवलं जातं, निसर्गाकडून नाही, तुमच्या गुरूकडूनही नाही।
+
+    Optimized Translation:
+
+    तुम्ही एक गोष्ट समजून घ्या... आध्यात्मिक प्रक्रिया तुमच्यासाठी किती कठीण असेल... ते तुमच्याकडूनच ठरवलं जातं - निसर्गाकडून नाही, तुमच्या गुरूकडूनही नाही।
+
+    Details of optimization:
+
+    Once one thought is completed and next there is additional information, use - at the end of the main thought, so that the dubbing artist will complete that thought, and again add information after that - instead of reading the whole thing like a list of things.
+
+
+
+
+Scenario 9:
+
+
+
+Aspect: Modulation based ending
+
+Written: दुर्लक्ष करायचं नाही, <Refining>लक्ष ठेवायला हवं - कोण काय बोलतंय ते।</Refining>
+
+
+
+Tuned for Dubbing: दुर्लक्ष करायचं नाही, <Refining>लक्ष ठेवायला हवं - कोण काय बोलतंय!</Refining>
+
+
+
+
+scenario 10:
+
+Aspect: short notation while speaking
+
+
+
+Written: तुम्हाला माहीत आहे का
+
+Tuned for Dubbing: माहीत आहे ना
+
+
+
+
+Written: माहीत नसेल तर
+
+Tuned for Dubbing: माहीत नसेल तर / नाही माहीत असेल तर
+
+
+
+Written: काय की
+
+Tuned for Dubbing: काय की
+
+
+
+
+Written: विचारतात
+
+Tuned for Dubbing: विचारतात
+
+
+
+Written: <Refining>तुम्ही इथे</Refining> काहीच न घेता आलात
+
+Tuned for Dubbing: <Refining>इथे आलात</Refining> काहीच न घेता
+
+
+
+Written: अन्न तुमच्या तोंडात जितका <Refining>जास्त वेळ राहील</Refining>, तितकं तुमचं पचन चांगलं होईल;
+
+Tuned for Dubbing: अन्न तुमच्या तोंडात जितका <Refining>जास्त वेळ राहील</Refining>, पचन तितकं चांगलं होईल;
+
+
+
+Written: आध्यात्मिक मार्गावर आहात म्हणजे, तुमच्या आयुष्यात काहीतरी भयानक <Refining> घडलंच असेल</Refining> - असं ते ठामपणे मानतात।
+
+Tuned for Dubbing: आध्यात्मिक मार्गावर आहात म्हणजे, तुमच्या आयुष्यात काहीतरी भयानक <Refining> घडलंच असणार </Refining> - असं ते ठामपणे मानतात।
+
+
+
+scenario 11:
+
+Aspect: Not explicitly mentioning the redundant subject
+
+
+
+Written:  "अरे <Refining>तुम्ही आश्रमात राहता</Refining>, मग, तुम्हाला काय त्रास?" असं विचारतात।
+
+Tuned for Dubbing:  "अरे <Refining>आश्रमात राहता</Refining>, मग, तुम्हाला काय त्रास?" असं विचारतात।
+
+
+
+
+Explanation: in English the subject must be there, but in Marathi, when the verb form, the topic continuity, or context already conveys the subject, the explicit pronoun can be dropped in spoken style.
+
+
+
+Written:  <Refining>तुम्ही आध्यात्मिक मार्गावर आहात म्हणजे</Refining>, तुमच्या आयुष्यात काहीतरी भयानक घडलंच असणार - असं ते ठामपणे मानतात।
+
+Tuned for Dubbing:  <Refining>आध्यात्मिक मार्गावर आहात म्हणजे</Refining>, तुमच्या आयुष्यात काहीतरी भयानक घडलंच असणार - असं ते ठामपणे मानतात।
+
+
+
+
+Written:
+
+ तसं केलं तर... कमीत कमी ३० ते ४०% पचन तोंडातच होऊन जातं - तेव्हाच, ते तयार होतं; आता अन्न तोंडातच नीट तयार झालेलं असतं; <Refining>ते आत गेल्यावर... पोट तेच अपेक्षित करतं - अर्ध-पचलेलं अन्न!</Refining>
+
+Tuned for Dubbing:
+
+ तसं केलं तर... कमीत कमी ३० ते ४०% पचन तोंडातच होऊन जातं - तेव्हाच, ते तयार होतं; आता अन्न तोंडातच नीट तयार झालेलं असतं; <Refining> आत गेल्यावर... पोट तेच अपेक्षित करतं - अर्ध-पचलेलं अन्न!</Refining>
+
+
+
+Explanation: in English the subject must be there, but in Marathi sentences can be formed without the subject. Here the tagged part is the continuation of the first part, the subject is already established in the first part. In the second part which is a follow-up, in Marathi we can skip mentioning the subject again. In spoken style, the subject is implied here.
+
+
+
+Scenario 12:
+
+While quoting what someone spoke:
+
+Please place the quoted text in the double quotes and Bring the verb part to the end of the sentence while quoting someone's words or while expressing internal thought process.
+
+
+
+
+Examples:
+
+
+
+Example:
+
+
+
+Original : ते <T3>मानतात<T3> आता आध्यात्मिकता म्हणजे तुम्हाला हिमालयात जावं लागेल किंवा काशीला जावं लागेल... किंवा सगळं सोडून द्यावं लागेल
+
+
+
+optimized : ते “आता आध्यात्मिकता म्हणजे तुम्हाला हिमालयात जावं लागेल किंवा काशीला जावं लागेल... किंवा सगळं सोडून द्यावं लागेल” - असं <T3>मानतात<T3>
+
+
+
+description:
+
+Here the structure is subject then comma then the thought or the words spoken by the subject in quotes then the verb that conveys saying or thinking and then period or question mark or other punctuation as per the need. Remember the … and - and ; within the quoted portion are still preserved.
+
+
+
+Example:
+
+Original
+
+प्रत्येक जण <T3>विचारतात<T3>, "सद्‌गुरू, तुम्ही यासाठी एवढं डोकं का खर्ची घालता?"
+
+
+
+optimized :
+
+प्रत्येक जण, "सद्‌गुरू, तुम्ही यासाठी एवढं डोकं का खर्ची घालता?" - असं <T3>विचारतात<T3>।
+
+
+
+
+Example:
+
+Original
+
+<T3>मी म्हणालो<T3>, त्यांच्याकडे प्यायलाच पाणी नसेल तर... मी त्यांना ध्यान कसं करायला सांगू?
+
+
+
+
+Optimized:
+
+<T3>मी<T3>, “त्यांच्याकडे प्यायलाच पाणी नसेल तर... मी त्यांना ध्यान कसं करायला सांगू?” - असं <T3>म्हणालो<T3>
+
+
+
+description:
+
+Here the subject who spoke and the verb that conveys the speaking are in one word. we have separated them, and placed the subject before the quoted part and the verb after the quoted part.
+
+
+
+
+Original:
+
+लोक मला <T3>विचारतच राहतात<T3>, "सद्‌गुरू, या देशात आध्यात्मिक प्रक्रिया पुन्हा रुजवण्याचा मार्ग काय?"
+
+
+
+Optimized:
+
+लोक मला <T3>असंच<T3> विचारत राहतात, "सद्‌गुरू, या देशात आध्यात्मिक प्रक्रिया पुन्हा रुजवण्याचा मार्ग काय?" <T3>म्हणतात।<T3>
+
+
+
+ description:
+
+Here the subject part is long, bringing the whole long phrase to the end may make sync loss while dubbing. So what we did is, we added the verb that conveys asking again at the end to make it end in a natural way of spoken Marathi. also note that we have added the word असंच as a cataphoric adverb / discourse-bridging adverb.
+
+
+
+
+In Short below is the instruction in summary:
+
+Primary Directive: Create a Dubbing Performance Script
+
+Your goal is not just to translate, but to create a performance script for a dubbing artist. This means capturing the speaker's exact timing, rhythm, and pauses is your highest priority, even if it occasionally makes the sentence structure feel less conventional than written text.
+
+CRITICAL RULE: Meticulous Pause Transcription
+
+Non-Negotiable Pauses: You must use ... to mark every noticeable pause or hesitation in the speaker's delivery. This is the single most important rule.
+
+Priority Over Flow: If a choice must be made between a perfectly natural sentence flow and accurately placing a ... to match the speaker's timing, always prioritize matching the pause. It is better to have a slightly unusual sentence structure that syncs perfectly than a smooth sentence that doesn't.
+
+Review for Pauses: Before finalizing your output, perform a final mental check specifically for this rule: "Have I captured all the short, rhythmic pauses, or have I smoothed them over?"
+
+
+
+
+Below is the information regarding Red threads:
+
+Do not hallucinate.
+
+Do not remove or summarize the units.
+
+Do not add information that is not actually spoken.
+
+Do not re arrange the sentences or clauses just to prioritize the flow within the sentence. this will break the flow between the sentences.
+
+Do not skip the portions that are not spoken by sadhguru. Should include other speakers translation also.
+
+Do not skip the promo part.
+
+Do not explicitly create promo part if it is not there in english. if it's not there in english, in Marathi also it should not be there.
+
+Do not skip the part in the main talk just because it has already come in the promo part/previous parts.
+
+Do not skip English sentences or phrases thinking they are redundant or irrelevant or secondary details. Every thing said in English should be reflected in Marathi.
+
+THIS IS NOT A SUMMARY, THIS IS A DUBBING SCRIPT WHERE DIALOGUES ARE DUBBED AND ATTACHED TO THE ORIGINAL VIDEO. SO NO SKIPPING PARTS OR PHRASES OR DETAILS.
+
+
+
+
+Below are the must do:
+
+Keep every redundant phrase.
+
+Keep every repetition.
+
+keep every redundant detail.
+
+keep every insignificant detail.
+
+in the middle of a sentence, if he adds additional sentence or a secondary information, do not skip it, reflect every minute detail spoken just place a - before those parts.
+
+
+
+
+Below are example Marathi scripts weaved using all the color threads:
+
+
+
+1. मी आधी कधीही ध्यान केलं नाही...
+
+
+
+
+सद्‌गुरू:
+
+“अरे मी आधी कधीच ध्यान केलं नाही; ध्यान कसं करू!” - ही तर चांगलीच गोष्ट आहे, जर आधी कधीच ध्यान केलं नसेल तर!
+
+
+
+ध्यानासाठी कुठल्याही प्रतिभेची गरज नाही; कुठल्या सरावाची गरज नाही; कुठल्या सीनियॉरिटीची गरज नाही; कुठल्या अनुभवाचीही गरज नाही; गरज आहे फक्त ‘इच्छेची’ … फक्त एवढ्याचीच!
+
+
+
+‘पूर्णपणे तयार असणं’ - ध्यानासाठी हेच लागतं!
+
+
+
+आणि, तुम्ही एक गोष्ट शिका - कधीही अनुभवी ध्यानी होऊ नका - नाहीतर, स्वतःला एका गुंतागुंतीत ढकलून द्याल!
+
+
+
+ ‘ध्यान’ प्रत्येक वेळी नव्याने उमलण्यासारखं! प्रत्येक वेळी ती एक नवीन शक्यता असते।
+
+
+
+तसं नाही, …   "मी वीस वर्षं ध्यान केलंय, म्हणून मी अनुभवी ध्यानी!" …   असं काही नसतं।
+
+
+
+उदाहरणार्थ - समजा, तुम्ही गेली दहा वर्षं बागकाम केलंय; त्याचा अर्थ असा का - यावेळी, या हंगामात, ‘रोपं न लावताच, बागेत फुलं आपोआप उमलतील’? किंवा ‘पाणी न देताच, बागेत फुलं आपोआप उमलतील’? देखभाल न करताच, फुलं आपोआप उमलतील - कारण तुम्हाला अनुभव आहे म्हणून!? - असं होतं का?
+
+
+
+नाही, यावेळीही सगळं नीट करावंच लागेल। तेव्हाच फुलं उमलतील; नाही का?
+
+
+
+कदाचित... माती कशी ठेवायची... किती पाणी द्यायचं … बाग कशी सांभाळायची - कदाचित या बाबतीत अनुभव कामी येईल; नाहीतर फुलं आपोआप उमलून येणार नाहीत - फक्त तुम्हाला अनुभव आहे म्हणून! आयुष्यात काहीच - अनुभव आहे म्हणून आपोआप होत नाही। यावेळीही सगळं नीट करावंच लागेल, नाही का?
+
+
+
+हं?
+
+
+
+ध्यानाच्या बाबतीतही तसंच, कधीही सीनियर ध्यानी होऊ नका। ध्यानाला बसताना प्रत्येक वेळी, आयुष्यात पहिल्यांदाच बसताय - असं समजून बसा। तेव्हाच ते उत्तम काम करेल।
+
+
+
+
+2. माझे विचार कसे नियंत्रणात ठेवू?
+
+
+
+सद्‌गुरू:
+
+मनात .. बेपर्वा विचार, भावना आल्या तर, पहिली गोष्ट तुम्हाला जे करायला हवं - ती म्हणजे त्यांना जसे आहेत तसेच पाहणं; अडवायला जाऊ नका, अडवायला गेलात तर - ते क्षणार्धात दुप्पट होतील।
+
+
+
+या मनात वजाबाकी, भागाकार नाही; बेरीज, गुणाकारच आहे।
+
+
+
+"मला ही भावना नकोय" - असं म्हटलं तर, ती वाढते - एकाची दोन होते।
+
+
+
+"अरे, हे परत येतंय; मला हे नकोय, मला हे नकोय" - असं म्हटलं तर, ती शंभरपटीने वाढते। तुमच्या मनाचा धर्मच असा आहे।
+
+
+
+मनातून काहीच जबरदस्तीने काढता येत नाही। कुणालाच मनातून जबरदस्तीने काही काढण्याचा कुठलाच मार्ग नाही।
+
+
+
+म्हणून तुम्ही जे करायला हवं - एवढं समजून घ्या - ते म्हणजे, ‘विचार आणि भावना’ खरं तर आधी साठवलेल्या माहितीचा पुनर्वापर आहेत! स्मृतीचं रिसायकलिंग!
+
+
+
+तर, ‘मेमरी’ थोडा वास सोडते; ती येतच राहते। तिला तशीच पाहायला हवी! तिच्यापासून थोडं दूर सरकायला हवं!
+
+
+
+हे कसं - समजा, तुम्ही ट्रॅफिक जॅममध्ये अडकलात; एअरपोर्टला निघालाय, ट्रॅफिक जॅममध्ये अडकलात - ‘किती’ चिंतित, अस्वस्थ वाटतंय! ठीक आहे, कसंतरी एअरपोर्टला पोहोचून विमानात बसून निघालात।
+
+
+
+खाली ट्रॅफिक भयंकर जॅम। आता वरून पाहिलं तर, “अरे वा, तो ट्रॅफिक जॅमही किती सुंदर दिसतोय!” …  फक्त थोडं अंतर असल्यामुळेच!
+
+
+
+ आता तोच ट्रॅफिक जॅम - पण अंतर असल्यामुळे, क्षणार्धात गोष्ट हलकी होऊन जाते। तसंच तुमच्या विचार, भावनांच्या बाबतीतही!
+
+
+
+थोड्याशा साधनेने … थोडं अंतर येतं - तुमच्या शारीरिक प्रक्रियेपासून! आणि मानसिक प्रक्रियेपासूनही!
+
+
+
+ते न करता प्रत्येक विचार, भावना सावरायला गेलात तर, ते हजारपटीने वाढतात।
+
+
+
+
+
+
+3. उद्या ध्यान सोडून देऊया असं वाटलं तर...
+
+
+
+सद्‌गुरू: सगळ्यांनी दात घासलेत का?
+
+
+
+सहभागी: घासलेत।
+
+
+
+सद्‌गुरू: छान!
+
+
+
+स्वतःहून घासलेत... की तुमच्या आई-वडिलांनी, नवऱ्याने, बायकोने, किंवा कुणीतरी जबरदस्ती करून - "आज दात घासायचेच" - असं सांगितलं?
+
+
+
+स्वतःहूनच घासलेत!
+
+
+
+सहभागी: हो।
+
+
+
+सद्‌गुरू: अरे वा! मस्तच!
+
+
+
+पण तुम्हाला आठवतंय का, तुमच्या आयुष्यातल्या एका काळात - इवल्याशा वयात - तुमची आई जोर देऊन सांगायची “दात घासायचेच आहेत। नाहीतर नाश्ता मिळणार नाही!”
+
+किती दिवस? - तीन महिने, सहा महिने, की एक वर्ष!
+
+
+
+त्यानंतर, स्वतःच घासता; उद्या तुमची आई येऊन, "ऐक, दात घासणं खरं तर चुकीचं आहे; त्यात काही फायदा नाही; मी सोडून दिलंय; तूही सोडून दे" - असं म्हणाली तर, सोडून देणार का?
+
+सहभागी: नाही सोडणार।
+
+
+
+सद्‌गुरू: का?
+
+
+
+कारण आता तुम्ही ‘याचं महत्त्व काय, हे तुमचं काय करतंय’ - हे समजून घेतलंय।
+
+
+
+आता कुणीतरी हे करायला जबरदस्ती करायची गरज नाही।
+
+
+
+याचं महत्त्व कळेपर्यंत, कुणाला तरी जबरदस्तीने करवून घ्यावं लागतं; याचं महत्त्व कळलं की, मग कुणाला सांगावं लागत नाही, नाही का? कारण, आता - हे तुमचं काय करतंय हे तुम्हाला माहीत झालंय; कुणी ‘करू नका’ म्हटलं तरी, तुम्ही करणारच। म्हणून, याच निश्चयाने सुरुवात करूया, ठीक आहे ना?
+
+
+
+
+
+
+4. ध्यान काम करतं का?
+
+
+
+सद्‌गुरू:
+
+हे काम करतं का? …
+
+
+
+बहुधा नेहमीच …  शारीरिक प्रकटीकरणच सगळ्यात थेट जाणवतात। पण आणखी कितीतरी प्रकटीकरणं आहेत ... शारीरिक आणि मानसिक स्थितीच्या पलीकडेही आणखी अनेक प्रकटीकरणं आहेत।
+
+
+
+शारीरिक आणि मानसिकदृष्ट्या - कुठल्याही गर्दीत हे तुम्हाला वेगळं ठरवेल - जर तुम्ही या साधनेसाठी स्वतःला पुरेसं समर्पित कराल तर!
+
+
+
+पण हे फायदे, हे सगळं … आरोग्याच्या दृष्टीने पाहिलं तर - अनेक आधुनिक संशोधनं सांगतायत - हे तुमच्यासाठी अप्रतिम काम करेल!
+
+
+
+पण हे सगळं - शारीरिक आरोग्य, मानसिक क्षमता, आयुष्याला सहज सामोरं जाता येणं - हे सगळं फक्त दुय्यम फळं आहेत; खरी गोष्ट हळूहळू आकार घेत असते। ती - प्रकट झाली तरच तुम्हाला कळेल। तोपर्यंत काहीच घडत नाहीये असं वाटेल।
+
+
+
+हे कसं - तुमच्या घरात … एक फुलझाड लावलंत; ते वाढतंय - फक्त पानंच फुटतायत!
+
+
+
+शेजारी तुम्हाला म्हणतील, "यात काही फायदा नाही; फुलं म्हणालात, पानंच फुटतायत। कापून टाकू, शेकोटी पेटवायला कामी येईल।"
+
+
+
+तुम्ही म्हणाल, "थांब, कदाचित उद्या सकाळी फुलेल!"
+
+
+
+दुसऱ्या दिवशी सकाळी काहीच होत नाही।
+
+
+
+पुन्हा, "अजून एक दिवस पाहूया" - अजून एक दिवस, अजून एक दिवस... असं करत वर्षं निघून जातात; हे झाड फुलायला किती दिवस लागतात हे जर तुम्हाला माहीत नसतं, तर बहुधा शंभर वेळा कापून टाकलं असतंत।
+
+
+
+पण ते जपून सांभाळत राहिलात तर - एक दिवस ते उमलून, फुलांनी भरून जाईल, तेव्हा तुम्हाला कळेल - “हे झाड पानांसाठी नाही... हे सावलीसाठी नाही... हे थोड्याशा ऑक्सिजनसाठीही नाही”!
+
+
+
+फुलं उमलल्यावर ‘हे’ सांगण्याइतकं सुंदर असतं!
+
+
+
+
+
+
+5. ध्यान खरंच काम करतं का?
+
+
+
+असं समजू नका - आज साधना केलीत, "अरे माझं काहीच झालं नाही!" दुसऱ्या दिवशी साधना केलीत, "अरे माझं काहीच झालं नाही!" काही घडण्याची गरज नाही, समजलं? फक्त करत राहायचं! हे एक समर्पण म्हणून करा, समजलं?
+
+
+
+काही मिळवण्याची गरज नाही! आयुष्य जगण्याची पद्धत हीच नाही - "हे केलं, काय मिळेल? ते केलं, काय मिळेल?" - ही जगण्याची पद्धत नाही।
+
+
+
+"मला काय मिळेल?" - जे हे विचारतात, त्यांना आयुष्य कळत नाही। तुम्हाला ‘महत्त्वाचं वाटतं’ ते, ते करत राहा - फक्त एक समर्पण म्हणून! जे व्हायचं ते होईल!
+
+
+
+पण तुम्ही फारच गोल-ओरिएंटेड झालाय - झाड वाढायच्या आधीच तुम्हाला आंबा हवाय!
+
+
+
+नाही! झाड वाढवा, त्याला सांभाळा... आंबा तुमच्या डोक्यावर पडेल - तुम्ही न मागताही!
+
+
+
+Focus area 2: Length of the Marathi segments:
+
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+
+
+Gap threshold = minimum 20 %
+Relative density threshold - 1.1
+
+
+
+that means if the gap after the segment is less than 20% of the length of the segment, then that segment is flagged for gap threshold.
+that means if the Relative number of syllables per second is greater than 1.3 times the average number of syllables per second, then that segment is flagged for gap threshold.
+
+Now
+
+Gap threshold flagged, density threshold flagged
+
+Case 1:
+Gap threshold flagged, density threshold flagged
+Action:
+need heavy compressing. Express the main idea by cutting as many additional details as possible. Just convey the main point in short and crisp way. And add tags [fast][/fast] around the corresponding Marathi segment so that ElevenLabs will render this segment in fast pace.
+
+Case 2:
+Gap threshold flagged, density threshold not flagged
+Action:
+Here the aim is to achieve at least some level of shortening, so that the Marathi fits in - as there is no gap after this.
+
+Apply all the shortening approaches mentioned above
+
+also use below Shortening approaches as well:
+
+You have three additional tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (संधी / Vowel Merging): Merge vowels and adjacent sounds where Marathi naturally permits it (e.g., "जे आहे" → "जेआहे"-style elisions; "करीत आहे" → "करतोय"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+
+Samasa (समास / Compound Nouns): Instead of "प्राणाचे संकेत" (The signs of life), you use "प्राण-संकेत". It sounds tighter and cuts the length significantly.
+
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+Verb Fusing / Contracted Forms: Use contracted spoken forms — "करीत आहे" → "करतोय"; "जात आहे" → "जातोय"; "होत नाही" → "होतंय ना" / "होत नाहीये". It turns a concept into a single action and matches natural Marathi colloquial speech.
+
+
+
+make sure the real intention being conveyed is not diluted. this is high priority. You aren't "diluting" the Master's words; you are "distilling" them. that means you are not skipping details, you are adjusting the structure.
+- Reduce verbosity while preserving meaning.
+- use context from previous and next segments
+- avoid repeating ideas already stated nearby
+- Do not remove key philosophical or logical meaning, Prefer simplifying structure over dropping whole concepts altogether.
+
+You should check if the segments tagged for shortening are able to be pronounced within The total time available for the dubbing segment. One way to check is the number of Akṣaras (syllabic units) in the Marathi segment must be almost same as the number of English syllables. For example, in प्रक्रिया there are three syllabic units प्र, क्रि, and या.
+
+
+Case 3:
+Gap threshold not flagged, density threshold flagged
+Action:
+Make the Marathi crisp without losing any details.
+
+
+Case 4:
+Gap threshold not flagged, density threshold not flagged
+- no need to shorten
+
+
+
+
+Secondary: check if the segments can be spoken in the time in general, if any Marathi segment contains relatively large number of words or lengthy words compared to corresponding English segment, shorten them also.
+
+
+
+Additional requirement:
+
+if the original audio includes the promo part (few sentences from the talk shown at the start of the video to create interest in the viewer) then, Both the scripts should also include the promo part at the beginning.
+
+
+Also, if you have to truncate the output because mention that also at the beginning. and then give the actual translation asked above.
+
+Below is the formatted English script :

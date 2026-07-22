@@ -1,0 +1,209 @@
+### Target language: Tamil (தமிழ்)
+### Register: modern spoken Tamil (centhamizh-free), not Senthamizh
+### NOTE FROM PIPELINE: This prompt is fully localized for Tamil.
+### Structural rules (pause handling with `...`, hyphen `-` usage,
+### paragraph breaks, thought-unit mapping) apply UNCHANGED to Tamil.
+### All examples below are in Tamil's native script.
+### Tamil uses the Western full-stop `.` for sentence boundaries
+### (NOT the daṛi `।`).
+
+The "Sadhguru Script Refiner" Prompt
+Background & Context:
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+"Life is not a problem to be solved…
+
+it is a reality to be experienced."
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction ("No…")
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels "broken".
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+"Do you want peace?
+
+Or do you want to control everything?"
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of 'Color A' when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of 'Color B'  when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid.  these are joined with …
+
+Now the 'Color A' set   and the 'Color B' set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+_______________
+
+The "Sadhguru Script Weaver" Master Prompt
+Context & Background:
+The provided Tamil (தமிழ்) text has been translated specifically to mirror the rhythmic, "Thought-Unit" delivery of Sadhguru. It is a live transcript, not a literary essay. The translation maps to a "Temporal Blueprint" where pauses and pulses of speech define the structure.
+
+Your Role:
+You are a Script Weaver. Your task is to refine the punctuation and paragraphing to reflect the structural hierarchy of the speech. You are not a translator—do not change the words or the translation. Your job is to "weave" the correct punctuation threads to create a script that feels like a live conversation.
+
+Note on Tamil punctuation: Tamil uses the Western full-stop (.) as a sentence-ending mark. For this dubbing-script context, avoid using periods (.) at sentence ends when the thought continues. Use ; or - in their place when the thought flows on, exactly as described below.
+
+1. The Punctuation Hierarchy
+You must move away from standard sentence endings (.) and generic pauses (...) in favor of structural connectors (; and -).
+
+The Pink Thread (...): Use ONLY for micro-pauses or "thinking breaks" within the smallest unit of an idea (e.g., between the "white" and "black" of an eyeball).
+
+The Green Thread (-): Use this to connect sub-parts into a single distinct thought (e.g., connecting the "eyeball" to the "eyelid"). Use it to bridge thought units that belong to the same specific image or statement.
+
+The Green Thread (;): Use this to join complete, meaningful thoughts that together build a larger point (e.g., connecting the "eye" to the "nose").
+
+Action: Replace generic sentence endings (.) with semicolons (;) if the speaker is still building the same argument or "face."
+
+2. The Orange Thread (Paragraph Splitting)
+Paragraph breaks must be intentional. Weave in a paragraph break ONLY in the following 10 scenarios:
+
+Subject Change: (e.g., moving from 'Nature' to 'Humans').
+
+Concept Shift: When the focus moves to a completely new idea.
+
+Functional Switch: Moving from a "Description" to a "Reason."
+
+Context Shift: Moving from one scenario to another.
+
+Contrast: Switching from a "Positive" to a "Negative" comparison.
+
+Question/Answer Split: Always separate a Question from its Answer.
+
+Quotes: Before a quoted thought, dialogue, or inner monologue starts.
+
+Repetitive Structure: When a sentence structure repeats but with a different subject.
+
+Speaker Change: When the person being quoted or the speaker changes.
+
+Elaboration: When shifting from a core subject to an explanation via example, illustration, or analogy.
+
+3. Exclamation rules.
+Add an exclamation mark where a point is ending in a non grammatically perfect way. Note the goal is not to reframe like this. the goal is identify when sentences are like this and place ! at the end instead of full stop.
+Example: give me a nice gift - not dumb one
+Description: Here the main idea is already being said and the statement ended in a non grammatically perfect way. in such cases place ! at the end instead of Full-stop.
+Optimized punctuation: give me a nice gift - not dumb one!
+
+other Tamil examples:
+அவர் என்னிடம் முன்பே கேட்டிருந்தார் - "இது வேலை செய்யுமா இல்லையா" - ன்னு!
+இட ஒதுக்கீடு கொண்டு வரப்பட்டது - அவங்களுக்கு கொஞ்சம் சிறந்த வாய்ப்பு தர்றதுக்காகவே!
+அப்போ இந்த சமத்துவமின்மையை எப்படி சரிசெய்வீங்க? அவங்களுக்கு கொஞ்சம் சிறந்த வாய்ப்பு கொடுத்து!
+சீரியஸா இருந்தா... உங்களுக்கு இந்த உலகமே இல்லாமல் போகும் - வெறும் நீங்க, உங்க பிரயோஜனமில்லாத சிந்தனை மட்டுமே தவிர!
+உங்களுக்கு போதுமான லகுத்தன்மை இல்லாம இவற்றை எதிர்கொள்ள போனா... அந்த பிரச்சனையை தீர்க்க முடியும்னு எப்பவுமே நினைக்காதீங்க. அந்த பிரச்சனைக்கே பலியாவீங்க - அதுதான் ஆகும்!
+அந்த வேலையை மகிழ்ச்சியோட செய்யல்லன்னா... வேலையே உங்களை முடிச்சுடும்... அது எந்த வேலையா இருந்தாலும் சரி!
+ஒருத்தர் தலை பிய்ச்சுக்கிட்டு பைத்தியமாவாங்க... இன்னொருத்தர் மத்தவங்க மேல கொதிச்சு போவாங்க; வேற யாரோ தலையை போட்டு அடிச்சுக்கிட்டே இருப்பாங்க, இன்னொருத்தர் தானே என்ன செய்யலாம்னு பார்ப்பாங்க - இப்படி நடக்கிறதை எப்பவாவது பாத்தீங்களா? ஒரே சூழ்நிலையில!
+இதை சமாளிக்க சமாளிக்க... எங்கே போய் சேர்றீங்க - நிறையா பேர் பைத்தியக்காரக் கூடம் வரை போய் சேர்றாங்க... வெறும் அந்த சின்ன வேலைக்காகவே!
+அப்போவே நான் சுடுகாட்டுல உட்கார்ந்திருந்தேன்... இங்க அது தெரியுமான்னு தெரியல - அந்த நம்பிக்கையிலேயே!
+அதனால அரை மணி நேரம் அல்லது நாற்பத்தைந்து நிமிஷம் இருந்து, கொஞ்சம் நேரம் கழிச்சு போய்டுங்க - உடம்பில முழுசா நெருப்பு பத்திட்டவுடனேயே!
+
+
+4. Formatting Rules (Continuous Flow)
+No Internal Line Breaks: Within a single paragraph, do not keep separate lines. The text should be a continuous, "wrapped" block of sentences for ease of reading.
+
+Preserve the "Broken" Rhythm: If a thought is grammatically "broken" or left hanging, do not fix it. Use the appropriate punctuation thread to show that it is part of a larger flow.
+
+Example of Transformation:
+
+Bad (Broken lines): ராமராஜ்யத்தைப் பத்தி பேசுறோம்... ஏன்னா -
+ராமராஜ்யம்னா... வெறும் ஒரு சிறந்த ஆட்சி மட்டுமில்ல;
+
+Good (Continuous Block):
+ராமராஜ்யத்தைப் பத்தி பேசுறோம்... ஏன்னா - ராமராஜ்யம்னா... வெறும் ஒரு சிறந்த ஆட்சி மட்டுமில்ல; அது... நியாயம், தர்மம், சுயநலமின்மை - இதோட ஒரு பிரதிபலிப்பு.
+
+5. Strict Constraints (The Red Threads)
+
+DO NOT remove the fast tags [fast]/[fast] - they are indications for tts to read those tagged areas with fast pace.
+DO NOT change the translation or the choice of Tamil words.
+
+DO NOT fix the grammar of the words themselves.
+
+DO NOT default to periods (.) at the end of every line. If the thought flows into the next line, use ; or -.
+
+REPLACE generic ellipses (...) with ; or - if the pause is actually a structural connection between ideas rather than a "thinking break."
+
+
+Note: In the results, don't give any additional information in English or Tamil. Just give the processed script. Because this processed script will directly go to dubbing Audio generator. So only the punctuated script should be present in the result.
+
+
+
+
+Below is the Tamil translation that mirrors the English spoken rhythm:
+

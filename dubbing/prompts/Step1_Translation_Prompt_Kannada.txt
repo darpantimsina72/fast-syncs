@@ -1,0 +1,1227 @@
+### Target language: Kannada (ಕನ್ನಡ)
+### Register: modern spoken Kannada (ಆಡುಭಾಷೆ), not literary
+### NOTE FROM PIPELINE: This prompt has been localized to Kannada.
+### All example sentences and word pairs below are in modern spoken
+### Kannada (Kannada script). Structural rules (pause handling with `...`,
+### hyphen `-` usage, paragraph breaks, thought-unit mapping) apply
+### UNCHANGED to Kannada. Kannada uses the Western full-stop `.` for
+### sentence boundaries (NOT the Bengali daṛi `।`).
+
+The goal is to generate a Kannada (ಕನ್ನಡ) dubbing script for the English talk given by Sadhguru (Including any other speakers who question or converse with him). The SRT file text will be given at the bottom.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+
+The SRT Temporal Blueprint: Mapping Threads to Pulses
+
+Instead of a plain transcript, you are receiving an SRT file. This file acts as the absolute structural blueprint for the dubbing script. Think of the SRT timestamps as the rigid framework of the loom.
+
+On-Signals (Spoken Pulses / Containers): The actual text block within a subtitle timestamp. This is continuous speech.
+
+Off-Signals (Silence Gaps / Spaces): The time gap between the end timestamp of one subtitle and the start timestamp of the next. This is a physical pause.
+
+CRITICAL RULE: The temporal blueprint overrides grammatical intuition. You must map the White Threads (thought units) onto these pulses and dictate the placement of your Green Threads (punctuation) strictly based on the On/Off signals, handling the mapping in the following ways:
+
+Before assessing case 1 or 2 or 3, first you must analyze and create the groups of subtitles, so that each group denotes one meaningful chunk or one thought unit of a complete thought.
+
+
+Case 1: One thought unit stretched across multiple pulses (e.g., 1 meaningful chunk or thought unit spoken over 3 subtitles):
+Do not smooth this out. You must weave a Green Thread (specifically the ... indicating a pause) exactly where the temporal gap occurs between the subtitles, even if it awkwardly breaks a Kannada clause in half. The pause must reflect the speaker's hesitation or deliberate pacing.
+
+Note that, only in this case, you can re arrange the sequence of these non-meaningful words/phrases that are building blocks of the meaningful chunk or a thought unit that was spread across multiple pulses, so that the thought unit or the meaningful chunk is formed in a natural way. Here still the pulses are separated by ... but they are resequenced to form a natural flow to form the meaningful chunk or thought unit.
+
+This applies only inside of a meaningful chunk/thought unit. The sequence of the meaningful chunks and thought units that form a complete thought remains same.
+In short, The "Holistic Mapping" Rule for case 1:
+When one thought unit or meaningful chunk is stretched across multiple pulses (pulses separated by ...), do not translate pulse-by-pulse. Instead:
+
+Synthesize: First, translate the entire English thought unit into a natural, complete Kannada sentence or clause.
+
+Distribute: Take that complete Kannada translation and "pour" it into the available pulse containers (the SRT timestamps).
+
+Fragment Naturally: When distributing the Kannada text across pulses, ensure that the text within each pulse forms a natural phonetic chunk (a phrase or sub-part) in Kannada.
+
+Transposition: Since Kannada is a Subject-Object-Verb (SOV) language and English is SVO, you must rearrange the words across the ... markers so the verb lands in the appropriate pulse for the Kannada flow, while ensuring the overall meaning matches the duration of the total pulses used.
+
+The "Bridge" Principle: Each segment between the ... should feel like a natural "breath" or a logical sub-component of the thought, not a random collection of words.
+
+Example of how to handle the "broken" input:
+
+English Pulses: the worship of the ... divine ... in the feminine form ... was hugely prevalent
+
+Wrong (Literal): ಇದರ ಆರಾಧನೆ ... ದೇವರನ್ನು ... ಸ್ತ್ರೀರೂಪದಲ್ಲಿ ... ವ್ಯಾಪಕವಾಗಿ ಇತ್ತು (This feels broken).
+
+Correct (Mapped): ದೇವರನ್ನು ... ಸ್ತ್ರೀರೂಪದಲ್ಲಿ ... ಆರಾಧಿಸೋದು ... ವ್ಯಾಪಕವಾಗಿ ಇತ್ತು (Each pulse now contains a logical Kannada phrase that builds toward the meaningful chunk/thought unit/conclusion).
+
+
+Case 2: Multiple thought units compressed into one pulse (e.g., 2-3 short sentences spoken rapidly in 1 subtitle):
+If the SRT shows continuous speech with no off-signal gaps, do not inject ... pauses just because the grammar suggests a new sentence. Translate the White Threads to flow rapidly together, using commas (,) in-between thought units and ; between different thoughts to maintain continuous structural phrasing to match the unbroken momentum of the speaker.
+
+Case 3: Overlapping boundaries (e.g., a pulse contains the end of thought A and the start of thought B):
+Translate the transition naturally with appropriate boundary punctuation, but reserve your heavy pause punctuation (... or -) only for where the actual SRT gap (Off-Signal) occurs.
+
+
+
+
+Now lets understand the requirement by an analogy.
+
+
+
+Its like weaving an art piece.
+
+
+
+The actual content itself is the white thread.
+
+The punctuation marks are the threads with green shades.
+
+… are the threads with pink shade.
+
+The paragraphs breaks are the threads with orange shades.
+
+The contextually perfect Kannada word choice is the thread of blue shades.
+
+The things that are not to be done are the red threads.
+
+
+
+Now as you start weaving the dubbing script you should carefully weave these color threads at appropriate places as per the instructions given below.
+
+
+
+Below is the information regarding the White threads:
+
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+“Life is not a problem to be solved…
+
+it is a reality to be experienced.”
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction (“No…”)
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels “broken”.
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+“Do you want peace?
+
+Or do you want to control everything?”
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts can be changed to create the sub part in a meaningful way. the subparts remain in the same order.
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of ‘Color A’ when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of ‘Color B’ when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid. these are joined with …
+
+Now the ‘Color A’ set and the ‘Color B’ set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+
+
+In short: Each individual piece that can be identified as a separate part or sub part is the white thread.
+
+
+
+To the extent possible make sure these pieces occur in the same sequence especially the meaningful chunks (made up of sub parts and internal parts)
+
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the coloured sections remain, the pieces of the same color that forms that colored section within can be rearranged.
+
+
+Below is the information regarding the green threads:
+
+now as we weave the white threads to form the sentences, we want to weave in the green threads (punctuation marks) as per the below rules.
+
+
+
+… indicates a pause in between the parts that makes a meaningful chunk or a clause.
+
+, indicates a pause between meaningful chunks that make up the sentence.
+
+; indicates connected sentences.
+
+Hyphen (-) indicates additional information related to the main idea of the sentence.
+
+
+
+
+we connect building parts with … to make up the internal part.
+
+we connect the internal parts with - to make up the subpart.
+
+we connect the subparts with ; to make up the body part.
+
+
+
+for example, the punctuation marks should be weaved like this:
+
+building part …  building part (one internal part)- another internal part - one more internal part; internal part - building part …  building part (another internal part);
+
+internal part -  building part …  building part (one internal part)
+
+subpart; subpart; internal part - internal part; building part…building part…building part; subpart
+
+
+
+
+Placing (-):
+
+  To Set Off Parenthetical Information:
+
+  Example: This is a very important point - one that you shouldn't forget.
+
+ Kannada: ಇದು ತುಂಬಾ ಮುಖ್ಯವಾದ ವಿಷಯ - ಮರೆಯಬಾರದಂಥದ್ದು.
+
+
+
+  Example: The students - all 35 of them - were excited for the field trip.
+
+  Kannada: ವಿದ್ಯಾರ್ಥಿಗಳು - ಎಲ್ಲಾ 35 ಜನ - ಫೀಲ್ಡ್ ಟ್ರಿಪ್‌ಗೆ ತುಂಬಾ ಉತ್ಸಾಹದಲ್ಲಿದ್ರು.
+
+
+
+ To Introduce a List:
+
+    Example: She bought many things - clothes, shoes, and accessories.
+
+Kannada: ಅವಳು ಬಹಳಷ್ಟು ವಸ್ತುಗಳನ್ನು ಕೊಂಡಳು - ಬಟ್ಟೆ, ಚಪ್ಪಲಿ, ಮತ್ತು ಬೇರೆ ಸಾಮಾನುಗಳು.
+
+
+
+
+   To Introduce an additional Explanation after completion of one thought:
+
+    Example: The reason for the delay - traffic congestion - was unavoidable.
+
+Kannada: ತಡವಾಗೋಕೆ ಕಾರಣ - ಟ್ರಾಫಿಕ್ ಜಾಮ್ - ತಪ್ಪಿಸೋಕೆ ಆಗಲಿಲ್ಲ.
+
+
+
+    Example: He is my uncle - who is a 7 feet tall man.
+
+Kannada: ಇವರು ನನ್ನ ಚಿಕ್ಕಪ್ಪ - ಏಳು ಅಡಿ ಎತ್ತರದ ಮನುಷ್ಯ.
+
+
+
+ Example: Today is Sunday - which is a holiday.
+
+Kannada: ಇವತ್ತು ಭಾನುವಾರ - ಅಂದ್ರೆ ರಜಾದಿನ.
+
+
+
+    To Indicate an Abrupt Break or Change in Thought:
+
+    Example: I was about to leave - wait, there's someone at the door.
+
+Kannada: ನಾನು ಹೊರಡೋಕೆ ಇದ್ದೆ - ಒಂದ್ನಿಮಿಷ, ಬಾಗಿಲಲ್ಲಿ ಯಾರೋ ಬಂದಿದಾರೆ.
+
+
+
+
+To separate inserted thoughts that need a new modulation.
+
+
+
+Pattern: Main sentence - inserted phrase - continuation of the main sentence.
+
+
+
+    Example: The most important thing - and I can't stress this enough - is to be yourself.
+
+Kannada: ಅತಿ ಮುಖ್ಯವಾದ ವಿಷಯ - ಎಷ್ಟು ಒತ್ತಿ ಹೇಳಿದ್ರೂ ಕಡಿಮೆಯೇ - ನೀವು ನೀವಾಗಿಯೇ ಇರೋದು.
+
+
+
+Example: After 100 years - only in 2010, I think - they figured it out... that this theorem describes the black holes... in the universe.
+
+Kannada: 100 ವರ್ಷಗಳ ನಂತರ - ಬಹುಶಃ 2010ರಲ್ಲಿ ಅನ್ಸತ್ತೆ - ಅವರು ಕಂಡುಹಿಡಿದರು... ಈ ಸಿದ್ಧಾಂತ ಬ್ರಹ್ಮಾಂಡದ ಕಪ್ಪು ಕುಳಿಗಳನ್ನು ವಿವರಿಸುತ್ತೆ ಅಂತ.
+
+
+
+To separate totally different details within a sentence.
+
+Pattern: Main Sentence - detail 1 - detail 2 - continuation of main sentence.
+
+Example: I must tell you this -  two, about maybe three, four years ago - a young woman of 33 or 34 years of age - in a city called Hyderabad in Southern India -  she was a television anchor - one day she did this thing.
+
+Kannada : ನಾನು ಇದನ್ನ ನಿಮಗೆ ಹೇಳಲೇಬೇಕು - ಸುಮಾರು ಎರಡು, ಮೂರು ಅಥವಾ ನಾಲ್ಕು ವರ್ಷಗಳ ಹಿಂದೆ - 33 ಅಥವಾ 34 ವರ್ಷದ ಒಬ್ಬ ಯುವತಿ - ದಕ್ಷಿಣ ಭಾರತದ ಹೈದರಾಬಾದ್ ಅನ್ನೋ ನಗರದಲ್ಲಿ - ಅವಳು ಒಬ್ಬ ಟೆಲಿವಿಷನ್ ಆ್ಯಂಕರ್ ಆಗಿದ್ಲು - ಒಂದು ದಿನ ಅವಳು ಈ ಕೆಲಸ ಮಾಡಿದ್ಲು.
+
+In below situation:
+
+When a phrase completes, clarifies, justifies, or defines a key concept or item mentioned immediately before it, so that it indicates change in tone.
+
+replace the punctuation before that phrase with a hyphen ( - ).
+
+Example: so in urban areas it may not matter -  because you have insurance and this and that.
+
+Kannada : ಹಾಗಾಗಿ ನಗರ ಪ್ರದೇಶಗಳಲ್ಲಿ ಇದು ಹೆಚ್ಚು ವಿಷಯ ಆಗದೆ ಇರಬಹುದು - ಯಾಕಂದ್ರೆ ನಿಮ್ಮ ಹತ್ರ ಇನ್ಶೂರೆನ್ಸ್ ಇದೆ, ಅದು ಇದು ಎಲ್ಲಾ ಇದೆ.
+
+
+
+Use ( - ) specifically when The phrase reveals the actual components of a previously stated category to ensure that the tone would land and conclude the meaning, not continue a list.
+
+Example: “two things — your body and your mind”
+
+Kannada : ಎರಡು ವಿಷಯಗಳು - ನಿಮ್ಮ ದೇಹ, ನಿಮ್ಮ ಮನಸ್ಸು.
+
+
+
+
+Below is the information regarding the Pink threads:
+
+
+… should not occur in the text that belong to one single pulse. Even though grammatically it makes sense. Even though there are multiple thought units/phrases/sentences in it. because each pulse is a continuous speech, we don't want the gap in between the continuous pulse.
+
+… only to be placed when there is a pause in between pulses that make up a single thought unit or clause or sentence.
+
+
+
+Below is the information regarding the orange threads:
+
+
+
+Each orange thread is the paragraph break that happens in the dubbing script.
+
+Below are the rules where to weave in the orange thread.
+
+
+
+
+
+When the subject changes (e.g., from speaking about 'Nature' to 'Humans')
+
+When the focus moves from one concept to a completely new idea.
+
+Switch from Description to Reason
+
+Switch from one Context to another.
+
+Switch from Positive to Negative contrast
+
+Split the Question from its Answer.
+
+Before a quoted thought or dialogue starts.
+
+When a sentence structure repeats with a different subject.
+
+When the speaker or the person being quoted changes.
+
+When it changes from a core subject to its explanation using an example, illustration, or analogy.
+
+
+
+
+
+And the sentences that occur within one para can be made into one continuous paragraph. no need to keep them as separate lines within the paragraph.
+
+Example:
+
+ನಾವು ರಾಮರಾಜ್ಯದ ಬಗ್ಗೆ ಮಾತಾಡ್ತೀವಿ... ಯಾಕಂದ್ರೆ -
+
+ರಾಮರಾಜ್ಯ ಅಂದ್ರೆ... ಬರೀ ಒಂದು ಮಹಾನ್ ಆಡಳಿತ ಅಲ್ಲ;
+
+ಅದು... ನ್ಯಾಯ, ಧರ್ಮ, ನಿಸ್ವಾರ್ಥತೆಯ ಒಂದು ಪ್ರತಿಬಿಂಬ.
+
+
+
+in the above it is one paragraph, but it is three lines in a paragraph. the linebreaks within the paragraph can be removed and it can be made into continuous sentences for ease of reading as shown below:
+
+ನಾವು ರಾಮರಾಜ್ಯದ ಬಗ್ಗೆ ಮಾತಾಡ್ತೀವಿ... ಯಾಕಂದ್ರೆ - ರಾಮರಾಜ್ಯ ಅಂದ್ರೆ... ಬರೀ ಒಂದು ಮಹಾನ್ ಆಡಳಿತ ಅಲ್ಲ; ಅದು... ನ್ಯಾಯ, ಧರ್ಮ, ನಿಸ್ವಾರ್ಥತೆಯ ಒಂದು ಪ್ರತಿಬಿಂಬ.
+
+
+
+
+CRITICAL FORMATTING RULE: Continuous Text Blocks
+
+
+
+No Soft Breaks: Do not use line breaks or newlines within a paragraph for visual formatting.
+
+
+
+Single Line Constraint: Each paragraph block must be rendered as one single, continuous line of text.
+
+
+
+Separation: Use a double line break only between different paragraphs.
+
+
+
+
+
+
+
+Below is the information regarding the blue threads:
+
+
+
+There are the points where you have to identify the actual contextually best Kannada word or phrase; and identify the actual intention of sadhguru behind those words spoken by him. There are the places where literal word based translation fails. and you have to think deep and pick the appropriate Kannada expression that conveys the actual contextual point and intention.
+
+
+
+
+
+
+
+Need 1: Polishing the Script into a day to day spoken style:
+
+
+
+    Scenario 1.
+
+    In Kannada the translations for a, an and the are not needed - unless in specific cases.
+
+
+
+
+
+
+    Scenario 2.
+
+    In Kannada in many cases, an explicit pronoun can be dropped when context makes it clear, since the verb form or topic continuity carries the subject.
+
+
+
+
+    Scenario 3: Preferred word pairs
+
+    Dimension - ಆಯಾಮ
+
+    You know - ಗೊತ್ತಲ್ಲ..
+
+    Life - ಜೀವನ
+
+    People - ಜನರು / ಜನ
+
+    Intense - ತೀವ್ರತೆ
+
+    Lifetime - ಜನ್ಮ
+
+    essentially - ಮೂಲತಃ
+
+    intense - ತೀವ್ರತೆ (not ಪ್ರಚಂಡತೆ in this context)
+
+    isn’t it? - ಅಲ್ಲವೇ?
+
+
+
+
+Scenario 4:
+
+This applies only to the segments that are lengthy in Kannada. In English, the segment is spoken with fewer words, but in Kannada, the written style contains more words which will exceed the time of the English segment. Mainly in such cases, we try to make the segment short by combining the words like we combine while talking (colloquial style). And in some cases, even though the words are more, Sadhguru speaks them fast. In such cases also shortening is needed. By analyzing the audio, please shorten the segments as and when necessary.
+
+
+
+CRITICAL: Remember we are not removing any segment, example, or list - we are trying to make it short by expressing the exact same content in fewer words / shorter syllables.
+
+
+
+
+    Example 1:
+
+    Fast spoken English segment: I'm not saying these things are wrong.
+
+    Kannada Lengthy sentence: ಇವೆಲ್ಲಾ ತಪ್ಪು ಅಂತ ನಾನು ಹೇಳ್ತಾ ಇಲ್ಲ.
+
+    Kannada Shortened Sentence: ಇವು ತಪ್ಪು ಅಂತ ಹೇಳ್ತಿಲ್ಲ.
+
+
+
+
+    Example 2:
+
+    Fast spoken English segment: Not some fanciful thing that I want to do or you want to do.
+
+    Kannada Lengthy sentence: ನಾನು ಮಾಡಬೇಕು ಅಂತ ಬಯಸೋ ಅಥವಾ ನೀವು ಮಾಡಬೇಕು ಅಂತ ಬಯಸೋ ಯಾವುದೋ ಕಾಲ್ಪನಿಕ ವಿಷಯ ಅಲ್ಲ.
+
+    Kannada Shortened Sentence: ನಾನು ಅಥವಾ ನೀವು ಮಾಡಬಯಸೋ ಕಾಲ್ಪನಿಕ ವಿಷಯ ಏನಲ್ಲ.
+
+
+
+
+    Example 3:
+
+    Fast spoken English segment: There are many others who would like to be you. 'Oh, I wish I was 20 and I wish I could think what to do.
+
+    Kannada Lengthy sentence: 'ಆಹಾ, 20 ವರ್ಷ ವಯಸ್ಸಲ್ಲಿ ಏನು ಮಾಡಬೇಕು ಅಂತ ಯೋಚಿಸೋಕೆ ಆಗಿದ್ರೆ ಎಷ್ಟು ಚೆನ್ನಾಗಿತ್ತು. ಆ ಸಮಯದಲ್ಲಿ ನಾನು ಏನಾದ್ರೂ ಮಾಡಿಯೇ ಬಿಡ್ತಿದ್ದೆ.' - ಹೀಗೆ ಯೋಚಿಸೋ ಜನ ಇಲ್ಲಿ ಬಹಳಷ್ಟು ಇದಾರೆ.
+
+    Kannada Shortened Sentence: 'ಆಹಾ, 20ಕ್ಕೆ ಏನು ಮಾಡಬೇಕು ಅಂತ ಯೋಚಿಸೋಕಾಗಿದ್ರೆ ಚೆನ್ನಾಗಿತ್ತು. ಆಗ್ಲೇ ಏನಾದ್ರೂ ಮಾಡಿಬಿಡ್ತಿದ್ದೆ.' - ಹೀಗೆ ಯೋಚಿಸೋರು ಇಲ್ಲಿ ತುಂಬಾ ಜನ ಇದಾರೆ.
+
+
+
+
+  Scenario 5:
+
+    Aspect: Missing Detail
+
+    English: So you must fix yourself, you must engineer yourself the way you think is the best way to be for a human being;
+
+    Basic Translation: ಹಾಗಾಗಿ - ಮನುಷ್ಯನಾಗಿ ಇರೋಕೆ ಯಾವುದು ಅತ್ಯುತ್ತಮ ರೀತಿ, ಆ ರೀತಿಯಲ್ಲೇ ನಿಮ್ಮನ್ನು ನೀವೇ ರೂಪಿಸಿಕೊಳ್ಳಬೇಕು;
+
+    Optimized Translation: ಹಾಗಾಗಿ - ಮನುಷ್ಯನಾಗಿ ಇರೋಕೆ ಯಾವುದು ಅತ್ಯುತ್ತಮ ರೀತಿ ಅಂತ ಅನ್ಸತ್ತೋ, ಆ ರೀತಿಯಲ್ಲೇ ನಿಮ್ಮನ್ನು ನೀವೇ ಕಟ್ಟಿಕೊಳ್ಳಬೇಕು;
+
+    Details of optimization: ‘ಅಂತ ಅನ್ಸತ್ತೋ’ is the detail for ‘you think is’
+
+
+
+
+  Scenario 6:
+
+    Aspect: Thought Flow
+
+
+
+    English:
+
+    Living strong means your level of experience is intense and enormous.
+
+
+
+    Your level of experience will become enormous - only when your level of attention is absolute.
+
+    Basic Translation:
+
+     ಶಕ್ತಿಯುತವಾಗಿ ಬದುಕೋದು ಅಂದ್ರೆ - ನಿಮ್ಮ ಅನುಭವದ ಮಟ್ಟ ತೀವ್ರ ಮತ್ತು ಅಗಾಧವಾಗಿರೋದು.
+
+
+
+    ಯಾವಾಗ ನಿಮ್ಮ ಗಮನ ಸಂಪೂರ್ಣವಾಗಿರತ್ತೋ, ಆಗ ನಿಮ್ಮ ಅನುಭವದ ಮಟ್ಟವೂ ಅಗಾಧವಾಗತ್ತೆ.
+
+
+
+    Optimized Translation:
+
+    ಶಕ್ತಿಯುತವಾಗಿ ಬದುಕೋದು ಅಂದ್ರೆ - ನಿಮ್ಮ ಅನುಭವದ ಮಟ್ಟ ತೀಕ್ಷ್ಣ ಮತ್ತು ಅಗಾಧವಾಗಿರೋದು.
+
+
+
+    ನಿಮ್ಮ ಅನುಭವದ ಮಟ್ಟ ಅಗಾಧವಾಗತ್ತೆ - ಯಾವಾಗ ನಿಮ್ಮ ಗಮನ ಸಂಪೂರ್ಣವಾಗತ್ತೋ ಆಗ!
+
+    Details of optimization:
+
+    Let us take these two sentences as A and B.  'The enormity of experience’ is in the ending portion of A  and is in the beginning portion of B. Thus ensuring a smooth flow of thoughts and connectivity.
+
+
+
+
+Scenario 7:
+
+   Aspect:  Exact detail without deviation
+
+
+
+    English:
+
+    Though I am known to be a yogi - very analytical and logical - essentially, I have always lived my life as a devotee.
+
+    Basic Translation:
+
+    ಎಲ್ಲರೂ ನನ್ನನ್ನು ತುಂಬಾ ವಿಶ್ಲೇಷಣಾತ್ಮಕ, ತಾರ್ಕಿಕ ಯೋಗಿ ಅಂತ ಭಾವಿಸ್ತಾರೆ, ಆದ್ರೆ ನಿಜ ಹೇಳಬೇಕು ಅಂದ್ರೆ ನಾನು ಯಾವಾಗಲೂ ಒಬ್ಬ ಭಕ್ತನಾಗಿಯೇ ನನ್ನ ಜೀವನ ಕಳೆದಿದ್ದೀನಿ.
+
+    Optimized Translation:
+
+    ಎಲ್ಲರೂ ನನ್ನನ್ನು ತುಂಬಾ ವಿಶ್ಲೇಷಣಾತ್ಮಕ, ತಾರ್ಕಿಕ ಯೋಗಿ ಅಂತ ನೋಡಿದ್ರೂ, ಮೂಲತಃ, ನಾನು ಯಾವಾಗಲೂ ಒಬ್ಬ ಭಕ್ತನಾಗಿಯೇ ನನ್ನ ಜೀವನ ಕಳೆದಿದ್ದೀನಿ.
+
+    Details of optimization:
+
+    ‘ಭಾವಿಸ್ತಾರೆ’ is a slight deviation from what is said. ‘ನೋಡಿದ್ರೂ’ is closer to the actual detail ‘known to be’ in English.
+
+
+
+    ‘ನಿಜ ಹೇಳಬೇಕು ಅಂದ್ರೆ’ conveys contradiction. ‘ಮೂಲತಃ’ conveys different levels of things - this is for the word ‘essentially’.
+
+
+
+
+Scenario 8:
+
+
+
+    Aspect:  Modulation Cues
+
+
+
+    English: I want you to understand... how difficult the spiritual process is going to be for you - is determined by you - not by nature and not by your guru.
+
+    Basic Translation:
+
+    ನೀವು ಒಂದು ವಿಷಯ ಅರ್ಥ ಮಾಡ್ಕೊಳ್ಳಿ... ಆಧ್ಯಾತ್ಮಿಕ ಪ್ರಕ್ರಿಯೆ ನಿಮಗೆ ಎಷ್ಟು ಕಷ್ಟ ಆಗತ್ತೆ ಅನ್ನೋದು... ಅದು ನಿಮ್ಮಿಂದಲೇ ನಿರ್ಧಾರ ಆಗತ್ತೆ, ಪ್ರಕೃತಿಯಿಂದ ಅಲ್ಲ, ನಿಮ್ಮ ಗುರುವಿನಿಂದಲೂ ಅಲ್ಲ.
+
+    Optimized Translation:
+
+    ನೀವು ಒಂದು ವಿಷಯ ಅರ್ಥ ಮಾಡ್ಕೊಳ್ಳಿ... ಆಧ್ಯಾತ್ಮಿಕ ಪ್ರಕ್ರಿಯೆ ನಿಮಗೆ ಎಷ್ಟು ಕಷ್ಟ ಆಗತ್ತೆ ಅನ್ನೋದು... ಅದು ನಿಮ್ಮಿಂದಲೇ ನಿರ್ಧಾರ ಆಗತ್ತೆ - ಪ್ರಕೃತಿಯಿಂದ ಅಲ್ಲ, ನಿಮ್ಮ ಗುರುವಿನಿಂದಲೂ ಅಲ್ಲ.
+
+    Details of optimization:
+
+    Once one thought is completed and next there is additional information, use - at the end of the main thought, so that the dubbing artist will complete that thought, and again add information after that - instead of reading the whole thing like a list of things.
+
+
+
+
+Scenario 9:
+
+
+
+Aspect: Modulation based ending
+
+Written: ತಲೆ ಕೆಡಿಸಿಕೊಳ್ಳೋದು ಬೇಡ, <Refining>ಗಮನಿಸಬೇಕು - ಯಾರು ಏನು ಹೇಳ್ತಿದಾರೆ ಅನ್ನೋದನ್ನು.</Refining>
+
+
+
+Tuned for Dubbing: ತಲೆ ಕೆಡಿಸಿಕೊಳ್ಳೋದು ಬೇಡ, <Refining>ಗಮನಿಸಬೇಕು - ಯಾರು ಏನು ಹೇಳ್ತಿದಾರೆ ಅಂತ!</Refining>
+
+
+
+
+scenario 10:
+
+Aspect: short notation while speaking
+
+
+
+Written: ನಿಮಗೆ ಗೊತ್ತಾ
+
+Tuned for Dubbing: ಗೊತ್ತಲ್ಲ
+
+
+
+
+Written: ಗೊತ್ತಿಲ್ಲದಿದ್ರೆ
+
+Tuned for Dubbing: ಗೊತ್ತಿಲ್ಲದಿದ್ರೆ / ಗೊತ್ತಿಲ್ಲ ಅಂದ್ರೆ
+
+
+
+Written: ಏನು ಅಂತ
+
+Tuned for Dubbing: ಏನು ಅಂತ
+
+
+
+
+Written: ಕೇಳ್ತಾರೆ
+
+Tuned for Dubbing: ಕೇಳ್ತಾರೆ
+
+
+
+Written: <Refining>ನೀವು ಇಲ್ಲಿಗೆ</Refining> ಬಂದಿದೀರಿ ಏನೂ ತಗೊಳ್ಳದೆ
+
+Tuned for Dubbing: <Refining>ಇಲ್ಲಿಗೆ ಬಂದಿದೀರಿ</Refining> ಏನೂ ತಗೊಳ್ಳದೆ
+
+
+
+Written: ಆಹಾರ ನಿಮ್ಮ ಬಾಯಲ್ಲಿ ಎಷ್ಟು <Refining>ಜಾಸ್ತಿ ಸಮಯ ಇರತ್ತೆ</Refining>, ನಿಮ್ಮ ಜೀರ್ಣಕ್ರಿಯೆ ಅಷ್ಟು ಚೆನ್ನಾಗಿರತ್ತೆ;
+
+Tuned for Dubbing: ಆಹಾರ ನಿಮ್ಮ ಬಾಯಲ್ಲಿ ಎಷ್ಟು <Refining>ಹೊತ್ತು ಇರತ್ತೆ</Refining>, ಜೀರ್ಣಕ್ರಿಯೆ ಅಷ್ಟು ಚೆನ್ನಾಗಿರತ್ತೆ;
+
+
+
+Written: ಆಧ್ಯಾತ್ಮಿಕ ಮಾರ್ಗದಲ್ಲಿದೀರಿ ಅಂದ್ರೆ, ನಿಮ್ಮ ಜೀವನದಲ್ಲಿ ಏನೋ ಭಯಾನಕ <Refining> ಆಗಿರಲೇಬೇಕು</Refining> - ಅಂತ ಅವರು ಗಟ್ಟಿಯಾಗಿ ನಂಬ್ತಾರೆ.
+
+Tuned for Dubbing: ಆಧ್ಯಾತ್ಮಿಕ ಮಾರ್ಗದಲ್ಲಿದೀರಿ ಅಂದ್ರೆ, ನಿಮ್ಮ ಜೀವನದಲ್ಲಿ ಏನೋ ಭಯಾನಕ <Refining> ಆಗೇ ಇರತ್ತೆ </Refining> - ಅಂತ ಅವರು ಗಟ್ಟಿಯಾಗಿ ನಂಬ್ತಾರೆ.
+
+
+
+scenario 11:
+
+Aspect: Not explicitly mentioning the redundant subject
+
+
+
+Written:  "ಓಹ್ <Refining>ನೀವು ಆಶ್ರಮದಲ್ಲಿ ಇರ್ತೀರಿ</Refining>, ಹಾಗಾದ್ರೆ, ನಿಮಗೆ ಏನು ಕಷ್ಟ?" ಅಂತ ಕೇಳ್ತಾರೆ.
+
+Tuned for Dubbing:  "ಓಹ್ <Refining>ಆಶ್ರಮದಲ್ಲಿ ಇರ್ತೀರಿ</Refining>, ಹಾಗಾದ್ರೆ, ನಿಮಗೆ ಏನು ಕಷ್ಟ?" ಅಂತ ಕೇಳ್ತಾರೆ.
+
+
+
+
+Explanation: in English the subject must be there, but in Kannada, when the verb form, the topic continuity, or context already conveys the subject, the explicit pronoun can be dropped in spoken style.
+
+
+
+Written:  <Refining>ನೀವು ಆಧ್ಯಾತ್ಮಿಕ ಮಾರ್ಗದಲ್ಲಿದೀರಿ ಅಂದ್ರೆ</Refining>, ನಿಮ್ಮ ಜೀವನದಲ್ಲಿ ಏನೋ ಭಯಾನಕ ಆಗೇ ಇರತ್ತೆ - ಅಂತ ಅವರು ಗಟ್ಟಿಯಾಗಿ ನಂಬ್ತಾರೆ.
+
+Tuned for Dubbing:  <Refining>ಆಧ್ಯಾತ್ಮಿಕ ಮಾರ್ಗದಲ್ಲಿದೀರಿ ಅಂದ್ರೆ</Refining>, ನಿಮ್ಮ ಜೀವನದಲ್ಲಿ ಏನೋ ಭಯಾನಕ ಆಗೇ ಇರತ್ತೆ - ಅಂತ ಅವರು ಗಟ್ಟಿಯಾಗಿ ನಂಬ್ತಾರೆ.
+
+
+
+
+Written:
+
+ ಹಾಗೆ ಮಾಡಿದ್ರೆ... ಕಡಿಮೆ ಅಂದ್ರೂ 30 ರಿಂದ 40% ಜೀರ್ಣಕ್ರಿಯೆ ಬಾಯಲ್ಲೇ ಆಗಿಬಿಡತ್ತೆ - ಆಗಲೇ, ಅದು ಸಿದ್ಧವಾಗತ್ತೆ; ಈಗ ಆಹಾರ ಬಾಯಲ್ಲೇ ಸರಿಯಾಗಿ ಸಿದ್ಧವಾಗಿರತ್ತೆ; <Refining>ಅದು ಒಳಗೆ ಹೋದ್ರೆ... ಹೊಟ್ಟೆ ಅದನ್ನೇ ನಿರೀಕ್ಷಿಸತ್ತೆ - ಅರ್ಧ-ಜೀರ್ಣವಾದ ಆಹಾರ!</Refining>
+
+Tuned for Dubbing:
+
+ ಹಾಗೆ ಮಾಡಿದ್ರೆ... ಕಡಿಮೆ ಅಂದ್ರೂ 30 ರಿಂದ 40% ಜೀರ್ಣಕ್ರಿಯೆ ಬಾಯಲ್ಲೇ ಆಗಿಬಿಡತ್ತೆ - ಆಗಲೇ, ಅದು ಸಿದ್ಧವಾಗತ್ತೆ; ಈಗ ಆಹಾರ ಬಾಯಲ್ಲೇ ಸರಿಯಾಗಿ ಸಿದ್ಧವಾಗಿರತ್ತೆ; <Refining> ಒಳಗೆ ಹೋದ್ರೆ... ಹೊಟ್ಟೆ ಅದನ್ನೇ ನಿರೀಕ್ಷಿಸತ್ತೆ - ಅರ್ಧ-ಜೀರ್ಣವಾದ ಆಹಾರ!</Refining>
+
+
+
+Explanation: in English the subject must be there, but in Kannada sentences can be formed without the subject. Here the tagged part is the continuation of the first part, the subject is already established in the first part. In the second part which is a follow-up, in Kannada we can skip mentioning the subject again. In spoken style, the subject is implied here.
+
+
+
+Scenario 12:
+
+While quoting what someone spoke:
+
+Please place the quoted text in the double quotes and Bring the verb part to the end of the sentence while quoting someone's words or while expressing internal thought process.
+
+
+
+
+Examples:
+
+
+
+Example:
+
+
+
+Original : ಅವರು <T3>ಭಾವಿಸ್ತಾರೆ<T3> ಈಗ ಆಧ್ಯಾತ್ಮಿಕತೆ ಅಂದ್ರೆ ನೀವು ಹಿಮಾಲಯಕ್ಕೆ ಹೋಗಬೇಕು ಅಥವಾ ಕಾಶಿಗೆ ಹೋಗಬೇಕು... ಅಥವಾ ಎಲ್ಲಾ ಬಿಡಬೇಕು
+
+
+
+optimized : ಅವರು “ಈಗ ಆಧ್ಯಾತ್ಮಿಕತೆ ಅಂದ್ರೆ ನೀವು ಹಿಮಾಲಯಕ್ಕೆ ಹೋಗಬೇಕು ಅಥವಾ ಕಾಶಿಗೆ ಹೋಗಬೇಕು... ಅಥವಾ ಎಲ್ಲಾ ಬಿಡಬೇಕು” - ಅಂತ <T3>ಭಾವಿಸ್ತಾರೆ<T3>
+
+
+
+description:
+
+Here the structure is subject then comma then the thought or the words spoken by the subject in quotes then the verb that conveys saying or thinking and then period or question mark or other punctuation as per the need. Remember the … and - and ; within the quoted portion are still preserved.
+
+
+
+Example:
+
+Original
+
+ಪ್ರತಿಯೊಬ್ಬರೂ <T3>ಕೇಳ್ತಾ ಇದಾರೆ<T3>, "ಸದ್‌ಗುರು, ನೀವು ಇದಕ್ಕೆ ಯಾಕೆ ಇಷ್ಟು ತಲೆ ಕೆಡಿಸಿಕೊಳ್ತಿದೀರಿ?"
+
+
+
+optimized :
+
+ಪ್ರತಿಯೊಬ್ಬರೂ, "ಸದ್‌ಗುರು, ನೀವು ಇದಕ್ಕೆ ಯಾಕೆ ಇಷ್ಟು ತಲೆ ಕೆಡಿಸಿಕೊಳ್ತಿದೀರಿ?" - ಅಂತ <T3>ಕೇಳ್ತಾ ಇದಾರೆ<T3>.
+
+
+
+
+Example:
+
+Original
+
+<T3>ನಾನು ಹೇಳಿದೆ<T3>, ಅವರಿಗೆ ಕುಡಿಯೋಕೆ ನೀರೇ ಇಲ್ಲ ಅಂದ್ರೆ... ನಾನು ಅವರಿಗೆ ಧ್ಯಾನ ಮಾಡೋಕೆ ಹೇಗೆ ಹೇಳಲಿ?
+
+
+
+
+Optimized:
+
+<T3>ನಾನು<T3>, “ಅವರಿಗೆ ಕುಡಿಯೋಕೆ ನೀರೇ ಇಲ್ಲ ಅಂದ್ರೆ... ನಾನು ಅವರಿಗೆ ಧ್ಯಾನ ಮಾಡೋಕೆ ಹೇಗೆ ಹೇಳಲಿ?” - <T3>ಅಂತ ಹೇಳಿದೆ<T3>
+
+
+
+description:
+
+Here the subject who spoke and the verb that conveys the speaking are in one word. we have separated them, and placed the subject before the quoted part and the verb after the quoted part.
+
+
+
+
+Original:
+
+ಜನ ನನ್ನನ್ನು <T3>ಕೇಳ್ತಾನೇ ಇರ್ತಾರೆ<T3>, "ಸದ್‌ಗುರು, ಈ ದೇಶದಲ್ಲಿ ಆಧ್ಯಾತ್ಮಿಕ ಪ್ರಕ್ರಿಯೆಯನ್ನು ಮರಳಿ ತರೋ ದಾರಿ ಯಾವುದು?"
+
+
+
+Optimized:
+
+ಜನ ನನ್ನನ್ನು <T3>ಹೀಗೇ<T3> ಕೇಳ್ತಾ ಇರ್ತಾರೆ, "ಸದ್‌ಗುರು, ಈ ದೇಶದಲ್ಲಿ ಆಧ್ಯಾತ್ಮಿಕ ಪ್ರಕ್ರಿಯೆಯನ್ನು ಮರಳಿ ತರೋ ದಾರಿ ಯಾವುದು?" <T3>ಅಂತ ಹೇಳ್ತಾರೆ.<T3>
+
+
+
+ description:
+
+Here the subject part is long, bringing the whole long phrase to the end may make sync loss while dubbing. So what we did is, we added the verb that conveys asking again at the end to make it end in a natural way of spoken Kannada. also note that we have added the word ಹೀಗೇ as a cataphoric adverb / discourse-bridging adverb.
+
+
+
+
+In Short below is the instruction in summary:
+
+Primary Directive: Create a Dubbing Performance Script
+
+Your goal is not just to translate, but to create a performance script for a dubbing artist. This means capturing the speaker's exact timing, rhythm, and pauses is your highest priority, even if it occasionally makes the sentence structure feel less conventional than written text.
+
+CRITICAL RULE: Meticulous Pause Transcription
+
+Non-Negotiable Pauses: You must use ... to mark every noticeable pause or hesitation in the speaker's delivery. This is the single most important rule.
+
+Priority Over Flow: If a choice must be made between a perfectly natural sentence flow and accurately placing a ... to match the speaker's timing, always prioritize matching the pause. It is better to have a slightly unusual sentence structure that syncs perfectly than a smooth sentence that doesn't.
+
+Review for Pauses: Before finalizing your output, perform a final mental check specifically for this rule: "Have I captured all the short, rhythmic pauses, or have I smoothed them over?"
+
+
+
+
+Below is the information regarding Red threads:
+
+Do not hallucinate.
+
+Do not remove or summarize the units.
+
+Do not add information that is not actually spoken.
+
+Do not re arrange the sentences or clauses just to prioritize the flow within the sentence. this will break the flow between the sentences.
+
+Do not skip the portions that are not spoken by sadhguru. Should include other speakers translation also.
+
+Do not skip the promo part.
+
+Do not explicitly create promo part if it is not there in english. if it's not there in english, in Kannada also it should not be there.
+
+Do not skip the part in the main talk just because it has already come in the promo part/previous parts.
+
+Do not skip English sentences or phrases thinking they are redundant or irrelevant or secondary details. Every thing said in English should be reflected in Kannada.
+
+THIS IS NOT A SUMMARY, THIS IS A DUBBING SCRIPT WHERE DIALOGUES ARE DUBBED AND ATTACHED TO THE ORIGINAL VIDEO. SO NO SKIPPING PARTS OR PHRASES OR DETAILS.
+
+
+
+
+Below are the must do:
+
+Keep every redundant phrase.
+
+Keep every repetition.
+
+keep every redundant detail.
+
+keep every insignificant detail.
+
+in the middle of a sentence, if he adds additional sentence or a secondary information, do not skip it, reflect every minute detail spoken just place a - before those parts.
+
+
+
+
+Below are example Kannada scripts weaved using all the color threads:
+
+
+
+1. ನಾನು ಈ ಮೊದಲು ಯಾವತ್ತೂ ಧ್ಯಾನ ಮಾಡಿಲ್ಲ...
+
+
+
+
+ಸದ್‌ಗುರು:
+
+“ಓ ನಾನು ಈ ಮೊದಲು ಯಾವತ್ತೂ ಧ್ಯಾನ ಮಾಡಿಲ್ಲ; ಧ್ಯಾನ ಹೇಗೆ ಮಾಡಲಿ!” - ಇದು ಒಳ್ಳೇ ವಿಷಯವೇ, ಈ ಮೊದಲು ಯಾವತ್ತೂ ಧ್ಯಾನ ಮಾಡಿರಲಿಲ್ಲ ಅಂದ್ರೆ!
+
+
+
+ಧ್ಯಾನಕ್ಕೆ ಯಾವುದೇ ಪ್ರತಿಭೆ ಬೇಕಿಲ್ಲ; ಯಾವುದೇ ಅಭ್ಯಾಸ ಬೇಕಿಲ್ಲ; ಯಾವುದೇ ಹಿರಿತನ ಬೇಕಿಲ್ಲ; ಯಾವುದೇ ಅನುಭವವೂ ಬೇಕಿಲ್ಲ; ಬೇಕಾಗಿರೋದು ಬರೀ ‘ಇಚ್ಛೆ’ … ಬರೀ ಅಷ್ಟೇ!
+
+
+
+‘ಸಂಪೂರ್ಣವಾಗಿ ಇಚ್ಛೆಯಿಂದ ಇರೋದು’ - ಧ್ಯಾನಕ್ಕೆ ಬೇಕಾಗಿರೋದು ಇದೇ!
+
+
+
+ಮತ್ತೆ, ನೀವು ಒಂದು ವಿಷಯ ಕಲಿಯಿರಿ - ಯಾವತ್ತೂ ಅನುಭವಿ ಧ್ಯಾನಿ ಆಗ್ಬೇಡಿ - ಆಗಿಬಿಟ್ರೆ, ನಿಮ್ಮನ್ನು ನೀವೇ ಒಂದು ಸಂಕೀರ್ಣತೆಗೆ ತಳ್ಳಿಕೊಳ್ತೀರಿ!
+
+
+
+ ‘ಧ್ಯಾನ’ ಪ್ರತಿ ಸಲವೂ ಹೊಸದಾಗಿ ಅರಳೋ ಹಾಗೆ! ಪ್ರತಿ ಸಲವೂ ಇದು ಒಂದು ಹೊಸ ಸಾಧ್ಯತೆ.
+
+
+
+ಹಾಗಲ್ಲ, …   "ನಾನು ಇಪ್ಪತ್ತು ವರ್ಷ ಧ್ಯಾನ ಮಾಡಿದ್ದೀನಿ, ಹಾಗಾಗಿ ನಾನು ಅನುಭವಿ ಧ್ಯಾನಿ!" …   ಹೀಗೆ ಯಾವುದೂ ಇಲ್ಲ.
+
+
+
+ಉದಾಹರಣೆಗೆ - ಅಂದ್ಕೊಳ್ಳಿ, ನೀವು ಕಳೆದ ಹತ್ತು ವರ್ಷಗಳಿಂದ ಗಾರ್ಡನಿಂಗ್ ಮಾಡ್ತಿದೀರಿ; ಅಂದ್ರೆ - ಈ ಸಲ, ಈ ಋತುವಿನಲ್ಲಿ, ‘ಸಸಿ ನೆಡದೇ ಇದ್ರೂ, ತೋಟದಲ್ಲಿ ಹೂವು ತಾನಾಗಿಯೇ ಅರಳತ್ತಾ’? ಅಥವಾ ‘ನೀರು ಹಾಕದೆ ಇದ್ರೂ, ತೋಟದಲ್ಲಿ ಹೂವು ತಾನಾಗಿಯೇ ಅರಳತ್ತಾ’? ಆರೈಕೆ ಮಾಡದೇ ಇದ್ರೂ, ಹೂವು ತಾನಾಗಿಯೇ ಅರಳತ್ತಾ - ಯಾಕಂದ್ರೆ ನಿಮಗೆ ಅನುಭವ ಇದೆ ಅಂತ!? - ಹಾಗೆ ಆಗತ್ತಾ?
+
+
+
+ಇಲ್ಲ, ಈ ಸಲನೂ ಎಲ್ಲಾ ಸರಿಯಾಗಿ ಮಾಡಲೇಬೇಕು. ಆಗ್ಲೇ ಹೂವು ಅರಳತ್ತೆ; ಅಲ್ಲವೇ?
+
+
+
+ಬಹುಶಃ... ಮಣ್ಣನ್ನು ಹೇಗೆ ಇಡಬೇಕು... ಎಷ್ಟು ನೀರು ಹಾಕಬೇಕು … ತೋಟವನ್ನು ಹೇಗೆ ನಡೆಸಬೇಕು - ಬಹುಶಃ ಈ ವಿಷಯದಲ್ಲಿ ಅನುಭವ ಸಹಾಯಕ್ಕೆ ಬರತ್ತೆ; ಇಲ್ಲದಿದ್ರೆ ಹೂವು ತಾನಾಗಿಯೇ ಅರಳಿಬಿಡಲ್ಲ - ಬರೀ ನಿಮಗೆ ಅನುಭವ ಇದೆ ಅಂತ! ಜೀವನದಲ್ಲಿ ಯಾವುದೂ - ಅನುಭವ ಇದೆ ಅಂತ ತಾನಾಗಿಯೇ ಆಗಲ್ಲ. ಈ ಸಲನೂ ಎಲ್ಲಾ ಸರಿಯಾಗಿ ಮಾಡಲೇಬೇಕು, ಅಲ್ಲವೇ?
+
+
+
+ಆಂ?
+
+
+
+ಧ್ಯಾನದ ವಿಷಯದಲ್ಲೂ ಹಾಗೇ, ಯಾವತ್ತೂ ಸೀನಿಯರ್ ಧ್ಯಾನಿ ಆಗ್ಬೇಡಿ. ಧ್ಯಾನಕ್ಕೆ ಕೂರೋ ಪ್ರತಿ ಸಲನೂ, ಜೀವನದಲ್ಲಿ ಇದೇ ಮೊದಲ ಸಲ ಕೂರ್ತಿದೀರಿ - ಹೀಗೆ ಕೂರಿ. ಆಗ್ಲೇ ಇದು ಚೆನ್ನಾಗಿ ಕೆಲಸ ಮಾಡತ್ತೆ.
+
+
+
+
+2. ನನ್ನ ಯೋಚನೆಗಳನ್ನು ಹೇಗೆ ನಿಯಂತ್ರಿಸಲಿ?
+
+
+
+ಸದ್‌ಗುರು:
+
+ಮನಸ್ಸಿಗೆ .. ಅಲ್ಲಾಡೋ ಯೋಚನೆಗಳು, ಭಾವನೆಗಳು ಬಂದಾಗ, ಮೊದಲು ನೀವು ಮಾಡಬೇಕಾದದ್ದು - ಅವು ಹೇಗೆ ಇವೆಯೋ ಹಾಗೇ ನೋಡಿ; ತಡೆಯೋಕೆ ಹೋಗಬೇಡಿ, ತಡೆದ್ರೆ - ಅವು ಕ್ಷಣದಲ್ಲಿ ಎರಡು ಪಟ್ಟು ಆಗಿಬಿಡ್ತಾವೆ.
+
+
+
+ಈ ಮನಸ್ಸಿನಲ್ಲಿ ಕಳೆತ, ಭಾಗಾಕಾರ ಇಲ್ಲ; ಕೂಡುವಿಕೆ, ಗುಣಾಕಾರ ಮಾತ್ರ ಇದೆ.
+
+
+
+"ನನಗೆ ಈ ಭಾವನೆ ಬೇಡ" - ಅಂದ್ರೆ, ಅದು ಬೆಳಿಯತ್ತೆ - ಒಂದು ಆಗಿದ್ದು ಎರಡು ಆಗತ್ತೆ.
+
+
+
+"ಆಹಾ, ಇದು ಮತ್ತೆ ಬರ್ತಿದೆ; ನನಗೆ ಇದು ಬೇಡ, ನನಗೆ ಇದು ಬೇಡ" - ಅಂದ್ರೆ, ಅದು ನೂರು ಪಟ್ಟು ಆಗತ್ತೆ. ನಿಮ್ಮ ಮನಸ್ಸಿನ ಸ್ವಭಾವವೇ ಇದು.
+
+
+
+ಮನಸ್ಸಿಂದ ಯಾವುದನ್ನೂ ಬಲವಂತವಾಗಿ ತೆಗೆಯೋಕೆ ಆಗಲ್ಲ. ಯಾವುದನ್ನೂ ಮನಸ್ಸಿಂದ ಬಲವಂತವಾಗಿ ತೆಗೆಯೋ ಯಾವುದೇ ದಾರಿ ಇಲ್ಲ.
+
+
+
+ಹಾಗಾಗಿ ನೀವು ಮಾಡಬೇಕಾದದ್ದು - ಇಷ್ಟನ್ನ ಅರ್ಥ ಮಾಡ್ಕೊಳ್ಳಿ - ಅದು ಏನಂದ್ರೆ, ‘ಯೋಚನೆಗಳು ಮತ್ತು ಭಾವನೆಗಳು’ ನಿಜವಾಗಿ ಮೊದಲು ಸಂಗ್ರಹವಾದ ಮಾಹಿತಿಯ ಮರುಬಳಕೆ ಅಷ್ಟೇ! ನೆನಪಿನ ರೀಸೈಕ್ಲಿಂಗ್!
+
+
+
+ಆದ್ರೆ, ‘ಮೆಮೊರಿ’ ಸ್ವಲ್ಪ ವಾಸನೆ ಹರಡತ್ತೆ; ಅದು ಬರ್ತಾನೇ ಇರತ್ತೆ. ಅದನ್ನ ಹಾಗೆಯೇ ನೋಡಬೇಕು! ಅದರಿಂದ ಸ್ವಲ್ಪ ದೂರ ಬರಬೇಕು!
+
+
+
+ಇದು ಹೇಗೆ ಅಂದ್ರೆ - ಅಂದ್ಕೊಳ್ಳಿ, ನೀವು ಟ್ರಾಫಿಕ್ ಜಾಮ್‌ನಲ್ಲಿ ಸಿಕ್ಕಿಹಾಕಿಕೊಂಡಿದೀರಿ; ಏರ್‌ಪೋರ್ಟಿಗೆ ಹೋಗ್ತಿದೀರಿ, ಟ್ರಾಫಿಕ್ ಜಾಮ್‌ನಲ್ಲಿ ಸಿಕ್ಕಿಬಿಟ್ರಿ - ‘ಎಷ್ಟು’ ಆತಂಕ, ಅಸ್ವಸ್ಥತೆ ಅನುಭವಿಸ್ತಿದೀರಿ! ಸರಿ, ಹೇಗೋ ಮಾಡಿ ಏರ್‌ಪೋರ್ಟ್ ತಲುಪಿ ವಿಮಾನ ಹತ್ತಿ ಹೊರಟ್ರಿ.
+
+
+
+ಕೆಳಗೆ ಟ್ರಾಫಿಕ್ ಕೆಟ್ಟದಾಗಿ ಜಾಮ್. ಈಗ ಮೇಲಿಂದ ನೋಡಿದ್ರೆ, “ಆಹಾ, ಆ ಟ್ರಾಫಿಕ್ ಜಾಮ್ ಎಷ್ಟು ಸುಂದರ!” …  ಬರೀ ಸ್ವಲ್ಪ ದೂರ ಇರೋದರಿಂದಲೇ!
+
+
+
+ ಈಗಲೂ ಅದೇ ಟ್ರಾಫಿಕ್ ಜಾಮ್ - ಆದ್ರೆ ದೂರ ಇರೋದರಿಂದ, ಒಂದು ಕ್ಷಣದಲ್ಲೇ ವಿಷಯ ಹಗುರವಾಗಿಬಿಡತ್ತೆ. ಹಾಗೇ ನಿಮ್ಮ ಯೋಚನೆಗಳು, ಭಾವನೆಗಳ ವಿಷಯದಲ್ಲೂ!
+
+
+
+ಸ್ವಲ್ಪ ಸಾಧನೆಯಲ್ಲಿ … ಸ್ವಲ್ಪ ಅಂತರ ಬರತ್ತೆ - ನಿಮ್ಮ ದೈಹಿಕ ಪ್ರಕ್ರಿಯೆಯಿಂದ! ಮತ್ತೆ ಮಾನಸಿಕ ಪ್ರಕ್ರಿಯೆಯಿಂದಲೂ!
+
+
+
+ಅದನ್ನ ಮಾಡದೆ ಪ್ರತಿ ಯೋಚನೆ, ಭಾವನೆ ನಿಭಾಯಿಸೋಕೆ ಹೋದ್ರೆ, ಅವು ಸಾವಿರ ಪಟ್ಟು ಆಗಿಬಿಡ್ತಾವೆ.
+
+
+
+
+
+
+3. ನಾಳೆ ಧ್ಯಾನ ಬಿಟ್ಟುಬಿಡ್ತೀನಿ ಅಂದ್ಕೊಂಡ್ರೆ...
+
+
+
+ಸದ್‌ಗುರು: ಎಲ್ಲರೂ ಹಲ್ಲು ಉಜ್ಜಿದ್ರಾ?
+
+
+
+ಭಾಗವಹಿಸುವವರು: ಉಜ್ಜಿದೀನಿ.
+
+
+
+ಸದ್‌ಗುರು: ಒಳ್ಳೇದು!
+
+
+
+ನೀವೇ ಉಜ್ಜಿದ್ರಾ... ಅಥವಾ ನಿಮ್ಮ ಅಪ್ಪ-ಅಮ್ಮ, ಗಂಡ, ಹೆಂಡ್ತಿ, ಅಥವಾ ಬೇರೆ ಯಾರಾದ್ರೂ ಒತ್ತಡ ಹಾಕಿ - "ಇವತ್ತು ಹಲ್ಲು ಉಜ್ಜಲೇಬೇಕು" - ಅಂತ ಹೇಳಿದ್ರಾ?
+
+
+
+ನೀವೇ ಉಜ್ಜಿದ್ರಿ!
+
+
+
+ಭಾಗವಹಿಸುವವರು: ಹೌದು.
+
+
+
+ಸದ್‌ಗುರು: ಓಹ್! ಚೆನ್ನಾಗಿದೆ!
+
+
+
+ಆದ್ರೆ ನಿಮಗೆ ನೆನಪಿದೆಯಾ, ನಿಮ್ಮ ಜೀವನದ ಒಂದು ಸಮಯದಲ್ಲಿ - ಇಷ್ಟು ಸಣ್ಣ ವಯಸ್ಸಿನಲ್ಲಿ - ನಿಮ್ಮ ಅಮ್ಮ ಒತ್ತಿ ಹೇಳ್ತಿದ್ರು “ಹಲ್ಲು ಉಜ್ಜಲೇಬೇಕು. ಇಲ್ಲ ಅಂದ್ರೆ ತಿಂಡಿ ಸಿಗಲ್ಲ!”
+
+ಎಷ್ಟು ದಿನ? - ಮೂರು ತಿಂಗಳು, ಆರು ತಿಂಗಳು, ಅಥವಾ ಒಂದು ವರ್ಷ!
+
+
+
+ಆಮೇಲಿಂದ, ನೀವೇ ಉಜ್ಜ್ತೀರಿ; ನಾಳೆ ನಿಮ್ಮ ಅಮ್ಮ ಬಂದು, "ನೋಡು, ಹಲ್ಲು ಉಜ್ಜೋದು ನಿಜವಾಗಿ ತಪ್ಪು; ಇದರಿಂದ ಯಾವುದೇ ಲಾಭ ಇಲ್ಲ; ನಾನು ಬಿಟ್ಟುಬಿಟ್ಟಿದೀನಿ; ನೀನೂ ಬಿಟ್ಟುಬಿಡು" - ಅಂದ್ರೆ, ಬಿಟ್ಟುಬಿಡ್ತೀರಾ?
+
+ಭಾಗವಹಿಸುವವರು: ಬಿಡಲ್ಲ.
+
+
+
+ಸದ್‌ಗುರು: ಯಾಕೆ?
+
+
+
+ಯಾಕಂದ್ರೆ ಈಗ ನೀವು ‘ಇದರ ಮಹತ್ವ ಏನು, ಇದು ನಿಮಗೆ ಏನು ಮಾಡ್ತಿದೆ’ - ಅಂತ ಅರ್ಥ ಮಾಡ್ಕೊಂಡಿದೀರಿ.
+
+
+
+ಈಗ ಬೇರೆ ಯಾರೂ ಇದನ್ನ ಮಾಡ್ಸೋಕೆ ಒತ್ತಾಯ ಮಾಡಬೇಕಾಗಿಲ್ಲ.
+
+
+
+ಇದರ ಮಹತ್ವ ಅರ್ಥ ಆಗದೇ ಇರೋವರೆಗೂ, ಯಾರಾದ್ರೂ ಒತ್ತಡ ಹಾಕಿ ಮಾಡ್ಸಬೇಕು; ಇದರ ಮಹತ್ವ ಅರ್ಥ ಆದ್ಮೇಲೆ, ಬೇರೆ ಯಾರೂ ಹೇಳಬೇಕಾಗಿಲ್ಲ, ಅಲ್ಲವೇ? ಯಾಕಂದ್ರೆ, ಈಗ - ಇದು ನಿಮಗೆ ಏನು ಮಾಡ್ತಿದೆ ಅನ್ನೋದು ನಿಮಗೆ ಗೊತ್ತಾಗಿದೆ; ಯಾರಾದ್ರೂ ‘ಮಾಡಬೇಡ’ ಅಂದ್ರೂ, ನೀವು ಮಾಡ್ತೀರಿ. ಹಾಗಾಗಿ, ಈ ದೃಢತೆಯಿಂದಲೇ ಶುರು ಮಾಡೋಣ, ಸರಿ ಹೌದಾ?
+
+
+
+
+
+
+4. ಧ್ಯಾನ ಕೆಲಸ ಮಾಡತ್ತಾ?
+
+
+
+ಸದ್‌ಗುರು:
+
+ಇದು ಕೆಲಸ ಮಾಡತ್ತಾ? …
+
+
+
+ಬಹುಶಃ ಯಾವಾಗಲೂ …  ದೈಹಿಕ ಅಭಿವ್ಯಕ್ತಿಗಳೇ ಅತ್ಯಂತ ನೇರವಾಗಿ ಅನುಭವಕ್ಕೆ ಬರ್ತಾವೆ. ಆದ್ರೆ ಇನ್ನೂ ಬಹಳಷ್ಟು ಅಭಿವ್ಯಕ್ತಿಗಳಿವೆ ... ದೈಹಿಕ ಮತ್ತು ಮಾನಸಿಕ ಸ್ಥಿತಿಯ ಆಚೆಗೂ ಇನ್ನೂ ಬಹಳಷ್ಟು ಅಭಿವ್ಯಕ್ತಿಗಳಿವೆ.
+
+
+
+ದೈಹಿಕವಾಗಿ ಮತ್ತು ಮಾನಸಿಕವಾಗಿ - ಯಾವುದೇ ಜನಸಮೂಹದಲ್ಲೂ ಇದು ನಿಮ್ಮನ್ನು ಬೇರೆಯವರಿಂದ ಬೇರೆ ಆಗಿ ಮಾಡತ್ತೆ - ಈ ಸಾಧನೆಗೆ ನೀವು ಸಾಕಷ್ಟು ತೊಡಗಿಸಿಕೊಂಡ್ರೆ!
+
+
+
+ಆದ್ರೆ ಈ ಪ್ರಯೋಜನಗಳು, ಇವೆಲ್ಲಾ … ಆರೋಗ್ಯದ ದೃಷ್ಟಿಯಿಂದ ನೋಡಿದ್ರೆ - ಬಹಳಷ್ಟು ಆಧುನಿಕ ಸಂಶೋಧನೆ ಹೇಳ್ತಿದೆ - ಇದು ನಿಮಗೆ ಅದ್ಭುತವಾಗಿ ಕೆಲಸ ಮಾಡತ್ತೆ!
+
+
+
+ಆದ್ರೆ ಇವೆಲ್ಲಾ - ದೈಹಿಕ ಆರೋಗ್ಯ, ಮಾನಸಿಕ ಸಾಮರ್ಥ್ಯ, ಜೀವನವನ್ನು ಸುಲಭವಾಗಿ ನಿಭಾಯಿಸೋ ಸಾಮರ್ಥ್ಯ - ಇವೆಲ್ಲಾ ಬರೀ ಪಕ್ಕದ ಫಲಗಳಷ್ಟೇ; ಮುಖ್ಯ ವಿಷಯ ನಿಧಾನವಾಗಿ ರೂಪ ತಗೋತಿದೆ. ಅದು - ಪ್ರಕಟವಾದಾಗಲೇ ನಿಮಗೆ ಗೊತ್ತಾಗತ್ತೆ. ಅದಕ್ಕೂ ಮುಂಚೆ ಏನೂ ಆಗ್ತಿಲ್ಲ ಅಂತಲೇ ಅನ್ಸತ್ತೆ.
+
+
+
+ಇದು ಹೇಗೆ ಅಂದ್ರೆ - ನಿಮ್ಮ ಮನೆಯಲ್ಲಿ … ಒಂದು ಹೂವಿನ ಗಿಡ ನೆಟ್ಟಿರಿ; ಅದು ಬೆಳಿತಿದೆ - ಬರೀ ಎಲೆಗಳೇ ಬರ್ತಿವೆ!
+
+
+
+ನೆರೆಯವರು ನಿಮಗೆ ಹೇಳ್ತಾರೆ, "ಇದರಿಂದ ಲಾಭ ಇಲ್ಲ; ಹೂವು ಅಂದಿರಿ, ಎಲೆಗಳೇ ಬರ್ತಿವೆ. ಕಡಿದು ಹಾಕೋಣ, ಬೆಂಕಿ ಕಾಯಿಸೋಕೆ ಸಹಾಯಕ್ಕೆ ಬರತ್ತೆ."
+
+
+
+ನೀವು ಹೇಳ್ತೀರಿ, "ಕಾಯೋಣ, ಬಹುಶಃ ನಾಳೆ ಬೆಳಗ್ಗೆ ಅರಳಬಹುದು!"
+
+
+
+ಮಾರನೇ ದಿನ ಬೆಳಗ್ಗೆ ಏನೂ ಬರಲ್ಲ.
+
+
+
+ಮತ್ತೆ, "ಇನ್ನೊಂದು ದಿನ ನೋಡೋಣ" - ಇನ್ನೊಂದು ದಿನ, ಇನ್ನೊಂದು ದಿನ... ಹೀಗೆ ವರ್ಷಗಳು ಕಳಿತಾವೆ; ಈ ಗಿಡ ಅರಳೋಕೆ ಎಷ್ಟು ದಿನ ಬೇಕು ಅಂತ ನಿಮಗೆ ಗೊತ್ತಿಲ್ಲದೇ ಇದ್ರೆ, ಬಹುಶಃ ನೂರು ಸಲ ಕಡಿದು ಹಾಕಿಬಿಡ್ತಿದ್ರಿ.
+
+
+
+ಆದ್ರೆ ಅದನ್ನು ಆರೈಕೆ ಮಾಡ್ತಾ ಮುಂದುವರಿಸಿದ್ರೆ - ಒಂದು ದಿನ ಅದು ಅರಳಿ, ಹೂವಿನಿಂದ ತುಂಬಿಹೋಗತ್ತೆ, ಆಗ ನಿಮಗೆ ಅರ್ಥ ಆಗತ್ತೆ - “ಈ ಗಿಡ ಎಲೆಗಳಿಗೋಸ್ಕರ ಅಲ್ಲ... ಇದು ನೆರಳಿಗೋಸ್ಕರವೂ ಅಲ್ಲ... ಇದು ಸ್ವಲ್ಪ ಆಮ್ಲಜನಕಕ್ಕೋಸ್ಕರವೂ ಅಲ್ಲ”!
+
+
+
+ಹೂವು ಅರಳಿದ್ರೆ ‘ಇದು’ ಹೇಳಲಾಗದ ಸುಂದರ!
+
+
+
+
+
+
+5. ಧ್ಯಾನ ನಿಜವಾಗಿ ಕೆಲಸ ಮಾಡತ್ತಾ?
+
+
+
+ಹೀಗೆ ಯೋಚಿಸಬೇಡಿ - ಇವತ್ತು ಸಾಧನೆ ಮಾಡಿದ್ರಿ, "ಓ ನನಗೆ ಏನೂ ಆಗಿಲ್ಲ!" ಮಾರನೇ ದಿನ ಸಾಧನೆ ಮಾಡಿದ್ರಿ, "ಓ ನನಗೆ ಏನೂ ಆಗಿಲ್ಲ!" ಏನೂ ಆಗಬೇಕಾದ ಅಗತ್ಯ ಇಲ್ಲ, ಅರ್ಥ ಆಯ್ತಾ? ಬರೀ ಮಾಡ್ತಾ ಇರೋದು! ಇದನ್ನು ಒಂದು ಸಮರ್ಪಣೆಯಾಗಿ ಮಾಡಿ, ಅರ್ಥ ಆಯ್ತಾ?
+
+
+
+ಏನೂ ಪಡೆಯಬೇಕಾದ ಅಗತ್ಯ ಇಲ್ಲ! ಜೀವನ ಕಳೆಯೋ ರೀತಿಯೇ ಇದು ಅಲ್ಲ - "ಇದು ಮಾಡಿದೆ, ಏನು ಸಿಗತ್ತೆ? ಅದು ಮಾಡಿದೆ, ಏನು ಸಿಗತ್ತೆ?" - ಇದು ಬದುಕೋ ವಿಧಾನ ಅಲ್ಲ.
+
+
+
+"ನನಗೆ ಏನು ಸಿಗತ್ತೆ?" - ಯಾರು ಇದನ್ನ ಯೋಚಿಸ್ತಾರೋ, ಅವರು ಜೀವನವನ್ನು ತಿಳಿಯೋಕೆ ಆಗಲ್ಲ. ನಿಮಗೆ ‘ಮುಖ್ಯ ಅನ್ಸತ್ತೆ’ ಯಾವುದು, ಅದನ್ನ ಮಾಡ್ತಾ ಇರಿ - ಬರೀ ಒಂದು ಸಮರ್ಪಣೆಯಾಗಿ! ಏನು ಆಗಬೇಕೋ ಅದು ಆಗತ್ತೆ!
+
+
+
+ಆದ್ರೆ ನೀವು ತುಂಬಾ ಗೋಲ್-ಓರಿಯೆಂಟೆಡ್ ಆಗಿಬಿಟ್ಟಿದೀರಿ - ಮರ ಬೆಳೆಯೋ ಮುಂಚೆನೇ ನಿಮಗೆ ಮಾವಿನಹಣ್ಣು ಬೇಕು!
+
+
+
+ಬೇಡ! ಮರವನ್ನು ಬೆಳಸಿ, ಅದನ್ನ ಆರೈಕೆ ಮಾಡಿ... ಮಾವಿನಹಣ್ಣು ನಿಮ್ಮ ತಲೆಯ ಮೇಲೆ ಬೀಳತ್ತೆ - ನೀವು ಕೇಳದೆ ಇದ್ರೂ!
+
+
+
+Focus area 2: Length of the Kannada segments:
+
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+
+
+Gap threshold = minimum 20 %
+Relative density threshold - 1.1
+
+
+
+that means if the gap after the segment is less than 20% of the length of the segment, then that segment is flagged for gap threshold.
+that means if the Relative number of syllables per second is greater than 1.3 times the average number of syllables per second, then that segment is flagged for gap threshold.
+
+Now
+
+Gap threshold flagged, density threshold flagged
+
+Case 1:
+Gap threshold flagged, density threshold flagged
+Action:
+need heavy compressing. Express the main idea by cutting as many additional details as possible. Just convey the main point in short and crisp way. And add tags [fast][/fast] around the corresponding Kannada segment so that ElevenLabs will render this segment in fast pace.
+
+Case 2:
+Gap threshold flagged, density threshold not flagged
+Action:
+Here the aim is to achieve at least some level of shortening, so that the Kannada fits in - as there is no gap after this.
+
+Apply all the shortening approaches mentioned above
+
+also use below Shortening approaches as well:
+
+You have three additional tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (ಸಂಧಿ / Vowel Merging): Merge vowels and adjacent sounds where Kannada naturally permits it (e.g., "ಮಾಡುತ್ತಾ ಇದ್ದೇನೆ" → "ಮಾಡ್ತಿದೀನಿ"; "ಆಗಿರುತ್ತದೆ" → "ಆಗಿರತ್ತೆ"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+
+Samasa (ಸಮಾಸ / Compound Nouns): Instead of "ಪ್ರಾಣದ ಸಂಕೇತ" (The signs of life), you use "ಪ್ರಾಣ-ಸಂಕೇತ". It sounds tighter and cuts the length significantly.
+
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+Verb Fusing / Contracted Forms: Use contracted spoken forms — "ಮಾಡುತ್ತಿದ್ದೇನೆ" → "ಮಾಡ್ತಿದೀನಿ"; "ಹೋಗುತ್ತಿದ್ದೇನೆ" → "ಹೋಗ್ತಿದೀನಿ"; "ಆಗುತ್ತದೆ" → "ಆಗತ್ತೆ". It turns a concept into a single action and matches natural Kannada colloquial speech.
+
+
+
+make sure the real intention being conveyed is not diluted. this is high priority. You aren't "diluting" the Master's words; you are "distilling" them. that means you are not skipping details, you are adjusting the structure.
+- Reduce verbosity while preserving meaning.
+- use context from previous and next segments
+- avoid repeating ideas already stated nearby
+- Do not remove key philosophical or logical meaning, Prefer simplifying structure over dropping whole concepts altogether.
+
+You should check if the segments tagged for shortening are able to be pronounced within The total time available for the dubbing segment. One way to check is the number of Akṣaras (syllabic units) in the Kannada segment must be almost same as the number of English syllables. For example, in ಪ್ರಕ್ರಿಯೆ there are three syllabic units ಪ್ರ, ಕ್ರಿ, and ಯೆ.
+
+
+Case 3:
+Gap threshold not flagged, density threshold flagged
+Action:
+Make the Kannada crisp without losing any details.
+
+
+Case 4:
+Gap threshold not flagged, density threshold not flagged
+- no need to shorten
+
+
+
+
+Secondary: check if the segments can be spoken in the time in general, if any Kannada segment contains relatively large number of words or lengthy words compared to corresponding English segment, shorten them also.
+
+
+
+Additional requirement:
+
+if the original audio includes the promo part (few sentences from the talk shown at the start of the video to create interest in the viewer) then, Both the scripts should also include the promo part at the beginning.
+
+
+Also, if you have to truncate the output because mention that also at the beginning. and then give the actual translation asked above.
+
+Below is the formatted English script :

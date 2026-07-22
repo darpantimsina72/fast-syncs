@@ -46,10 +46,9 @@ if errorlevel 1 (
 )
 git pull --ff-only
 if errorlevel 1 (
-  echo ERROR: git pull failed - the latest version was NOT applied.
-  echo Resolve the conflict ^(or re-download the ZIP^) and run update.bat again.
-  pause
-  exit /b 1
+  echo [update] git pull could not fast-forward ^(diverged or local edits^) -
+  echo          falling back to ZIP overlay...
+  goto zip_update
 )
 goto deps
 
@@ -113,6 +112,22 @@ if exist ".\venv\Scripts\python.exe" (
   echo [update] No venv found - running setup.bat ...
   if exist ".direct-mode" ( call setup.bat --direct ) else ( call setup.bat )
   if errorlevel 1 ( exit /b 1 )
+)
+
+rem ── bundled dubbing app (dubbing\) ─────────────────────────────
+rem Refresh ITS venv only when the user already set it up - dubbing deps
+rem are heavy (librosa/numpy), sync-only installs never pull them. First
+rem setup happens from the dubbing panel (dubbing\setup_windows.bat).
+if exist ".\dubbing\venv\Scripts\python.exe" (
+  if exist ".\dubbing\requirements.txt" (
+    echo [update] Updating dubbing app dependencies...
+    ".\dubbing\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r ".\dubbing\requirements.txt"
+    if errorlevel 1 ( echo WARNING: dubbing deps failed to update - re-run dubbing\setup_windows.bat. )
+  )
+) else (
+  if exist ".\dubbing" (
+    echo [update] Dubbing app present ^(not set up yet - use the Dubbing... button in REAPER^).
+  )
 )
 
 echo.

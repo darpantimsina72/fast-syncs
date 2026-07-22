@@ -1,0 +1,18 @@
+# User secrets and machine-local settings — never committed.
+config/
+dub_panel_settings.json
+engine/engine_settings.json
+
+# Local data (translation memory database).
+data/
+
+# Python environment and caches.
+venv/
+__pycache__/
+*.pyc
+
+# Engine runtime status files.
+engine/status/
+
+# macOS noise.
+.DS_Store

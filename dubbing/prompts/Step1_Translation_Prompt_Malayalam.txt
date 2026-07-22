@@ -1,0 +1,1164 @@
+### Target language: Malayalam (മലയാളം)
+### Register: modern spoken Malayalam (സംഭാഷണ ഭാഷ), not literary
+### NOTE FROM PIPELINE: This prompt is fully localized for Malayalam.
+### All example sentences and word pairs below are in modern spoken
+### Malayalam (Malayalam script). Structural rules (pause handling with
+### `...`, hyphen `-` usage, paragraph breaks, thought-unit mapping)
+### apply UNCHANGED to Malayalam. Malayalam uses the Western full-stop
+### `.` for sentence boundaries (NOT the daṛi `।`).
+
+The goal is to generate a Malayalam (മലയാളം) dubbing script for the English talk given by Sadhguru (Including any other speakers who question or converse with him). The SRT file text will be given at the bottom.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+
+The SRT Temporal Blueprint: Mapping Threads to Pulses
+
+Instead of a plain transcript, you are receiving an SRT file. This file acts as the absolute structural blueprint for the dubbing script. Think of the SRT timestamps as the rigid framework of the loom.
+
+On-Signals (Spoken Pulses / Containers): The actual text block within a subtitle timestamp. This is continuous speech.
+
+Off-Signals (Silence Gaps / Spaces): The time gap between the end timestamp of one subtitle and the start timestamp of the next. This is a physical pause.
+
+CRITICAL RULE: The temporal blueprint overrides grammatical intuition. You must map the White Threads (thought units) onto these pulses and dictate the placement of your Green Threads (punctuation) strictly based on the On/Off signals, handling the mapping in the following ways:
+
+Before assessing case 1 or 2 or 3, first you must analyze and create the groups of subtitles, so that each group denotes one meaningful chunk or one thought unit of a complete thought.
+
+
+Case 1: One thought unit stretched across multiple pulses (e.g., 1 meaningful chunk or thought unit spoken over 3 subtitles):
+Do not smooth this out. You must weave a Green Thread (specifically the ... indicating a pause) exactly where the temporal gap occurs between the subtitles, even if it awkwardly breaks a Malayalam clause in half. The pause must reflect the speaker's hesitation or deliberate pacing.
+
+Note that, only in this case, you can re arrange the sequence of these non-meaningful words/phrases that are building blocks of the meaningful chunk or a thought unit that was spread across multiple pulses, so that the thought unit or the meaningful chunk is formed in a natural way. Here still the pulses are separated by ... but they are resequenced to form a natural flow to form the meaningful chunk or thought unit.
+
+This applies only inside of a meaningful chunk/thought unit. The sequence of the meaningful chunks and thought units that form a complete thought remains same.
+In short, The "Holistic Mapping" Rule for case 1:
+When one thought unit or meaningful chunk is stretched across multiple pulses (pulses separated by ...), do not translate pulse-by-pulse. Instead:
+
+Synthesize: First, translate the entire English thought unit into a natural, complete Malayalam sentence or clause.
+
+Distribute: Take that complete Malayalam translation and "pour" it into the available pulse containers (the SRT timestamps).
+
+Fragment Naturally: When distributing the Malayalam text across pulses, ensure that the text within each pulse forms a natural phonetic chunk (a phrase or sub-part) in Malayalam.
+
+Transposition: Since Malayalam is a Subject-Object-Verb (SOV) language and English is SVO, you must rearrange the words across the ... markers so the verb lands in the appropriate pulse for the Malayalam flow, while ensuring the overall meaning matches the duration of the total pulses used.
+
+The "Bridge" Principle: Each segment between the ... should feel like a natural "breath" or a logical sub-component of the thought, not a random collection of words.
+
+Example of how to handle the "broken" input:
+
+English Pulses: the worship of the ... divine ... in the feminine form ... was hugely prevalent
+
+Wrong (Literal): ദൈവത്തെ ... സ്ത്രീരൂപത്തിൽ ... ആരാധിക്കൽ ... വ്യാപകമായി ഉണ്ടായിരുന്നു (This feels broken).
+
+Correct (Mapped): ദൈവത്തെ ... സ്ത്രീരൂപത്തിൽ ... ആരാധിക്കൽ ... വ്യാപകമായി പ്രചലിതമായിരുന്നു (Each pulse now contains a logical Malayalam phrase that builds toward the meaningful chunk/thought unit/conclusion).
+
+
+Case 2: Multiple thought units compressed into one pulse (e.g., 2-3 short sentences spoken rapidly in 1 subtitle):
+If the SRT shows continuous speech with no off-signal gaps, do not inject ... pauses just because the grammar suggests a new sentence. Translate the White Threads to flow rapidly together, using commas (,) in-between thought units and ; between different thoughts to maintain continuous structural phrasing to match the unbroken momentum of the speaker.
+
+Case 3: Overlapping boundaries (e.g., a pulse contains the end of thought A and the start of thought B):
+Translate the transition naturally with appropriate boundary punctuation, but reserve your heavy pause punctuation (... or -) only for where the actual SRT gap (Off-Signal) occurs.
+
+
+
+
+Now lets understand the requirement by an analogy.
+
+
+
+Its like weaving an art piece.
+
+
+
+The actual content itself is the white thread.
+
+The punctuation marks are the threads with green shades.
+
+… are the threads with pink shade.
+
+The paragraphs breaks are the threads with orange shades.
+
+The contextually perfect Malayalam word choice is the thread of blue shades.
+
+The things that are not to be done are the red threads.
+
+
+
+Now as you start weaving the dubbing script you should carefully weave these color threads at appropriate places as per the instructions given below.
+
+
+
+Below is the information regarding the White threads:
+
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+“Life is not a problem to be solved…
+
+it is a reality to be experienced.”
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction (“No…”)
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels “broken”.
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+“Do you want peace?
+
+Or do you want to control everything?”
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts can be changed to create the sub part in a meaningful way. the subparts remain in the same order.
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of ‘Color A’ when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of ‘Color B’ when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid. these are joined with …
+
+Now the ‘Color A’ set and the ‘Color B’ set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+
+
+In short: Each individual piece that can be identified as a separate part or sub part is the white thread.
+
+
+
+To the extent possible make sure these pieces occur in the same sequence especially the meaningful chunks (made up of sub parts and internal parts)
+
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the coloured sections remain, the pieces of the same color that forms that colored section within can be rearranged.
+
+
+Below is the information regarding the green threads:
+
+now as we weave the white threads to form the sentences, we want to weave in the green threads (punctuation marks) as per the below rules.
+
+
+
+… indicates a pause in between the parts that makes a meaningful chunk or a clause.
+
+, indicates a pause between meaningful chunks that make up the sentence.
+
+; indicates connected sentences.
+
+Hyphen (-) indicates additional information related to the main idea of the sentence.
+
+
+
+
+we connect building parts with … to make up the internal part.
+
+we connect the internal parts with - to make up the subpart.
+
+we connect the subparts with ; to make up the body part.
+
+
+
+for example, the punctuation marks should be weaved like this:
+
+building part …  building part (one internal part)- another internal part - one more internal part; internal part - building part …  building part (another internal part);
+
+internal part -  building part …  building part (one internal part)
+
+subpart; subpart; internal part - internal part; building part…building part…building part; subpart
+
+
+
+
+Placing (-):
+
+  To Set Off Parenthetical Information:
+
+  Example: This is a very important point - one that you shouldn't forget.
+
+ Malayalam: ഇത് വളരെ പ്രധാനപ്പെട്ട കാര്യമാണ് - മറക്കരുതാത്തത്.
+
+
+
+  Example: The students - all 35 of them - were excited for the field trip.
+
+  Malayalam: വിദ്യാർത്ഥികൾ - 35 പേരും - ഫീൽഡ് ട്രിപ്പിന് ഉത്സാഹഭരിതരായി.
+
+
+
+ To Introduce a List:
+
+    Example: She bought many things - clothes, shoes, and accessories.
+
+Malayalam: അവൾ ഒരുപാട് സാധനങ്ങൾ വാങ്ങി - വസ്ത്രങ്ങൾ, ഷൂസ്, ആക്സസറികൾ.
+
+
+
+
+   To Introduce an additional Explanation after completion of one thought:
+
+    Example: The reason for the delay - traffic congestion - was unavoidable.
+
+Malayalam: വൈകാൻ കാരണം - ട്രാഫിക് ജാം - ഒഴിവാക്കാൻ കഴിഞ്ഞില്ല.
+
+
+
+    Example: He is my uncle - who is a 7 feet tall man.
+
+Malayalam: ഇദ്ദേഹം എന്റെ അമ്മാവൻ - ഏഴ് അടി ഉയരമുള്ള ആൾ.
+
+
+
+
+ Example: Today is Sunday - which is a holiday.
+
+Malayalam: ഇന്ന് ഞായർ - അതായത് അവധി ദിവസം.
+
+
+
+    To Indicate an Abrupt Break or Change in Thought:
+
+    Example: I was about to leave - wait, there's someone at the door.
+
+Malayalam: ഞാൻ ഇറങ്ങാൻ ഒരുങ്ങുകയായിരുന്നു - ഒരു നിമിഷം, വാതിൽക്കൽ ആരോ വന്നിട്ടുണ്ട്.
+
+
+
+
+
+To separate inserted thoughts that need a new modulation.
+
+
+
+Pattern: Main sentence - inserted phrase - continuation of the main sentence.
+
+
+
+    Example: The most important thing - and I can't stress this enough - is to be yourself.
+
+Malayalam: ഏറ്റവും പ്രധാനപ്പെട്ട കാര്യം - ഞാൻ എത്ര ഊന്നിപ്പറഞ്ഞാലും കുറവ് - നിങ്ങൾ നിങ്ങളായിരിക്കുക.
+
+
+
+Example: After 100 years - only in 2010, I think - they figured it out... that this theorem describes the black holes... in the universe.
+
+Malayalam: 100 വർഷം കഴിഞ്ഞ് - ഒരുപക്ഷേ 2010-ൽ ആണ് - അവർ കണ്ടെത്തി... ഈ സിദ്ധാന്തം പ്രപഞ്ചത്തിലെ തമോഗർത്തങ്ങളെ വിശദീകരിക്കുന്നുവെന്ന്.
+
+
+
+To separate totally different details within a sentence.
+
+Pattern: Main Sentence - detail 1 - detail 2 - continuation of main sentence.
+
+Example: I must tell you this -  two, about maybe three, four years ago - a young woman of 33 or 34 years of age - in a city called Hyderabad in Southern India -  she was a television anchor - one day she did this thing.
+
+Malayalam : ഞാൻ ഇത് പറഞ്ഞേ തീരൂ - ഏകദേശം രണ്ടോ, മൂന്നോ, നാലോ വർഷം മുൻപ് - 33 അല്ലെങ്കിൽ 34 വയസ്സുള്ള ഒരു യുവതി - ദക്ഷിണേന്ത്യയിലെ ഹൈദ്രബാദ് എന്ന നഗരത്തിൽ - അവൾ ഒരു ടെലിവിഷൻ ആങ്കർ ആയിരുന്നു - ഒരു ദിവസം അവൾ ഇത് ചെയ്തു.
+
+In below situation:
+
+When a phrase completes, clarifies, justifies, or defines a key concept or item mentioned immediately before it, so that it indicates change in tone.
+
+replace the punctuation before that phrase with a hyphen ( - ).
+
+Example: so in urban areas it may not matter -  because you have insurance and this and that.
+
+Malayalam : അതുകൊണ്ട് നഗരപ്രദേശങ്ങളിൽ ഒരുപക്ഷേ ഇത് വലിയ കാര്യമില്ല - കാരണം നിങ്ങൾക്ക് ഇൻഷ്വറൻസ് ഉണ്ട്, ഇതും അതും ഒക്കെ ഉണ്ട്.
+
+
+
+Use ( - ) specifically when The phrase reveals the actual components of a previously stated category to ensure that the tone would land and conclude the meaning, not continue a list.
+
+Example: “two things — your body and your mind”
+
+Malayalam : രണ്ട് കാര്യങ്ങൾ - നിങ്ങളുടെ ശരീരം, നിങ്ങളുടെ മനസ്സ്.
+
+
+
+
+Below is the information regarding the Pink threads:
+
+
+… should not occur in the text that belong to one single pulse. Even though grammatically it makes sense. Even though there are multiple thought units/phrases/sentences in it. because each pulse is a continuous speech, we don't want the gap in between the continuous pulse.
+
+… only to be placed when there is a pause in between pulses that make up a single thought unit or clause or sentence.
+
+
+
+Below is the information regarding the orange threads:
+
+
+
+Each orange thread is the paragraph break that happens in the dubbing script.
+
+Below are the rules where to weave in the orange thread.
+
+
+
+
+
+When the subject changes (e.g., from speaking about 'Nature' to 'Humans')
+
+When the focus moves from one concept to a completely new idea.
+
+Switch from Description to Reason
+
+Switch from one Context to another.
+
+Switch from Positive to Negative contrast
+
+Split the Question from its Answer.
+
+Before a quoted thought or dialogue starts.
+
+When a sentence structure repeats with a different subject.
+
+When the speaker or the person being quoted changes.
+
+When it changes from a core subject to its explanation using an example, illustration, or analogy.
+
+
+
+
+
+And the sentences that occur within one para can be made into one continuous paragraph. no need to keep them as separate lines within the paragraph.
+
+Example:
+
+നാം രാമരാജ്യത്തെക്കുറിച്ച് സംസാരിക്കുന്നു... കാരണം -
+
+രാമരാജ്യം അർഥമാക്കുന്നത്... കേവലം ഒരു മഹത്തായ ഭരണം മാത്രമല്ല;
+
+അത്... നീതി, ധർമ്മം, നിഃസ്വാർഥതയുടെ ഒരു പ്രതിഫലനം.
+
+
+
+in the above it is one paragraph, but it is three lines in a paragraph. the linebreaks within the paragraph can be removed and it can be made into continuous sentences for ease of reading as shown below:
+
+നാം രാമരാജ്യത്തെക്കുറിച്ച് സംസാരിക്കുന്നു... കാരണം - രാമരാജ്യം അർഥമാക്കുന്നത്... കേവലം ഒരു മഹത്തായ ഭരണം മാത്രമല്ല; അത്... നീതി, ധർമ്മം, നിഃസ്വാർഥതയുടെ ഒരു പ്രതിഫലനം.
+
+
+
+
+CRITICAL FORMATTING RULE: Continuous Text Blocks
+
+
+
+No Soft Breaks: Do not use line breaks or newlines within a paragraph for visual formatting.
+
+
+
+Single Line Constraint: Each paragraph block must be rendered as one single, continuous line of text.
+
+
+
+Separation: Use a double line break only between different paragraphs.
+
+
+
+
+
+
+
+Below is the information regarding the blue threads:
+
+
+
+There are the points where you have to identify the actual contextually best Malayalam word or phrase; and identify the actual intention of sadhguru behind those words spoken by him. There are the places where literal word based translation fails. and you have to think deep and pick the appropriate Malayalam expression that conveys the actual contextual point and intention.
+
+
+
+
+
+
+
+Need 1: Polishing the Script into a day to day spoken style:
+
+
+
+    Scenario 1.
+
+    In Malayalam the translations for a, an and the are not needed - unless in specific cases.
+
+
+
+
+
+
+
+    Scenario 2.
+
+    In Malayalam in many cases, an explicit pronoun can be dropped when context makes it clear, since the verb form or topic continuity carries the subject.
+
+
+
+
+
+    Scenario 3: Preferred word pairs
+
+    Dimension - മാനം
+
+    You know - അറിയാലോ..
+
+    Life - ജീവിതം
+
+    People - ആളുകൾ / മനുഷ്യർ
+
+    Intense - തീവ്രത
+
+    Lifetime - ജന്മം
+
+    essentially - മൗലികമായി
+
+    intense - തീവ്രത (not ഭീകരത in this context)
+
+    isn’t it? - അല്ലേ?
+
+
+
+
+Scenario 4:
+
+This applies only to the segments that are lengthy in Malayalam. In English, the segment is spoken with fewer words, but in Malayalam, the written style contains more words which will exceed the time of the English segment. Mainly in such cases, we try to make the segment short by combining the words like we combine while talking (colloquial style). And in some cases, even though the words are more, Sadhguru speaks them fast. In such cases also shortening is needed. By analyzing the audio, please shorten the segments as and when necessary.
+
+
+
+CRITICAL: Remember we are not removing any segment, example, or list - we are trying to make it short by expressing the exact same content in fewer words / shorter syllables.
+
+
+
+
+
+    Example 1:
+
+    Fast spoken English segment: I'm not saying these things are wrong.
+
+    Malayalam Lengthy sentence: ഇവ തെറ്റാണ് എന്ന് ഞാൻ പറയുന്നില്ല.
+
+    Malayalam Shortened Sentence: ഇവ തെറ്റാണ് എന്ന് പറയുന്നില്ല.
+
+
+
+
+
+    Example 2:
+
+    Fast spoken English segment: Not some fanciful thing that I want to do or you want to do.
+
+    Malayalam Lengthy sentence: ഞാൻ ചെയ്യാൻ ആഗ്രഹിക്കുന്ന അല്ലെങ്കിൽ നിങ്ങൾ ചെയ്യാൻ ആഗ്രഹിക്കുന്ന ഏതെങ്കിലും ഭ്രമകൽ‌പ്പന അല്ല.
+
+    Malayalam Shortened Sentence: ഞാനോ നിങ്ങളോ ചെയ്യാൻ ആഗ്രഹിക്കുന്ന ഭ്രമകൽ‌പ്പന ഒന്നുമല്ല.
+
+
+
+
+
+
+
+    Example 3:
+
+    Fast spoken English segment: There are many others who would like to be you. 'Oh, I wish I was 20 and I wish I could think what to do.
+
+    Malayalam Lengthy sentence: 'ആഹ, 20 വയസ്സിൽ എന്ത് ചെയ്യണമെന്ന് ചിന്തിക്കാൻ കഴിഞ്ഞിരുന്നെങ്കിൽ എത്ര നന്നായേനെ. ആ സമയത്ത് ഞാൻ എന്തെങ്കിലും ചെയ്തേനെ.' - ഇങ്ങനെ ചിന്തിക്കുന്ന ആളുകൾ ഇവിടെ ഏറെ ഉണ്ട്.
+
+    Malayalam Shortened Sentence: 'ആഹ, 20-ൽ എന്ത് ചെയ്യണമെന്ന് ചിന്തിക്കാൻ കഴിഞ്ഞിരുന്നെങ്കിൽ. അന്ന് തന്നെ എന്തെങ്കിലും ചെയ്തേനെ.' - ഇങ്ങനെ ആഗ്രഹിക്കുന്നവർ ഇവിടെ ഒരുപാട് ഉണ്ട്.
+
+
+
+
+
+  Scenario 5:
+
+    Aspect: Missing Detail
+
+    English: So you must fix yourself, you must engineer yourself the way you think is the best way to be for a human being;
+
+    Basic Translation: അതുകൊണ്ട് - ഒരു മനുഷ്യനായിരിക്കാൻ ഏറ്റവും നല്ല വഴി ഏതാണ്, ആ വഴിയിൽ നിങ്ങൾ തന്നെ നിങ്ങളെ ശരിയാക്കി വളർത്തിയെടുക്കണം;
+
+    Optimized Translation: അതുകൊണ്ട് - ഒരു മനുഷ്യനായിരിക്കാൻ ഏറ്റവും നല്ല വഴി ഏതാണ് എന്ന് തോന്നുന്നോ, ആ വഴിയിൽ നിങ്ങൾ തന്നെ നിങ്ങളെ രൂപപ്പെടുത്തണം;
+
+    Details of optimization: ‘എന്ന് തോന്നുന്നോ’ is the detail for ‘you think is’
+
+
+
+
+
+
+
+
+  Scenario 6:
+
+    Aspect: Thought Flow
+
+
+
+    English:
+
+    Living strong means your level of experience is intense and enormous.
+
+
+
+    Your level of experience will become enormous - only when your level of attention is absolute.
+
+    Basic Translation:
+
+     ശക്തമായി ജീവിക്കുക എന്നാൽ - നിങ്ങളുടെ അനുഭവ നില തീവ്രവും അഗാധവുമായിരിക്കുക.
+
+
+
+    നിങ്ങളുടെ ശ്രദ്ധ പൂർണ്ണമാകുമ്പോൾ, അപ്പോൾ നിങ്ങളുടെ അനുഭവ നിലയും അഗാധമാകും.
+
+
+
+    Optimized Translation:
+
+    ശക്തമായി ജീവിക്കുക എന്നാൽ - നിങ്ങളുടെ അനുഭവ നില തീക്ഷ്ണവും അഗാധവുമായിരിക്കുക.
+
+
+
+    നിങ്ങളുടെ അനുഭവ നില അഗാധമാകും - നിങ്ങളുടെ ശ്രദ്ധ പൂർണ്ണമാകുമ്പോൾ മാത്രം!
+
+    Details of optimization:
+
+    Let us take these two sentences as A and B.  'The enormity of experience’ is in the ending portion of A  and is in the beginning portion of B. Thus ensuring a smooth flow of thoughts and connectivity.
+
+
+
+
+Scenario 7:
+
+   Aspect:  Exact detail without deviation
+
+
+
+    English:
+
+    Though I am known to be a yogi - very analytical and logical - essentially, I have always lived my life as a devotee.
+
+    Basic Translation:
+
+    എല്ലാവരും എന്നെ വളരെ വിശകലനാത്മകവും യുക്തിസഹവുമായ ഒരു യോഗി ആയി കരുതുന്നു, എന്നാൽ സത്യം പറഞ്ഞാൽ ഞാൻ എല്ലായ്‌പ്പോഴും ഒരു ഭക്തനായി എന്റെ ജീവിതം കഴിച്ചുകൂട്ടിയിരിക്കുന്നു.
+
+    Optimized Translation:
+
+    എല്ലാവരും എന്നെ വളരെ വിശകലനാത്മകവും യുക്തിസഹവുമായ ഒരു യോഗിയായി കണ്ടാലും, മൗലികമായി, ഞാൻ എല്ലായ്‌പ്പോഴും ഒരു ഭക്തനായി എന്റെ ജീവിതം കഴിച്ചുകൂട്ടിയിരിക്കുന്നു.
+
+    Details of optimization:
+
+    ‘കരുതുന്നു’ is a slight deviation from what is said. ‘കണ്ടാലും’ is closer to the actual detail ‘known to be’ in English.
+
+
+
+    ‘സത്യം പറഞ്ഞാൽ’ conveys contradiction. ‘മൗലികമായി’ conveys different levels of things - this is for the word ‘essentially’.
+
+
+
+
+
+Scenario 8:
+
+
+
+    Aspect:  Modulation Cues
+
+
+
+    English: I want you to understand... how difficult the spiritual process is going to be for you - is determined by you - not by nature and not by your guru.
+
+    Basic Translation:
+
+    നിങ്ങൾ ഒരു കാര്യം മനസ്സിലാക്കണം... ആധ്യാത്മിക പ്രക്രിയ നിങ്ങൾക്ക് എത്ര ബുദ്ധിമുട്ടായിരിക്കും... അത് നിങ്ങളാൽ തന്നെ നിർണ്ണയിക്കപ്പെടുന്നു, പ്രകൃതിയാൽ അല്ല, നിങ്ങളുടെ ഗുരുവിനാലുമല്ല.
+
+    Optimized Translation:
+
+    നിങ്ങൾ ഒരു കാര്യം മനസ്സിലാക്കണം... ആധ്യാത്മിക പ്രക്രിയ നിങ്ങൾക്ക് എത്ര ബുദ്ധിമുട്ടായിരിക്കും... അത് നിങ്ങളാൽ തന്നെ നിർണ്ണയിക്കപ്പെടുന്നു - പ്രകൃതിയാൽ അല്ല, നിങ്ങളുടെ ഗുരുവിനാലുമല്ല.
+
+    Details of optimization:
+
+    Once one thought is completed and next there is additional information, use - at the end of the main thought, so that the dubbing artist will complete that thought, and again add information after that - instead of reading the whole thing like a list of things.
+
+
+
+
+Scenario 9:
+
+
+
+Aspect: Modulation based ending
+
+Written: അവഗണിക്കരുത്, <Refining>ശ്രദ്ധിക്കണം - ആര് എന്ത് പറയുന്നു എന്ന്.</Refining>
+
+
+
+Tuned for Dubbing: അവഗണിക്കരുത്, <Refining>ശ്രദ്ധിക്കണം - ആര് എന്ത് പറയുന്നു!</Refining>
+
+
+
+
+scenario 10:
+
+Aspect: short notation while speaking
+
+
+
+Written: നിങ്ങൾക്ക് അറിയാമോ
+
+Tuned for Dubbing: അറിയാലോ
+
+
+
+
+Written: അറിയില്ലെങ്കിൽ
+
+Tuned for Dubbing: അറിയില്ലെങ്കിൽ / അറിയില്ല എന്നുണ്ടെങ്കിൽ
+
+
+
+Written: എന്ത് എന്ന്
+
+Tuned for Dubbing: എന്ത് എന്ന്
+
+
+
+
+Written: ചോദിക്കുന്നു
+
+Tuned for Dubbing: ചോദിക്കുന്നു
+
+
+
+Written: <Refining>നിങ്ങൾ ഇവിടെ</Refining> വന്നിരിക്കുന്നു ഒന്നും കൂടാതെ
+
+Tuned for Dubbing: <Refining>ഇവിടെ വന്നിരിക്കുന്നു</Refining> ഒന്നും കൂടാതെ
+
+
+
+Written: ഭക്ഷണം നിങ്ങളുടെ വായിൽ എത്ര <Refining>കൂടുതൽ സമയം ഇരിക്കുമോ</Refining>, നിങ്ങളുടെ ദഹനം അത്ര മെച്ചപ്പെടും;
+
+Tuned for Dubbing: ഭക്ഷണം നിങ്ങളുടെ വായിൽ എത്ര <Refining>കൂടുതൽ നേരം ഇരിക്കുമോ</Refining>, ദഹനം അത്ര മെച്ചപ്പെടും;
+
+
+
+Written: ആധ്യാത്മിക പാതയിലാണ് എന്നാൽ, നിങ്ങളുടെ ജീവിതത്തിൽ എന്തോ ഭീകരം <Refining>സംഭവിച്ചിരിക്കണം</Refining> - ഇത് അവർ ദൃഢമായി വിശ്വസിക്കുന്നു.
+
+Tuned for Dubbing: ആധ്യാത്മിക പാതയിലാണ് എന്നാൽ, നിങ്ങളുടെ ജീവിതത്തിൽ എന്തോ ഭീകരം <Refining>സംഭവിച്ചിട്ടുണ്ടാകും</Refining> - ഇത് അവർ ദൃഢമായി വിശ്വസിക്കുന്നു.
+
+
+
+scenario 11:
+
+Aspect: Not explicitly mentioning the redundant subject
+
+
+
+Written: "ഓഹ് <Refining>നിങ്ങൾ ആശ്രമത്തിൽ താമസിക്കുന്നു</Refining>, അപ്പോൾ, നിങ്ങൾക്ക് എന്ത് ബുദ്ധിമുട്ട്?" എന്ന് ചോദിക്കുന്നു.
+
+Tuned for Dubbing: "ഓഹ് <Refining>ആശ്രമത്തിൽ താമസിക്കുന്നു</Refining>, അപ്പോൾ, നിങ്ങൾക്ക് എന്ത് ബുദ്ധിമുട്ട്?" എന്ന് ചോദിക്കുന്നു.
+
+
+
+
+Explanation: in English the subject must be there, but in Malayalam, when the verb form, the topic continuity, or context already conveys the subject, the explicit pronoun can be dropped in spoken style.
+
+
+
+Written: <Refining>നിങ്ങൾ ആധ്യാത്മിക പാതയിലാണ് എന്നാൽ</Refining>, നിങ്ങളുടെ ജീവിതത്തിൽ എന്തോ ഭീകരം സംഭവിച്ചിട്ടുണ്ടാകും - ഇത് അവർ ദൃഢമായി വിശ്വസിക്കുന്നു.
+
+Tuned for Dubbing: <Refining>ആധ്യാത്മിക പാതയിലാണ് എന്നാൽ</Refining>, നിങ്ങളുടെ ജീവിതത്തിൽ എന്തോ ഭീകരം സംഭവിച്ചിട്ടുണ്ടാകും - ഇത് അവർ ദൃഢമായി വിശ്വസിക്കുന്നു.
+
+
+
+
+Written: അങ്ങനെ ചെയ്‌താൽ... കുറഞ്ഞത് 30 മുതൽ 40% ദഹനം വായിൽ വച്ചുതന്നെ ആകും - അപ്പോൾ, അത് തയ്യാറാകുന്നു; ഇപ്പോൾ ഭക്ഷണം വായിൽ ശരിക്ക് തയ്യാറായിരിക്കുന്നു; <Refining>അത് അകത്ത് പോകുമ്പോൾ... വയർ അതേ ആഗ്രഹിക്കുന്നത് - അർദ്ധദഹനമായ ഭക്ഷണമാണ്!</Refining>
+
+Tuned for Dubbing: അങ്ങനെ ചെയ്‌താൽ... കുറഞ്ഞത് 30 മുതൽ 40% ദഹനം വായിൽ വച്ചുതന്നെ ആകും - അപ്പോൾ, അത് തയ്യാറാകുന്നു; ഇപ്പോൾ ഭക്ഷണം വായിൽ ശരിക്ക് തയ്യാറായിരിക്കുന്നു; <Refining>അകത്ത് പോകുമ്പോൾ... വയർ അതേ ആഗ്രഹിക്കുന്നത് - അർദ്ധദഹനമായ ഭക്ഷണമാണ്!</Refining>
+
+
+
+Explanation: in English the subject must be there, but in Malayalam sentences can be formed without the subject. Here the tagged part is the continuation of the first part, the subject is already established in the first part. In the second part which is a follow-up, in Malayalam we can skip mentioning the subject again. In spoken style, the subject is implied here.
+
+
+
+Scenario 12:
+
+While quoting what someone spoke:
+
+Please place the quoted text in the double quotes and Bring the verb part to the end of the sentence while quoting someone's words or while expressing internal thought process.
+
+
+
+
+Examples:
+
+
+
+Example:
+
+
+
+Original: അവർ <T3>കരുതുന്നു<T3> ഇപ്പോൾ ആധ്യാത്മികത അർഥമാക്കുന്നത് - നിങ്ങൾ ഹിമാലയത്തിൽ പോകണം അല്ലെങ്കിൽ കാശിയിൽ പോകണം... അല്ലെങ്കിൽ എല്ലാം ത്യജിക്കണം.
+
+
+
+optimized: അവർ “ഇപ്പോൾ ആധ്യാത്മികത അർഥമാക്കുന്നത് - നിങ്ങൾ ഹിമാലയത്തിൽ പോകണം അല്ലെങ്കിൽ കാശിയിൽ പോകണം... അല്ലെങ്കിൽ എല്ലാം ത്യജിക്കണം” - എന്ന് <T3>കരുതുന്നു<T3>
+
+
+
+description:
+
+Here the structure is subject then comma then the thought or the words spoken by the subject in quotes then the verb that conveys saying or thinking and then period or question mark or other punctuation as per the need. Remember the … and - and ; within the quoted portion are still preserved.
+
+
+
+Example:
+
+Original:
+
+എല്ലാവരും <T3>ചോദിക്കുന്നു<T3>, "സദ്‌ഗുരു, നിങ്ങൾ ഇതിനായി ഇത്ര ശ്രമിക്കുന്നത് എന്തിനാണ്?"
+
+
+
+optimized:
+
+എല്ലാവരും, "സദ്‌ഗുരു, നിങ്ങൾ ഇതിനായി ഇത്ര ശ്രമിക്കുന്നത് എന്തിനാണ്?" - എന്ന് <T3>ചോദിക്കുന്നു<T3>.
+
+
+
+
+Example:
+
+Original:
+
+<T3>ഞാൻ പറഞ്ഞു<T3>, അവർക്ക് കുടിക്കാൻ വെള്ളം പോലും ഇല്ലെങ്കിൽ... ഞാൻ അവരോട് ധ്യാനം ചെയ്യൂ എന്ന് എങ്ങനെ പറയും?
+
+
+
+
+Optimized:
+
+<T3>ഞാൻ<T3>, “അവർക്ക് കുടിക്കാൻ വെള്ളം പോലും ഇല്ലെങ്കിൽ... ഞാൻ അവരോട് ധ്യാനം ചെയ്യൂ എന്ന് എങ്ങനെ പറയും?” - <T3>പറഞ്ഞു<T3>
+
+
+
+description:
+
+Here the subject who spoke and the verb that conveys the speaking are in one word. we have separated them, and placed the subject before the quoted part and the verb after the quoted part.
+
+
+
+
+Original:
+
+ആളുകൾ എന്നോട് <T3>ചോദിക്കുക തന്നെ ചെയ്യുന്നു<T3>, "സദ്‌ഗുരു, ഈ രാജ്യത്ത് ആധ്യാത്മിക പ്രക്രിയ പുനഃസ്ഥാപിക്കാനുള്ള വഴി എന്ത്?"
+
+
+
+Optimized:
+
+ആളുകൾ എന്നോട് <T3>ഇങ്ങനെ<T3> ചോദിക്കുക തന്നെ ചെയ്യുന്നു, "സദ്‌ഗുരു, ഈ രാജ്യത്ത് ആധ്യാത്മിക പ്രക്രിയ പുനഃസ്ഥാപിക്കാനുള്ള വഴി എന്ത്?" <T3>എന്ന്.<T3>
+
+
+
+ description:
+
+Here the subject part is long, bringing the whole long phrase to the end may make sync loss while dubbing. So what we did is, we added the verb that conveys asking again at the end to make it end in a natural way of spoken Malayalam. also note that we have added the word ഇങ്ങനെ as a cataphoric adverb / discourse-bridging adverb.
+
+
+
+
+In Short below is the instruction in summary:
+
+Primary Directive: Create a Dubbing Performance Script
+
+Your goal is not just to translate, but to create a performance script for a dubbing artist. This means capturing the speaker's exact timing, rhythm, and pauses is your highest priority, even if it occasionally makes the sentence structure feel less conventional than written text.
+
+CRITICAL RULE: Meticulous Pause Transcription
+
+Non-Negotiable Pauses: You must use ... to mark every noticeable pause or hesitation in the speaker's delivery. This is the single most important rule.
+
+Priority Over Flow: If a choice must be made between a perfectly natural sentence flow and accurately placing a ... to match the speaker's timing, always prioritize matching the pause. It is better to have a slightly unusual sentence structure that syncs perfectly than a smooth sentence that doesn't.
+
+Review for Pauses: Before finalizing your output, perform a final mental check specifically for this rule: "Have I captured all the short, rhythmic pauses, or have I smoothed them over?"
+
+
+
+
+Below is the information regarding Red threads:
+
+Do not hallucinate.
+
+Do not remove or summarize the units.
+
+Do not add information that is not actually spoken.
+
+Do not re arrange the sentences or clauses just to prioritize the flow within the sentence. this will break the flow between the sentences.
+
+Do not skip the portions that are not spoken by sadhguru. Should include other speakers translation also.
+
+Do not skip the promo part.
+
+Do not explicitly create promo part if it is not there in english. if it's not there in english, in Malayalam also it should not be there.
+
+Do not skip the part in the main talk just because it has already come in the promo part/previous parts.
+
+Do not skip English sentences or phrases thinking they are redundant or irrelevant or secondary details. Every thing said in English should be reflected in Malayalam.
+
+THIS IS NOT A SUMMARY, THIS IS A DUBBING SCRIPT WHERE DIALOGUES ARE DUBBED AND ATTACHED TO THE ORIGINAL VIDEO. SO NO SKIPPING PARTS OR PHRASES OR DETAILS.
+
+
+
+
+Below are the must do:
+
+Keep every redundant phrase.
+
+Keep every repetition.
+
+keep every redundant detail.
+
+keep every insignificant detail.
+
+in the middle of a sentence, if he adds additional sentence or a secondary information, do not skip it, reflect every minute detail spoken just place a - before those parts.
+
+
+
+
+Below are example Malayalam scripts weaved using all the color threads:
+
+
+
+1. ആദ്യമായി ധ്യാനം ചെയ്യുന്നു...
+
+
+
+സദ്‌ഗുരു:
+
+“ഓ, ഞാൻ ഒരിക്കലും ധ്യാനം ചെയ്തിട്ടില്ല; ധ്യാനം എങ്ങനെ ചെയ്യും!” - ഇത് നല്ലതു തന്നെ, ഇതുവരെ ധ്യാനം ചെയ്തിട്ടില്ലെങ്കിൽ!
+
+
+
+ധ്യാനത്തിന് പ്രതിഭ ആവശ്യമില്ല; അഭ്യാസം ആവശ്യമില്ല; മുൻ‌പരിചയം ആവശ്യമില്ല; അനുഭവവും ആവശ്യമില്ല; ആവശ്യം കേവലം ‘ഇച്ഛ’ … അത്രമാത്രം!
+
+‘പൂർണ്ണ സന്നദ്ധത’ - ധ്യാനത്തിന് ആവശ്യമായത് അതു മാത്രം!
+
+ഒരു കാര്യം പഠിക്കൂ - ഒരിക്കലും ‘പരിചയസമ്പന്നനായ ധ്യാനി’ ആകരുത് - അങ്ങനെ ആകുന്നത് സ്വയം സങ്കീർണ്ണതയിലേക്ക് തള്ളിവിടലാണ്!
+
+‘ധ്യാനം’ ഓരോ തവണയും പുതിയ പൂക്കൽ പോലെ! ഓരോ തവണയും ഇത് ഒരു പുതിയ സാദ്ധ്യതയാണ്.
+
+അല്ലെങ്കിൽ... "ഞാൻ ഇരുപത് വർഷം ധ്യാനിച്ചു, ഞാൻ ഒരു അനുഭവസമ്പന്ന ധ്യാനിയാണ്!" ... - ഇങ്ങനെ ഒന്നില്ല.
+
+ഉദാഹരണത്തിന് - കഴിഞ്ഞ പത്ത് വർഷമായി തോട്ടം നോക്കിവരികയാണ് നിങ്ങൾ; അതിന്റെ അർഥം - ഇക്കുറി, ഈ സീസണിൽ, ‘തൈ നടാതെ, പൂക്കൾ अपने आप വിടരും’ എന്നാണോ? അല്ലെങ്കിൽ ‘വെള്ളം ഒഴിക്കാതെ, പൂക്കൾ अपने आप വിടരും’ എന്നാണോ? പരിചരിക്കാതെ, ‘പൂക്കൾ अपने आप വിടരും’ - കാരണം നിങ്ങൾക്ക് അനുഭവമുണ്ടല്ലോ!? - ഇങ്ങനെ ആകുമോ?
+
+ഇക്കുറിയും എല്ലാം ശരിയായി ചെയ്യണം. അപ്പോഴേ പൂക്കൾ വിടരൂ; അല്ലേ?
+
+ഒരുപക്ഷേ... മണ്ണ് എങ്ങനെ സൂക്ഷിക്കണം... എത്ര വെള്ളം ഒഴിക്കണം... തോട്ടം എങ്ങനെ നോക്കണം - ഇക്കാര്യത്തിൽ ഒരുപക്ഷേ അനുഭവം ഉപകരിക്കും; അല്ലാതെ, പൂക്കൾ अपने आप വിടരില്ല - നിങ്ങൾക്ക് അനുഭവമുണ്ട് എന്നതുകൊണ്ട്! ജീവിതത്തിൽ ഒന്നും - അനുഭവമുണ്ട് എന്നതുകൊണ്ട് अपने आप ആകില്ല. ഇക്കുറിയും എല്ലാം ശരിയായി ചെയ്യണം, അല്ലേ?
+
+ആഹ്?
+
+ധ്യാനത്തിലും അങ്ങനെ തന്നെ, ഒരിക്കലും ‘മുതിർന്ന ധ്യാനി’ ആകരുത്. ഓരോ തവണ ധ്യാനത്തിന് ഇരിക്കുമ്പോഴും, ജീവിതത്തിൽ ആദ്യമായി ഇരിക്കുകയാണ് - എന്ന ഭാവത്തിൽ ഇരിക്കൂ. അപ്പോഴേ ഇത് ഗംഭീരമായി ഫലിക്കൂ.
+
+
+
+
+2. എന്റെ ചിന്തകൾ എങ്ങനെ നിയന്ത്രിക്കും?
+
+
+
+സദ്‌ഗുരു:
+
+മനസ്സിൽ... ക്രമരഹിതമായ ചിന്തകളും വികാരങ്ങളും വരുമ്പോൾ, ആദ്യം ചെയ്യേണ്ടത് - അവ ഉള്ളതുപോലെ കാണൂ; തടയാൻ പോകരുത്, തടഞ്ഞാൽ - ഒരു നിമിഷത്തിൽ അവ ഇരട്ടിയാകും.
+
+ഈ മനസ്സിന് കുറയ്ക്കൽ, ഹരിക്കൽ ഇല്ല; കൂട്ടൽ, ഗുണിക്കൽ മാത്രമേ ഉള്ളൂ.
+
+“ഈ വികാരം എനിക്ക് വേണ്ട” - എന്ന് പറഞ്ഞാൽ, അത് ഇരട്ടിക്കും - ഒന്ന് രണ്ടാകും.
+
+“ആഹ, ഇത് വീണ്ടും വരുന്നു; എനിക്ക് ഇത് വേണ്ട, ഇത് വേണ്ട” - എന്ന് പറഞ്ഞാൽ, അത് നൂറ് മടങ്ങാകും. ഇതാണ് നിങ്ങളുടെ മനസ്സിന്റെ സ്വഭാവം.
+
+മനസ്സിൽ നിന്ന് ഒന്നും ബലം പ്രയോഗിച്ച് ഒഴിവാക്കാൻ ആകില്ല. ആർക്കും മനസ്സിൽ നിന്ന് ഒന്നും ബലം പ്രയോഗിച്ച് ഒഴിവാക്കാനുള്ള ഒരു വഴിയുമില്ല.
+
+അതുകൊണ്ട് ചെയ്യേണ്ടത് - ഇത്രമാത്രം മനസ്സിലാക്കൂ - അതായത്, ‘ചിന്തകളും വികാരങ്ങളും’ യഥാർഥത്തിൽ മുൻ‌പ് ശേഖരിച്ച വിവരങ്ങളുടെ പുനരുപയോഗം മാത്രം! ഓർമ്മകളുടെ റീസൈക്ലിങ്!
+
+എന്നാലും, ‘ഓർമ്മ’ ഒരു ഗന്ധം പ്രസരിപ്പിക്കും; അത് വന്നുകൊണ്ടിരിക്കും. അങ്ങനെ തന്നെ കാണണം! അതിൽ നിന്ന് ഒരല്പം അകന്ന് നിൽക്കണം!
+
+ഇത് എങ്ങനെ - ട്രാഫിക് ജാമിൽ കുടുങ്ങി ഇരിക്കുന്നു എന്ന് കരുതൂ; വിമാനത്താവളത്തിലേക്ക് പോകുന്നു, ട്രാഫിക് ജാമിൽ കുടുങ്ങി - ‘എത്ര’ ഉത്കണ്ഠ, അസ്വസ്ഥത! ശരി, ഏതെങ്കിലും വഴി വിമാനത്താവളം എത്തി വിമാനത്തിൽ കയറി പോയി.
+
+താഴെ ട്രാഫിക് ഭയങ്കരമായ ജാം. ഇപ്പോൾ മുകളിൽ നിന്ന് നോക്കിയാൽ, “ആഹ, ആ ട്രാഫിക് ജാം എത്ര മനോഹരം!” ... ഒരല്പം ദൂരം ഉണ്ടായതുകൊണ്ട് മാത്രം!
+
+ഇപ്പോഴും അതേ ട്രാഫിക് ജാം - പക്ഷേ ദൂരം ഉണ്ടായതുകൊണ്ട്, ഒരു നിമിഷത്തിൽ വിഷയം ഹൽകാ ആകുന്നു. അതുപോലെ നിങ്ങളുടെ ചിന്തകൾ, വികാരങ്ങളുടെ കാര്യത്തിലും!
+
+
+
+
+
+
+ചെറിয় സാധനയിൽ... ഒരല്പം ദൂരം ഉണ്ടാകുന്നു - നിങ്ങളുടെ ശാരീരിക പ്രക്രിയയിൽ നിന്ന്! മാനസിക പ്രക്രിയയിൽ നിന്നും!
+
+അത് ചെയ്യാതെ ഓരോ ചിന്തയെയും വികാരത്തെയും നേരിടാൻ ശ്രമിച്ചാൽ, അവ ആയിരം മടങ്ങ് ആകും.
+
+
+
+
+
+
+3. നാളെ ധ്യാനം ഒഴിവാക്കണം എന്ന് തോന്നിയാൽ...
+
+
+
+സദ്‌ഗുരു: എല്ലാവരും പല്ല് തേച്ചോ?
+
+
+
+പങ്കെടുക്കുന്നയാൾ: തേച്ചു.
+
+
+
+സദ്‌ഗുരു: നല്ലത്!
+
+
+
+സ്വയം തേച്ചോ... അതോ നിങ്ങളുടെ അമ്മ, അച്ഛൻ, ഭർത്താവ്, ഭാര്യ, അല്ലെങ്കിൽ മറ്റാരെങ്കിലും നിർബന്ധിച്ച് - "ഇന്ന് പല്ല് തേക്കണം" - എന്ന് പറഞ്ഞോ?
+
+
+
+സ്വയം തേച്ചു!
+
+
+
+പങ്കെടുക്കുന്നയാൾ: ഉം.
+
+
+
+സദ്‌ഗുരു: ഓഹ്! ഭംഗിയായ കാര്യം!
+
+പക്ഷേ ഓർക്കുന്നുണ്ടോ, ജീവിതത്തിന്റെ ഒരു ഘട്ടത്തിൽ - ഇത്ര ചെറുപ്പത്തിൽ - അമ്മ ശക്തമായി പറഞ്ഞിരുന്നു “പല്ല് തേക്കണം. ഇല്ലെങ്കിൽ പ്രാതൽ കിട്ടില്ല!”
+
+എത്ര ദിവസം? - മൂന്ന് മാസം, ആറ് മാസം, ഒരു വർഷം!
+
+അതിനു ശേഷം, സ്വയം തേക്കുന്നു; നാളെ അമ്മ വന്ന്, “കേൾക്ക്, പല്ല് തേക്കുന്നത് തെറ്റ്; ഇതുകൊണ്ട് ഒരു ഗുണവുമില്ല; ഞാൻ ഉപേക്ഷിച്ചു; നീയും ഉപേക്ഷിക്ക്” - എന്ന് പറഞ്ഞാൽ, ഉപേക്ഷിക്കുമോ?
+
+പങ്കെടുക്കുന്നയാൾ: ഉപേക്ഷിക്കില്ല.
+
+
+
+സദ്‌ഗുരു: എന്തുകൊണ്ട്?
+
+കാരണം ഇപ്പോൾ ‘ഇതിന്റെ പ്രാധാന്യം എന്ത്, ഇത് നിങ്ങൾക്ക് എന്ത് ചെയ്യുന്നു’ - അത് മനസ്സിലായിക്കഴിഞ്ഞു.
+
+ഇനി ആർക്കും ഇത് ചെയ്യാൻ നിർബന്ധിക്കേണ്ട ആവശ്യമില്ല.
+
+ഇതിന്റെ പ്രാധാന്യം മനസ്സിലാകാത്ത കാലത്തോളം, ആരെക്കൊണ്ടെങ്കിലും നിർബന്ധിപ്പിക്കണം; ഇതിന്റെ പ്രാധാന്യം മനസ്സിലായാൽ, ഇനി ആരും പറയേണ്ടതില്ല, അല്ലേ? കാരണം, ഇപ്പോൾ - ഇത് നിങ്ങൾക്ക് എന്ത് ചെയ്യുന്നു എന്ന് അറിഞ്ഞുകഴിഞ്ഞു; ആരെങ്കിലും ‘ചെയ്യേണ്ട’ എന്ന് പറഞ്ഞാലും, ചെയ്യും. അതുകൊണ്ട്, ഈ ദൃഢനിശ്ചയവുമായി ആരംഭിക്കാം, ശരിയോ?
+
+
+
+
+
+
+4. ധ്യാനം ഫലിക്കുമോ?
+
+
+
+സദ്‌ഗുരു:
+
+ഇത് ഫലിക്കുമോ? ...
+
+ഒരുപക്ഷേ എല്ലായ്‌പ്പോഴും... ശാരീരിക പ്രകടനങ്ങളാണ് ഏറ്റവും നേരിട്ട് അനുഭവത്തിൽ വരുന്നത്. എന്നാൽ ഇനിയും ഒരുപാട് പ്രകടനങ്ങൾ ഉണ്ട്... ശാരീരികവും മാനസികവുമായ അവസ്ഥയ്ക്ക് അപ്പുറത്തും ഒരുപാട് പ്രകടനങ്ങൾ ഉണ്ട്.
+
+ശാരീരികമായും മാനസികമായും - ഏതൊരു ജനക്കൂട്ടത്തിലും ഇത് നിങ്ങളെ വേർതിരിച്ചു നിർത്തും - ഈ സാധനയ്ക്ക് വേണ്ടി നിങ്ങൾ സ്വയം മതിയാക്കി നൽകുകയാണെങ്കിൽ!
+
+എന്നാൽ ഈ ഗുണങ്ങൾ, ഇവ... ആരോഗ്യ ദൃഷ്ടിയിൽ നോക്കിയാൽ - ഒരുപാട് ആധുനിക ഗവേഷണങ്ങൾ പറയുന്നത് - ഇത് നിങ്ങൾക്ക് അത്ഭുതകരമായി ഫലിക്കും!
+
+എന്നാൽ ഇവ - ശാരീരിക ആരോഗ്യം, മാനസിക ശക്തി, ജീവിതത്തെ എളുപ്പം നേരിടാൻ ആകൽ - ഇവ കേവലം ഉപോൽ‌പ്പന്നങ്ങൾ മാത്രം; യഥാർഥ കാര്യം ക്രമേണ രൂപം കൊള്ളുന്നു. അത് - വെളിച്ചമായാൽ അപ്പോഴേ അറിയൂ. അതിനുമുൻ‌പ് ഒന്നും സംഭവിക്കുന്നില്ല എന്ന് തോന്നും.
+
+ഇത് എങ്ങനെ - നിങ്ങളുടെ വീട്ടിൽ... ഒരു പൂച്ചെടി നട്ടു; അത് വളരുന്നു - ഇലകൾ മാത്രം മുളക്കുന്നു!
+
+അയൽക്കാരൻ പറയും, "ഇതിൽ ഒരു ഗുണവുമില്ല; പൂ എന്ന് പറഞ്ഞു, ഇലകൾ മാത്രം. വെട്ടിക്കളയൂ, തീ കായൽ കൊള്ളാം."
+
+നിങ്ങൾ പറയും, "കാത്തിരിക്കൂ, നാളെ രാവിലെ ഒരുപക്ഷേ വിടരും!"
+
+
+
+പിറ്റേ ദിവസം രാവിലെ ഒന്നും വരുന്നില്ല.
+
+വീണ്ടും, “ഒരു ദിവസം കൂടി കാണൂ” - ഒരു ദിവസം, ഒരു ദിവസം... ഇങ്ങനെ വർഷം കടന്നുപോകുന്നു; ഈ ചെടി വിടരാൻ എത്ര ദിവസം വേണം എന്ന് അറിഞ്ഞില്ലായിരുന്നെങ്കിൽ, ഒരുപക്ഷേ നൂറ് തവണ വെട്ടിക്കളഞ്ഞേനെ.
+
+എന്നാൽ അത് പരിചരിച്ച് തുടർന്നാൽ - ഒരു ദിവസം അത് വിടർന്ന്, പൂക്കളാൽ നിറയും, അപ്പോൾ മനസ്സിലാകും - “ഈ ചെടി ഇലകൾക്ക് വേണ്ടിയല്ല... ഇത് തണലിന് വേണ്ടിയല്ല... ഇത് ഒരല്പം ഓക്‌സിജനു വേണ്ടിയുമല്ല”!
+
+പൂ വിടർന്നാൽ ‘ഇത്’ പറഞ്ഞ് തീർക്കാൻ ആകാത്ത ഭംഗി!
+
+
+
+
+
+
+5. ധ്യാനം ശരിക്കും ഫലിക്കുമോ?
+
+
+
+ഇങ്ങനെ ചിന്തിക്കരുത് - ഇന്ന് സാധന ചെയ്‌തു, "ഓ, എനിക്ക് ഒന്നും ആകുന്നില്ല!" പിറ്റേ ദിവസം സാധന ചെയ്‌തു, "ഓ, എനിക്ക് ഒന്നും ആകുന്നില്ല!" ഒന്നും സംഭവിക്കേണ്ട ആവശ്യമില്ല, മനസ്സിലായോ? ചെയ്‌തുകൊണ്ടിരിക്കൂ! ഇതൊരു സമർ‌പ്പണമായി ചെയ്യൂ, മനസ്സിലായോ?
+
+ഒന്നും നേടേണ്ട ആവശ്യമില്ല! ജീവിതം ചെലവഴിക്കുന്ന രീതി ഇതല്ല - "ഇത് ചെയ്‌തു, എന്ത് കിട്ടും? അത് ചെയ്‌തു, എന്ത് കിട്ടും?" - ഇത് ജീവിക്കുന്ന ശൈലിയല്ല.
+
+"എനിക്ക് എന്ത് കിട്ടും?" - ഇങ്ങനെ ചിന്തിക്കുന്നവർക്ക് ജീവിതം അറിയാൻ ആകില്ല. ‘പ്രധാനം’ എന്ന് തോന്നുന്നത് ചെയ്‌തുകൊണ്ടിരിക്കൂ - ഒരു സമർ‌പ്പണം എന്ന നിലയിൽ! ആകേണ്ടത് ആകും!
+
+പക്ഷേ നിങ്ങൾ അമിതമായ ലക്ഷ്യോന്മുഖർ ആയിപ്പോയി - മരം വളരുന്നതിനു മുൻ‌പ് ആംബ വേണം!
+
+ഇല്ല! മരത്തെ വളർത്തൂ, അതിനെ പരിചരിക്കൂ... ആംബ നിങ്ങളുടെ തലയിൽ വീഴും - ചോദിക്കാതെ തന്നെ!
+
+
+
+Focus area 2: Length of the Malayalam segments:
+
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+
+
+Gap threshold = minimum 20 %
+Relative density threshold - 1.1
+
+
+
+that means if the gap after the segment is less than 20% of the length of the segment, then that segment is flagged for gap threshold.
+that means if the Relative number of syllables per second is greater than 1.3 times the average number of syllables per second, then that segment is flagged for gap threshold.
+
+Now
+
+Gap threshold flagged, density threshold flagged
+
+Case 1:
+Gap threshold flagged, density threshold flagged
+Action:
+need heavy compressing. Express the main idea by cutting as many additional details as possible. Just convey the main point in short and crisp way. And add tags [fast][/fast] around the corresponding Malayalam segment so that ElevenLabs will render this segment in fast pace.
+
+Case 2:
+Gap threshold flagged, density threshold not flagged
+Action:
+Here the aim is to achieve at least some level of shortening, so that the Malayalam fits in - as there is no gap after this.
+
+Apply all the shortening approaches mentioned above
+
+also use below Shortening approaches as well:
+
+You have three additional tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (സന്ധി / Vowel Merging): Merge vowels and adjacent sounds where Malayalam naturally permits it (e.g., "അത് ആണ്" → "അതാണ്"; "ഇത് ആണ്" → "ഇതാണ്"; "ഇവിടെ ഉണ്ട്" → "ഇവിടുണ്ട്"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+
+Samasa (സമാസം / Compound Nouns): Instead of "ജീവന്റെ അടയാളം" (The signs of life), you use "ജീവനടയാളം". It sounds tighter and cuts the length significantly.
+
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+Verb Fusing / Contracted Forms: Use contracted spoken forms — "ചെയ്യുന്നുണ്ട്" → "ചെയ്യുണ്ട്"; "പോകുന്നുണ്ട്" → "പോകുണ്ട്"; "ആകുന്നില്ല" → "ആകില്ല". It turns a concept into a single action and matches natural Malayalam colloquial speech.
+
+
+
+make sure the real intention being conveyed is not diluted. this is high priority. You aren't "diluting" the Master's words; you are "distilling" them. that means you are not skipping details, you are adjusting the structure.
+- Reduce verbosity while preserving meaning.
+- use context from previous and next segments
+- avoid repeating ideas already stated nearby
+- Do not remove key philosophical or logical meaning, Prefer simplifying structure over dropping whole concepts altogether.
+
+You should check if the segments tagged for shortening are able to be pronounced within The total time available for the dubbing segment. One way to check is the number of Akṣaras (syllabic units) in the Malayalam segment must be almost same as the number of English syllables. For example, in പ്രക്രിയ there are three syllabic units പ്ര, ക്രി, and യ.
+
+
+Case 3:
+Gap threshold not flagged, density threshold flagged
+Action:
+Make the Malayalam crisp without losing any details.
+
+
+Case 4:
+Gap threshold not flagged, density threshold not flagged
+- no need to shorten
+
+
+
+
+Secondary: check if the segments can be spoken in the time in general, if any Malayalam segment contains relatively large number of words or lengthy words compared to corresponding English segment, shorten them also.
+
+
+
+Additional requirement:
+
+if the original audio includes the promo part (few sentences from the talk shown at the start of the video to create interest in the viewer) then, Both the scripts should also include the promo part at the beginning.
+
+
+Also, if you have to truncate the output because mention that also at the beginning. and then give the actual translation asked above.
+
+Below is the formatted English script :

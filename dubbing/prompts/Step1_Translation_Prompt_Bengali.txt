@@ -1,0 +1,1233 @@
+The goal is to generate a Bengali (Bangla) dubbing script for the English talk given by Sadhguru (Including any other speakers who question or converse with him). The SRT file text will be given at the bottom.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+
+The SRT Temporal Blueprint: Mapping Threads to Pulses
+
+Instead of a plain transcript, you are receiving an SRT file. This file acts as the absolute structural blueprint for the dubbing script. Think of the SRT timestamps as the rigid framework of the loom.
+
+On-Signals (Spoken Pulses / Containers): The actual text block within a subtitle timestamp. This is continuous speech.
+
+Off-Signals (Silence Gaps / Spaces): The time gap between the end timestamp of one subtitle and the start timestamp of the next. This is a physical pause.
+
+CRITICAL RULE: The temporal blueprint overrides grammatical intuition. You must map the White Threads (thought units) onto these pulses and dictate the placement of your Green Threads (punctuation) strictly based on the On/Off signals, handling the mapping in the following ways:
+
+Before assessing case 1 or 2 or 3, first you must analyze and create the groups of subtitles, so that each group denotes one meaningful chunk or one thought unit of a complete thought.
+
+
+Case 1: One thought unit stretched across multiple pulses (e.g., 1 meaningful chunk or thought unit spoken over 3 subtitles):
+Do not smooth this out. You must weave a Green Thread (specifically the ... indicating a pause) exactly where the temporal gap occurs between the subtitles, even if it awkwardly breaks a Bengali clause in half. The pause must reflect the speaker's hesitation or deliberate pacing.
+
+Note that, only in this case, you can re arrange the sequence of these non-meaningful words/phrases that are building blocks of the meaningful chunk or a thought unit that was spread across multiple pulses, so that the thought unit or the meaningful chunk is formed in a natural way. Here still the pulses are separated by ... but they are resequenced to form a natural flow to form the meaningful chunk or thought unit.
+
+This applies only inside of a meaningful chunk/thought unit. The sequence of the meaningful chunks and thought units that form a complete thought remains same.
+In short, The "Holistic Mapping" Rule for case 1:
+When one thought unit or meaningful chunk is stretched across multiple pulses (pulses separated by ...), do not translate pulse-by-pulse. Instead:
+
+Synthesize: First, translate the entire English thought unit into a natural, complete Bengali sentence or clause.
+
+Distribute: Take that complete Bengali translation and "pour" it into the available pulse containers (the SRT timestamps).
+
+Fragment Naturally: When distributing the Bengali text across pulses, ensure that the text within each pulse forms a natural phonetic chunk (a phrase or sub-part) in Bengali.
+
+Transposition: Since Bengali is a Subject-Object-Verb (SOV) language and English is SVO, you must rearrange the words across the ... markers so the verb lands in the appropriate pulse for the Bengali flow, while ensuring the overall meaning matches the duration of the total pulses used.
+
+The "Bridge" Principle: Each segment between the ... should feel like a natural "breath" or a logical sub-component of the thought, not a random collection of words.
+
+Example of how to handle the "broken" input:
+
+English Pulses: the worship of the ... divine ... in the feminine form ... was hugely prevalent
+
+Wrong (Literal): এর উপাসনা ... ঈশ্বরকে ... নারী রূপে ... ব্যাপকভাবে প্রচলিত ছিল (This feels broken).
+
+Correct (Mapped): ঈশ্বরকে ... নারী রূপে ... উপাসনা করা ... ব্যাপকভাবে প্রচলিত ছিল (Each pulse now contains a logical Bengali phrase that builds toward the meaningful chunk/thought unit/conclusion).
+
+
+Case 2: Multiple thought units compressed into one pulse (e.g., 2-3 short sentences spoken rapidly in 1 subtitle):
+If the SRT shows continuous speech with no off-signal gaps, do not inject ... pauses just because the grammar suggests a new sentence. Translate the White Threads to flow rapidly together, using commas (,) in-between thought units and ; between different thoughts to maintain continuous structural phrasing to match the unbroken momentum of the speaker.
+
+Case 3: Overlapping boundaries (e.g., a pulse contains the end of thought A and the start of thought B):
+Translate the transition naturally with appropriate boundary punctuation, but reserve your heavy pause punctuation (... or -) only for where the actual SRT gap (Off-Signal) occurs.
+
+
+
+
+Now lets understand the requirement by an analogy.
+
+
+
+Its like weaving an art piece.
+
+
+
+The actual content itself is the white thread.
+
+The punctuation marks are the threads with green shades.
+
+… are the threads with pink shade.
+
+The paragraphs breaks are the threads with orange shades.
+
+The contextually perfect Bengali word choice is the thread of blue shades.
+
+The things that are not to be done are the red threads.
+
+
+
+Now as you start weaving the dubbing script you should carefully weave these color threads at appropriate places as per the instructions given below.
+
+
+
+Below is the information regarding the White threads:
+
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+“Life is not a problem to be solved…
+
+it is a reality to be experienced.”
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction (“No…”)
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels “broken”.
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+“Do you want peace?
+
+Or do you want to control everything?”
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts can be changed to create the sub part in a meaningful way. the subparts remain in the same order.
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of ‘Color A’ when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of ‘Color B’ when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid. these are joined with …
+
+Now the ‘Color A’ set and the ‘Color B’ set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+
+
+In short: Each individual piece that can be identified as a separate part or sub part is the white thread.
+
+
+
+To the extent possible make sure these pieces occur in the same sequence especially the meaningful chunks (made up of sub parts and internal parts)
+
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the coloured sections remain, the pieces of the same color that forms that colored section within can be rearranged.
+
+
+Below is the information regarding the green threads:
+
+now as we weave the white threads to form the sentences, we want to weave in the green threads (punctuation marks) as per the below rules.
+
+
+
+… indicates a pause in between the parts that makes a meaningful chunk or a clause.
+
+, indicates a pause between meaningful chunks that make up the sentence.
+
+; indicates connected sentences.
+
+Hyphen (-) indicates additional information related to the main idea of the sentence.
+
+
+
+
+we connect building parts with … to make up the internal part.
+
+we connect the internal parts with - to make up the subpart.
+
+we connect the subparts with ; to make up the body part.
+
+
+
+for example, the punctuation marks should be weaved like this:
+
+building part …  building part (one internal part)- another internal part - one more internal part; internal part - building part …  building part (another internal part);
+
+internal part -  building part …  building part (one internal part)
+
+subpart; subpart; internal part - internal part; building part…building part…building part; subpart
+
+
+
+
+Placing (-):
+
+  To Set Off Parenthetical Information:
+
+  Example: This is a very important point - one that you shouldn't forget.
+
+ Bengali: এটি একটি অত্যন্ত গুরুত্বপূর্ণ বিষয় - যেটা আপনার ভোলা উচিত নয়।
+
+
+
+  Example: The students - all 35 of them - were excited for the field trip.
+
+  Bengali: ছাত্ররা - মোট ৩৫ জনই - ফিল্ড ট্রিপের জন্য উৎসাহিত ছিল।
+
+
+
+ To Introduce a List:
+
+    Example: She bought many things - clothes, shoes, and accessories.
+
+Bengali: সে অনেক জিনিস কিনেছে - জামাকাপড়, জুতো, এবং অন্যান্য সাজসরঞ্জাম।
+
+
+
+
+   To Introduce an additional Explanation after completion of one thought:
+
+    Example: The reason for the delay - traffic congestion - was unavoidable.
+
+Bengali: দেরির কারণ - ট্রাফিক জ্যাম - এড়ানো যায়নি।
+
+
+
+    Example: He is my uncle - who is a 7 feet tall man.
+
+Bengali: উনি আমার কাকা - সাত ফুট লম্বা মানুষ।
+
+
+
+
+ Example: Today is Sunday - which is a holiday.
+
+Bengali: আজ রবিবার - মানে ছুটির দিন।
+
+
+
+    To Indicate an Abrupt Break or Change in Thought:
+
+    Example: I was about to leave - wait, there's someone at the door.
+
+Bengali: আমি বেরোতে যাচ্ছিলাম - দাঁড়ান, দরজায় কে যেন এসেছে।
+
+
+
+
+
+To separate inserted thoughts that need a new modulation.
+
+
+
+Pattern: Main sentence - inserted phrase - continuation of the main sentence.
+
+
+
+    Example: The most important thing - and I can't stress this enough - is to be yourself.
+
+Bengali: সবচেয়ে গুরুত্বপূর্ণ বিষয় - যেটা আমি যত জোর দিয়েই বলি না কেন কম পড়বে - নিজের মতো করে থাকা।
+
+
+
+Example: After 100 years - only in 2010, I think - they figured it out... that this theorem describes the black holes... in the universe.
+
+Bengali: ১০০ বছর পরে - সম্ভবত ২০১০ সালে মনে হয় - ওঁরা এটা আবিষ্কার করেছিলেন... যে এই তত্ত্বটি বিশ্বের কৃষ্ণগহ্বরগুলোকে বর্ণনা করে।
+
+
+
+To separate totally different details within a sentence.
+
+Pattern: Main Sentence - detail 1 - detail 2 - continuation of main sentence.
+
+Example: I must tell you this -  two, about maybe three, four years ago - a young woman of 33 or 34 years of age - in a city called Hyderabad in Southern India -  she was a television anchor - one day she did this thing.
+
+Bengali : আমি আপনাদের এটা বলতেই হবে - প্রায় দুই, তিন কি চার বছর আগে - ৩৩ কি ৩৪ বছর বয়সী এক যুবতী - দক্ষিণ ভারতের হায়দ্রাবাদ নামক এক শহরে - সে একজন টেলিভিশন উপস্থাপিকা ছিল - একদিন সে এই কাজটা করল।
+
+In below situation:
+
+When a phrase completes, clarifies, justifies, or defines a key concept or item mentioned immediately before it, so that it indicates change in tone.
+
+replace the punctuation before that phrase with a hyphen ( - ).
+
+Example: so in urban areas it may not matter -  because you have insurance and this and that.
+
+Bengali : তাই শহরাঞ্চলে হয়তো এটা বড় বিষয় না - কারণ আপনার ইনস্যুরেন্স আছে, এটা সেটা সব আছে।
+
+
+
+Use ( - ) specifically when The phrase reveals the actual components of a previously stated category to ensure that the tone would land and conclude the meaning, not continue a list.
+
+Example: “two things — your body and your mind”
+
+Bengali : দুটো জিনিস - আপনার শরীর, আপনার মন।
+
+
+
+
+Below is the information regarding the Pink threads:
+
+
+… should not occur in the text that belong to one single pulse. Even though grammatically it makes sense. Even though there are multiple thought units/phrases/sentences in it. because each pulse is a continuous speech, we don't want the gap in between the continuous pulse.
+
+… only to be placed when there is a pause in between pulses that make up a single thought unit or clause or sentence.
+
+
+
+Below is the information regarding the orange threads:
+
+
+
+Each orange thread is the paragraph break that happens in the dubbing script.
+
+Below are the rules where to weave in the orange thread.
+
+
+
+
+
+When the subject changes (e.g., from speaking about 'Nature' to 'Humans')
+
+When the focus moves from one concept to a completely new idea.
+
+Switch from Description to Reason
+
+Switch from one Context to another.
+
+Switch from Positive to Negative contrast
+
+Split the Question from its Answer.
+
+Before a quoted thought or dialogue starts.
+
+When a sentence structure repeats with a different subject.
+
+When the speaker or the person being quoted changes.
+
+When it changes from a core subject to its explanation using an example, illustration, or analogy.
+
+
+
+
+
+And the sentences that occur within one para can be made into one continuous paragraph. no need to keep them as separate lines within the paragraph.
+
+Example:
+
+আমরা রামরাজ্যের কথা বলি... কারণ -
+
+রামরাজ্য মানে... শুধুমাত্র একটি মহান শাসন নয়;
+
+এটা... ন্যায়, ধর্ম, নিঃস্বার্থতার এক প্রতিচ্ছবি।
+
+
+
+in the above it is one paragraph, but it is three lines in a paragraph. the linebreaks within the paragraph can be removed and it can be made into continuous sentences for ease of reading as shown below:
+
+আমরা রামরাজ্যের কথা বলি... কারণ - রামরাজ্য মানে... শুধুমাত্র একটি মহান শাসন নয়; এটা... ন্যায়, ধর্ম, নিঃস্বার্থতার এক প্রতিচ্ছবি।
+
+
+
+
+CRITICAL FORMATTING RULE: Continuous Text Blocks
+
+
+
+No Soft Breaks: Do not use line breaks or newlines within a paragraph for visual formatting.
+
+
+
+Single Line Constraint: Each paragraph block must be rendered as one single, continuous line of text.
+
+
+
+Separation: Use a double line break only between different paragraphs.
+
+
+
+
+
+
+
+Below is the information regarding the blue threads:
+
+
+
+There are the points where you have to identify the actual contextually best Bengali word or phrase; and identify the actual intention of sadhguru behind those words spoken by him. There are the places where literal word based translation fails. and you have to think deep and pick the appropriate Bengali expression that conveys the actual contextual point and intention.
+
+
+
+
+
+
+
+Need 1: Polishing the Script into a day to day spoken style:
+
+
+
+    Scenario 1.
+
+    In Bengali the translations for a, an and the are not needed - unless in specific cases.
+
+
+
+
+
+
+
+    Scenario 2.
+
+    In Bengali in many cases, an explicit pronoun can be dropped when context makes it clear, since the verb form or topic continuity carries the subject.
+
+
+
+
+
+    Scenario 3: Preferred word pairs
+
+    Dimension - মাত্রা
+
+    You know - জানেন তো..
+
+    Life - জীবন
+
+    People - মানুষ / লোকজন
+
+    Intense - তীব্রতা
+
+    Lifetime - জন্ম
+
+    essentially - মূলত
+
+    intense - তীব্রতা (not প্রচণ্ডতা in this context)
+
+    isn’t it? - তাই না?
+
+
+
+
+Scenario 4:
+
+This applies only to the segments that are lengthy in Bengali. In English, the segment is spoken with fewer words, but in Bengali, the written style contains more words which will exceed the time of the English segment. Mainly in such cases, we try to make the segment short by combining the words like we combine while talking (colloquial style). And in some cases, even though the words are more, Sadhguru speaks them fast. In such cases also shortening is needed. By analyzing the audio, please shorten the segments as and when necessary.
+
+
+
+CRITICAL: Remember we are not removing any segment, example, or list - we are trying to make it short by expressing the exact same content in fewer words / shorter syllables.
+
+
+
+
+
+    Example 1:
+
+    Fast spoken English segment: I'm not saying these things are wrong.
+
+    Bengali Lengthy sentence: আমি বলছি না যে এগুলো ভুল।
+
+    Bengali Shortened Sentence: এগুলো ভুল বলছি না।
+
+
+
+
+
+    Example 2:
+
+    Fast spoken English segment: Not some fanciful thing that I want to do or you want to do.
+
+    Bengali Lengthy sentence: এমন কোনো কাল্পনিক বিষয় নয় যেটা আমি করতে চাই বা আপনি করতে চান।
+
+    Bengali Shortened Sentence: আমার বা আপনার করতে চাওয়া কোনো কাল্পনিক বিষয় নয়।
+
+
+
+
+
+
+
+    Example 3:
+
+    Fast spoken English segment: There are many others who would like to be you. 'Oh, I wish I was 20 and I wish I could think what to do.
+
+    Bengali Lengthy sentence: 'আহা, ২০ বছর বয়সে কী করব তা যদি ভাবতে পারতাম তো কত ভালো হতো। সেই সময়ে আমি কিছু একটা করেই ফেলতাম।' - এমন ভাবা মানুষ এখানে অনেকে আছেন।
+
+    Bengali Shortened Sentence: 'আহা, ২০-তে কী করব ভাবতে পারলে ভালো হতো। তখনই কিছু করে ফেলতাম।' - এমন ভাবার মানুষ এখানে অনেকেই আছেন।
+
+
+
+
+
+  Scenario 5:
+
+    Aspect: Missing Detail
+
+    English: So you must fix yourself, you must engineer yourself the way you think is the best way to be for a human being;
+
+    Basic Translation: তাই - মানুষ হিসেবে থাকার সর্বোত্তম উপায় যেটা, সেইভাবে নিজেকেই ঠিক করে গড়ে তুলতে হবে;
+
+    Optimized Translation: তাই - মানুষ হিসেবে থাকার সর্বোত্তম উপায় যা মনে করেন, সেইভাবে নিজেকেই গড়েপিটে তুলতে হবে;
+
+    Details of optimization: ‘মনে করেন’ is the detail for ‘you think is’
+
+
+
+
+
+
+
+
+  Scenario 6:
+
+    Aspect: Thought Flow
+
+
+
+    English:
+
+    Living strong means your level of experience is intense and enormous.
+
+
+
+    Your level of experience will become enormous - only when your level of attention is absolute.
+
+    Basic Translation:
+
+     শক্তিশালী জীবনযাপন মানে - আপনার অনুভূতির স্তর তীব্র এবং বিশাল হওয়া।
+
+
+
+    যখনই আপনার মনোযোগ সম্পূর্ণ হবে, তখনই আপনার অনুভূতির স্তরও বিশাল হবে।
+
+
+
+    Optimized Translation:
+
+    শক্তিশালী জীবনযাপন মানে - আপনার অনুভূতির স্তর তীক্ষ্ণ এবং বিশাল হওয়া।
+
+
+
+    আপনার অনুভূতির স্তর বিশাল হয়ে ওঠে, তখনই - যখন আপনার মনোযোগ সম্পূর্ণ হয়!
+
+    Details of optimization:
+
+    Let us take these two sentences as A and B.  'The enormity of experience’ is in the ending portion of A  and is in the beginning portion of B. Thus ensuring a smooth flow of thoughts and connectivity.
+
+
+
+
+Scenario 7:
+
+   Aspect:  Exact detail without deviation
+
+
+
+    English:
+
+    Though I am known to be a yogi - very analytical and logical - essentially, I have always lived my life as a devotee.
+
+    Basic Translation:
+
+    সবাই আমাকে অত্যন্ত বিশ্লেষণাত্মক, যৌক্তিক যোগী মনে করেন, কিন্তু সত্যি বলতে আমি সর্বদা একজন ভক্ত হিসেবেই আমার জীবন কাটিয়েছি।
+
+    Optimized Translation:
+
+    সবাই আমাকে অত্যন্ত বিশ্লেষণাত্মক, যৌক্তিক যোগী হিসেবে দেখলেও, মূলত, আমি সর্বদা একজন ভক্ত হিসেবেই আমার জীবন কাটিয়েছি।
+
+    Details of optimization:
+
+    ‘মনে করেন’ is a slight deviation from what is said. ‘দেখলেও’ is closer to the actual detail ‘known to be’ in English.
+
+
+
+    ‘সত্যি বলতে’ conveys contradiction. ‘মূলত’ conveys different levels of things - this is for the word ‘essentially’.
+
+
+
+
+
+Scenario 8:
+
+
+
+    Aspect:  Modulation Cues
+
+
+
+    English: I want you to understand... how difficult the spiritual process is going to be for you - is determined by you - not by nature and not by your guru.
+
+    Basic Translation:
+
+    আপনি একটা বিষয় বুঝুন... আধ্যাত্মিক প্রক্রিয়াটি আপনার জন্য কতটা কঠিন হবে... সেটা আপনার দ্বারাই নির্ধারিত হয়, প্রকৃতি দ্বারা নয়, আপনার গুরু দ্বারাও নয়।
+
+    Optimized Translation:
+
+    আপনি একটা বিষয় বুঝুন... আধ্যাত্মিক প্রক্রিয়াটি আপনার জন্য কতটা কঠিন হবে... সেটা আপনার দ্বারাই নির্ধারিত হয় - প্রকৃতি দ্বারা নয়, আপনার গুরু দ্বারাও নয়।
+
+    Details of optimization:
+
+    Once one thought is completed and next there is additional information, use - at the end of the main thought, so that the dubbing artist will complete that thought, and again add information after that - instead of reading the whole thing like a list of things.
+
+
+
+
+Scenario 9:
+
+
+
+Aspect: Modulation based ending
+
+Written: পাত্তা না দেওয়া না, <Refining>লক্ষ্য রাখতে হবে - কে কী বলছে সেটা।</Refining>
+
+
+
+Tuned for Dubbing: পাত্তা না দেওয়া না, <Refining>লক্ষ্য রাখতে হবে - কে কী বলছে!</Refining>
+
+
+
+
+scenario 10:
+
+Aspect: short notation while speaking
+
+
+
+Written: আপনি কি জানেন
+
+Tuned for Dubbing: জানেন তো
+
+
+
+
+Written: না জানলে
+
+Tuned for Dubbing: না জানলে / জানেন না হলে
+
+
+
+Written: কী যে
+
+Tuned for Dubbing: কী যে
+
+
+
+
+Written: জিজ্ঞেস করেন
+
+Tuned for Dubbing: জিজ্ঞেস করেন
+
+
+
+Written: <Refining>আপনি এখানে</Refining> এসেছেন কিছু না নিয়েই
+
+Tuned for Dubbing: <Refining>এখানে এসেছেন</Refining> কিছু না নিয়েই
+
+
+
+Written: খাবার আপনার মুখে যত <Refining>বেশি সময় থাকবে</Refining>, আপনার হজম তত ভালো হবে;
+
+Tuned for Dubbing: খাবার আপনার মুখে যত <Refining>বেশিক্ষণ থাকবে</Refining>, হজম তত ভালো হবে;
+
+
+
+Written: আধ্যাত্মিক পথে আছেন মানে, আপনার জীবনে কিছু ভয়াবহ <Refining> ঘটে থাকবেই</Refining> - এটা ওঁরা দৃঢ়ভাবে বিশ্বাস করেন।
+
+Tuned for Dubbing: আধ্যাত্মিক পথে আছেন মানে, আপনার জীবনে কিছু ভয়াবহ <Refining> ঘটেই থাকবে </Refining> - এটা ওঁরা দৃঢ়ভাবে বিশ্বাস করেন।
+
+
+
+scenario 11:
+
+Aspect: Not explicitly mentioning the redundant subject
+
+
+
+Written:  "ওহ <Refining>আপনি আশ্রমে থাকেন</Refining>, তাহলে, আপনার কষ্ট কী?" এই বলে জিজ্ঞেস করেন।
+
+Tuned for Dubbing:  "ওহ <Refining>আশ্রমে থাকেন</Refining>, তাহলে, আপনার কষ্ট কী?" এই বলে জিজ্ঞেস করেন।
+
+
+
+
+Explanation: in English the subject must be there, but in Bengali, when the verb form, the topic continuity, or context already conveys the subject, the explicit pronoun can be dropped in spoken style.
+
+
+
+Written:  <Refining>আপনি আধ্যাত্মিক পথে আছেন মানে</Refining>, আপনার জীবনে কিছু ভয়াবহ ঘটে থাকবেই - এটা ওঁরা দৃঢ়ভাবে বিশ্বাস করেন।
+
+Tuned for Dubbing:  <Refining>আধ্যাত্মিক পথে আছেন মানে</Refining>, আপনার জীবনে কিছু ভয়াবহ ঘটে থাকবেই - এটা ওঁরা দৃঢ়ভাবে বিশ্বাস করেন।
+
+
+
+
+Written:
+
+ অমন করলে... অন্তত ৩০ থেকে ৪০% হজম মুখেই হয়ে যায় - তখনই, সেটা প্রস্তুত হয়; এখন খাবার মুখেই ভালোভাবে প্রস্তুত হয়ে থাকে; <Refining>সেটা ভেতরে গেলে... পেট সেটাই আশা করে - অর্ধ-হজম হওয়া খাবার!</Refining>
+
+Tuned for Dubbing:
+
+ অমন করলে... অন্তত ৩০ থেকে ৪০% হজম মুখেই হয়ে যায় - তখনই, সেটা প্রস্তুত হয়; এখন খাবার মুখেই ভালোভাবে প্রস্তুত হয়ে থাকে; <Refining> ভেতরে গেলে... পেট সেটাই আশা করে - অর্ধ-হজম হওয়া খাবার!</Refining>
+
+
+
+Explanation: in English the subject must be there, but in Bengali sentences can be formed without the subject. Here the tagged part is the continuation of the first part, the subject is already established in the first part. In the second part which is a follow-up, in Bengali we can skip mentioning the subject again. In spoken style, the subject is implied here.
+
+
+
+Scenario 12:
+
+While quoting what someone spoke:
+
+Please place the quoted text in the double quotes and Bring the verb part to the end of the sentence while quoting someone's words or while expressing internal thought process.
+
+
+
+
+Examples:
+
+
+
+Example:
+
+
+
+Original : ওঁরা <T3>মনে করেন<T3> এখন আধ্যাত্মিকতা মানে আপনাকে হিমালয়ে যেতে হবে বা কাশীতে যেতে হবে... অথবা সব ছেড়ে দিতে হবে
+
+
+
+optimized : ওঁরা “এখন আধ্যাত্মিকতা মানে আপনাকে হিমালয়ে যেতে হবে বা কাশীতে যেতে হবে... অথবা সব ছেড়ে দিতে হবে” - এই বলে <T3>মনে করেন<T3>
+
+
+
+description:
+
+Here the structure is subject then comma then the thought or the words spoken by the subject in quotes then the verb that conveys saying or thinking and then period or question mark or other punctuation as per the need. Remember the … and - and ; within the quoted portion are still preserved.
+
+
+
+Example:
+
+Original
+
+প্রত্যেকেই <T3>জিজ্ঞেস করছেন<T3>, "সদ্‌গুরু, আপনি এর জন্য এত মাথা ঘামাচ্ছেন কেন?"
+
+
+
+optimized :
+
+প্রত্যেকেই, "সদ্‌গুরু, আপনি এর জন্য এত মাথা ঘামাচ্ছেন কেন?" - এই বলে <T3>জিজ্ঞেস করছেন<T3>।
+
+
+
+
+Example:
+
+Original
+
+<T3>আমি বললাম<T3>, ওঁদের যদি খাওয়ার জলই না থাকে... তাহলে আমি ওঁদের ধ্যান করতে কীভাবে বলব?
+
+
+
+
+Optimized:
+
+<T3>আমি<T3>, “ওঁদের যদি খাওয়ার জলই না থাকে... তাহলে আমি ওঁদের ধ্যান করতে কীভাবে বলব?” - <T3>বললাম<T3>
+
+
+
+description:
+
+Here the subject who spoke and the verb that conveys the speaking are in one word. we have separated them, and placed the subject before the quoted part and the verb after the quoted part.
+
+
+
+
+Original:
+
+মানুষ আমাকে <T3>জিজ্ঞেস করতেই থাকেন<T3>, "সদ্‌গুরু, এই দেশে আধ্যাত্মিক প্রক্রিয়া পুনরুদ্ধারের পথ কী?"
+
+
+
+Optimized:
+
+মানুষ আমাকে <T3>এভাবেই<T3> জিজ্ঞেস করতে থাকেন, "সদ্‌গুরু, এই দেশে আধ্যাত্মিক প্রক্রিয়া পুনরুদ্ধারের পথ কী?" <T3>বলেন।<T3>
+
+
+
+ description:
+
+Here the subject part is long, bringing the whole long phrase to the end may make sync loss while dubbing. So what we did is, we added the verb that conveys asking again at the end to make it end in a natural way of spoken Bengali. also note that we have added the word এভাবেই as a cataphoric adverb / discourse-bridging adverb.
+
+
+
+
+In Short below is the instruction in summary:
+
+Primary Directive: Create a Dubbing Performance Script
+
+Your goal is not just to translate, but to create a performance script for a dubbing artist. This means capturing the speaker's exact timing, rhythm, and pauses is your highest priority, even if it occasionally makes the sentence structure feel less conventional than written text.
+
+CRITICAL RULE: Meticulous Pause Transcription
+
+Non-Negotiable Pauses: You must use ... to mark every noticeable pause or hesitation in the speaker's delivery. This is the single most important rule.
+
+Priority Over Flow: If a choice must be made between a perfectly natural sentence flow and accurately placing a ... to match the speaker's timing, always prioritize matching the pause. It is better to have a slightly unusual sentence structure that syncs perfectly than a smooth sentence that doesn't.
+
+Review for Pauses: Before finalizing your output, perform a final mental check specifically for this rule: "Have I captured all the short, rhythmic pauses, or have I smoothed them over?"
+
+
+
+
+Below is the information regarding Red threads:
+
+Do not hallucinate.
+
+Do not remove or summarize the units.
+
+Do not add information that is not actually spoken.
+
+Do not re arrange the sentences or clauses just to prioritize the flow within the sentence. this will break the flow between the sentences.
+
+Do not skip the portions that are not spoken by sadhguru. Should include other speakers translation also.
+
+Do not skip the promo part.
+
+Do not explicitly create promo part if it is not there in english. if it's not there in english, in Bengali also it should not be there.
+
+Do not skip the part in the main talk just because it has already come in the promo part/previous parts.
+
+Do not skip English sentences or phrases thinking they are redundant or irrelevant or secondary details. Every thing said in English should be reflected in Bengali.
+
+THIS IS NOT A SUMMARY, THIS IS A DUBBING SCRIPT WHERE DIALOGUES ARE DUBBED AND ATTACHED TO THE ORIGINAL VIDEO. SO NO SKIPPING PARTS OR PHRASES OR DETAILS.
+
+
+
+
+Below are the must do:
+
+Keep every redundant phrase.
+
+Keep every repetition.
+
+keep every redundant detail.
+
+keep every insignificant detail.
+
+in the middle of a sentence, if he adds additional sentence or a secondary information, do not skip it, reflect every minute detail spoken just place a - before those parts.
+
+
+
+
+Below are example Bengali scripts weaved using all the color threads:
+
+
+
+1. আমি আগে কখনও ধ্যান করিনি...
+
+
+
+
+সদ্‌গুরু:
+
+“ও আমি আগে কখনও ধ্যান করিনি; ধ্যান কীভাবে করব!” - এটা ভালো ব্যাপারই, যদি আগে কখনও ধ্যান না করে থাকেন!
+
+
+
+ধ্যানের জন্য কোনো প্রতিভা প্রয়োজন নেই; কোনো অনুশীলন প্রয়োজন নেই; কোনো সিনিয়রিটি প্রয়োজন নেই; কোনো অভিজ্ঞতাও প্রয়োজন নেই; প্রয়োজন কেবল ‘ইচ্ছা’ … শুধু ওটুকুই!
+
+
+
+‘সম্পূর্ণ ইচ্ছুক থাকা’ - ধ্যানের জন্য এটাই দরকার!
+
+
+
+আর, আপনি একটা বিষয় শিখুন - কখনই অভিজ্ঞ ধ্যানী হবেন না - তা হলে, নিজেকে এক জটিলতায় ঠেলে দেবেন!
+
+
+
+ ‘ধ্যান’ প্রতিবার নতুনভাবে ফোটার মতো! প্রতিবার এটা একটা নতুন সম্ভাবনা।
+
+
+
+তা না, …   "আমি কুড়ি বছর ধ্যান করেছি, তাই আমি অভিজ্ঞ ধ্যানী!" …   এমন কিছু নেই।
+
+
+
+উদাহরণস্বরূপ - ধরুন, আপনি গত দশ বছর ধরে বাগান করেছেন; তার মানে কি - এবার, এই মরসুমে, ‘চারা না লাগালেও, বাগানে ফুল আপনাআপনি ফুটবে’? অথবা ‘জল না দিলেও, বাগানে ফুল আপনাআপনি ফুটবে’? দেখাশোনা না করলেও, ফুল আপনাআপনি ফুটবে - কারণ আপনার অভিজ্ঞতা আছে!? - এমন হয় কি?
+
+
+
+না, এবারও সব ঠিকঠাক করতে হবে। তবেই ফুল ফুটবে; তাই না?
+
+
+
+হয়ত... মাটি কীভাবে রাখতে হবে... কতটা জল দিতে হবে … বাগান কীভাবে চালাতে হবে - সম্ভবত এই বিষয়ে অভিজ্ঞতা কাজে আসবে; তা না হলে ফুল আপনাআপনি ফুটে যাবে না - শুধু আপনার অভিজ্ঞতা আছে বলে! জীবনে কিছুই - অভিজ্ঞতা আছে বলে আপনাআপনি হয় না। এবারও সব ঠিকঠাক করতে হবে, তাই না?
+
+
+
+আঁ?
+
+
+
+ধ্যানের ক্ষেত্রেও তেমন, কখনই সিনিয়র ধ্যানী হবেন না। ধ্যানে বসা প্রতিবার, জীবনে এই প্রথম বসছেন - এমনভাবে বসুন। তবেই এটা দারুণ কাজ করবে।
+
+
+
+
+2. আমার চিন্তাগুলো কীভাবে নিয়ন্ত্রণ করব?
+
+
+
+সদ্‌গুরু:
+
+মনে .. বেপরোয়া চিন্তাভাবনা, আবেগ এলে, প্রথমে আপনাকে যেটা করতে হবে - সেগুলোকে যেমন আছে তেমনিই দেখুন; বাধা দিতে যাবেন না, বাধা দিলে - সেগুলো মুহূর্তে দ্বিগুণ হয়ে যাবে।
+
+
+
+এই মনে বিয়োগ, ভাগ নেই; যোগ, গুণই আছে।
+
+
+
+"আমার এই আবেগ চাই না" - বললে, সেটা বাড়ে - এক হয়ে দুই হয়।
+
+
+
+"আহা, এটা আবার আসছে; আমার এটা চাই না, আমার এটা চাই না" - বললে, সেটা শতগুণ হয়। আপনার মনের ধর্মই এই।
+
+
+
+মন থেকে কিছুই জোর করে সরানো যায় না। কেউই কিছু মন থেকে জোর করে সরানোর কোনো উপায়ই নেই।
+
+
+
+তাই আপনাকে যেটা করতে হবে - এটুকু বুঝুন - সেটা হলো, ‘চিন্তা আর আবেগ’ আসলে আগের সংরক্ষিত তথ্যের পুনর্ব্যবহার মাত্র! স্মৃতির রিসাইক্লিং!
+
+
+
+তবে, ‘মেমোরি’ একটু গন্ধ ছড়ায়; সেটা আসতেই থাকে। সেটা সেইভাবেই দেখতে হবে! সেটা থেকে একটু দূরে সরে আসতে হবে!
+
+
+
+এটা কেমন - ধরুন, আপনি ট্র্যাফিক জ্যামে আটকে আছেন; এয়ারপোর্ট যাচ্ছেন, ট্র্যাফিক জ্যামে আটকে গেছেন - ‘কতটা’ উদ্বিগ্ন, অস্বস্তি বোধ করছেন! ঠিক আছে, যেভাবেই হোক এয়ারপোর্ট পৌঁছে বিমানে উঠে রওনা হলেন।
+
+
+
+নিচে ট্র্যাফিক বাজেভাবে জ্যাম। এখন উপর থেকে দেখলে, “আহা, ওই ট্র্যাফিক জ্যামটাই কী সুন্দর!” …  শুধু একটু দূরত্ব থাকার ফলেই!
+
+
+
+ এখনও সেই একই ট্র্যাফিক জ্যাম - কিন্তু দূরত্ব থাকার ফলে, একনিমেষেই বিষয়টা হালকা হয়ে যায়। তেমনই আপনার চিন্তা, আবেগের ক্ষেত্রেও!
+
+
+
+সামান্য সাধনায় … একটু দূরত্ব আসে - আপনার শারীরিক প্রক্রিয়া থেকে! আবার মানসিক প্রক্রিয়া থেকেও!
+
+
+
+সেটা না করে প্রতিটি চিন্তা, আবেগ সামাল দিতে গেলে, সেগুলো হাজারগুণ হয়ে যায়।
+
+
+
+
+
+
+3. কাল ধ্যান বাদ দেব ভাবলে...
+
+
+
+সদ্‌গুরু: সবাই দাঁত মেজেছেন?
+
+
+
+অংশগ্রহণকারী: মেজেছি।
+
+
+
+সদ্‌গুরু: ভালো!
+
+
+
+নিজেই মেজেছেন... নাকি আপনার মা-বাবা, স্বামী, স্ত্রী, অথবা অন্য কেউ চাপ দিয়ে - "আজ দাঁত মাজতেই হবে" - বলেছেন?
+
+
+
+নিজেই মেজেছেন!
+
+
+
+অংশগ্রহণকারী: হ্যাঁ।
+
+
+
+সদ্‌গুরু: ওহ! দারুণ ব্যাপার!
+
+
+
+কিন্তু আপনার মনে আছে কি, আপনার জীবনের এক সময়ে - এইটুকু বয়সে - আপনার মা জোর দিয়ে বলতেন “দাঁত মাজতেই হবে। নয়তো জলখাবার পাবে না!”
+
+কতদিন? - তিন মাস, ছয় মাস, কি একবছর!
+
+
+
+তারপর থেকে, নিজেই মাজেন; কাল আপনার মা এসে, "শোন, দাঁত মাজা আসলে ভুল; এতে কোনো লাভ নেই; আমি ছেড়ে দিয়েছি; তুইও ছেড়ে দে" - বললে, ছেড়ে দেবেন?
+
+অংশগ্রহণকারী: ছাড়ব না।
+
+
+
+সদ্‌গুরু: কেন?
+
+
+
+কারণ এখন আপনি ‘এর গুরুত্ব কী, এটা আপনার কী করছে’ - তা বুঝে গেছেন।
+
+
+
+এখন আর কেউ এটা করতে জোর করতে হবে না।
+
+
+
+এর গুরুত্ব না বোঝা অবধি, কাউকে চাপ দিয়ে করাতে হয়; এর গুরুত্ব বুঝে গেলে, আর কাউকে বলতে হয় না, তাই না? কারণ, এখন - এটা আপনার কী করছে সেটা আপনার জানা হয়ে গেছে; কেউ ‘না করতে’ বললেও, আপনি করবেন। তাই, এই দৃঢ়তা নিয়েই শুরু করি, ঠিক আছে?
+
+
+
+
+
+
+4. ধ্যান কাজ করে কি?
+
+
+
+সদ্‌গুরু:
+
+এটা কাজ করে কি? …
+
+
+
+সম্ভবত সবসময় …  শারীরিক প্রকাশগুলোই সবচেয়ে সরাসরি অনুভবে আসে। তবে আরও অনেক প্রকাশ আছে ... শারীরিক ও মানসিক স্থিতির বাইরেও আরও অনেক প্রকাশ আছে।
+
+
+
+শারীরিক ও মানসিকভাবে - যে কোনো জনসমাবেশে এটা আপনাকে আলাদা করে তুলবে - যদি আপনি এই সাধনার জন্য নিজেকে যথেষ্ট নিবেদন করেন!
+
+
+
+তবে এই উপকারগুলো, এসব … স্বাস্থ্যগতভাবে দেখলে - অনেক আধুনিক গবেষণা জানাচ্ছে - এটা আপনার জন্য অসাধারণ কাজ করবে!
+
+
+
+তবে এসব - শারীরিক স্বাস্থ্য, মানসিক সক্ষমতা, জীবনকে সহজে মোকাবিলা করতে পারা - এসব শুধু পার্শ্ব ফল মাত্র; আসল বিষয়টা ধীরে ধীরে রূপ নিচ্ছে। সেটা - প্রকাশিত হলে তবেই আপনি জানবেন। তার আগে কিছু ঘটছে না বলেই মনে হবে।
+
+
+
+এটা কেমন - আপনার ঘরে … একটা ফুলগাছ লাগালেন; সেটা বাড়ছে - শুধু পাতাই গজাচ্ছে!
+
+
+
+প্রতিবেশী আপনাকে বলবেন, "এতে লাভ নেই; ফুল বললেন, পাতাই গজাচ্ছে। কেটে ফেলি, আগুন পোহাতে কাজে আসবে।"
+
+
+
+আপনি বলবেন, "অপেক্ষা করি, হয়তো কাল সকালে ফুটবে!"
+
+
+
+পরের দিন সকালে কিছুই আসে না।
+
+
+
+আবার, "আরেকদিন দেখি" - আরেকদিন, আরেকদিন... এভাবে বছর কেটে যায়; এই গাছটা ফুটতে কতদিন লাগে যদি আপনি না জানতেন, তাহলে হয়তো একশোবার কেটে ফেলতেন।
+
+
+
+কিন্তু সেটা পরিচর্যা করে চালিয়ে গেলে - একদিন সেটা ফুটে, ফুলে ভরে যাবে, তখন আপনি বুঝবেন - “এই গাছ পাতার জন্য নয়... এটা ছায়ার জন্য নয়... এটা সামান্য অক্সিজেনের জন্যও নয়”!
+
+
+
+ফুল ফুটলে ‘এটা’ বলার অসাধ্য সুন্দর হয়!
+
+
+
+
+
+
+5. ধ্যান কি সত্যিই কাজ করে?
+
+
+
+এমন ভাববেন না - আজ সাধনা করলেন, "ও আমার কিছুই হয়নি!" পরের দিন সাধনা করলেন, "ও আমার কিছুই হয়নি!" কিছু ঘটার দরকার নেই, বুঝেছেন? শুধু করতে থাকা! এটাকে একটা নিবেদন হিসেবে করুন, বুঝেছেন?
+
+
+
+কিছু পাওয়ার দরকার নেই! জীবন কাটানোর ধরনটাই এটা না - "এটা করলাম, কী পাব? সেটা করলাম, কী পাব?" - এটা বাঁচার পদ্ধতি না।
+
+
+
+"আমি কী পাব?" - যাঁরা এটা ভাবেন, তাঁরা জীবন জানতে পারেন না। আপনার ‘গুরুত্বপূর্ণ মনে হয়’ যা, সেটা করতে থাকুন - শুধু একটা নিবেদন হিসেবে! যা হওয়ার তা হবে!
+
+
+
+কিন্তু আপনি বড্ড গোল-ওরিয়েন্টেড হয়ে গেছেন - গাছ বাড়ার আগেই আপনার আম চাই!
+
+
+
+না! গাছকে বড় করুন, সেটাকে পরিচর্যা করুন... আম আপনার মাথায় পড়বে - না চাইলেও!
+
+
+
+Focus area 2: Length of the Bengali segments:
+
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+
+
+Gap threshold = minimum 20 %
+Relative density threshold - 1.1
+
+
+
+that means if the gap after the segment is less than 20% of the length of the segment, then that segment is flagged for gap threshold.
+that means if the Relative number of syllables per second is greater than 1.3 times the average number of syllables per second, then that segment is flagged for gap threshold.
+
+Now
+
+Gap threshold flagged, density threshold flagged
+
+Case 1:
+Gap threshold flagged, density threshold flagged
+Action:
+need heavy compressing. Express the main idea by cutting as many additional details as possible. Just convey the main point in short and crisp way. And add tags [fast][/fast] around the corresponding Bengali segment so that ElevenLabs will render this segment in fast pace.
+
+Case 2:
+Gap threshold flagged, density threshold not flagged
+Action:
+Here the aim is to achieve at least some level of shortening, so that the Bengali fits in - as there is no gap after this.
+
+Apply all the shortening approaches mentioned above
+
+also use below Shortening approaches as well:
+
+You have three additional tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (সন্ধি / Vowel Merging): Merge vowels and adjacent sounds where Bengali naturally permits it (e.g., "যে আছে" → "যেই আছে" / "যাঁ-আছে"-style elisions; "করিয়া" → "করে"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+
+Samasa (সমাস / Compound Nouns): Instead of "প্রাণের সংকেত" (The signs of life), you use "প্রাণ-সংকেত". It sounds tighter and cuts the length significantly.
+
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+Verb Fusing / Contracted Forms: Use contracted spoken forms — "করিতেছি" → "করছি"; "যাইতেছি" → "যাচ্ছি"; "হয় না" → "হয়না". It turns a concept into a single action and matches natural Bengali colloquial speech.
+
+
+
+make sure the real intention being conveyed is not diluted. this is high priority. You aren't "diluting" the Master's words; you are "distilling" them. that means you are not skipping details, you are adjusting the structure.
+- Reduce verbosity while preserving meaning.
+- use context from previous and next segments
+- avoid repeating ideas already stated nearby
+- Do not remove key philosophical or logical meaning, Prefer simplifying structure over dropping whole concepts altogether.
+
+You should check if the segments tagged for shortening are able to be pronounced within The total time available for the dubbing segment. One way to check is the number of Akṣaras (syllabic units) in the Bengali segment must be almost same as the number of English syllables. For example, in প্রক্রিয়া there are three syllabic units প্র, ক্রি, and য়া.
+
+
+Case 3:
+Gap threshold not flagged, density threshold flagged
+Action:
+Make the Bengali crisp without losing any details.
+
+
+Case 4:
+Gap threshold not flagged, density threshold not flagged
+- no need to shorten
+
+
+
+
+Secondary: check if the segments can be spoken in the time in general, if any Bengali segment contains relatively large number of words or lengthy words compared to corresponding English segment, shorten them also.
+
+
+
+Additional requirement:
+
+if the original audio includes the promo part (few sentences from the talk shown at the start of the video to create interest in the viewer) then, Both the scripts should also include the promo part at the beginning.
+
+
+Also, if you have to truncate the output because mention that also at the beginning. and then give the actual translation asked above.
+
+Below is the formatted English script :

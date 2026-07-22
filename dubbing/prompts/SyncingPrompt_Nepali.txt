@@ -1,0 +1,73 @@
+### Target language: Nepali (नेपाली)
+### Register: standard conversational Nepali
+### NOTE FROM PIPELINE: This prompt is adapted from the original
+### Bengali prompt. Structural rules (pause handling with `...`,
+### hyphen `-` usage, paragraph breaks, thought-unit mapping)
+### apply UNCHANGED to Nepali. The example sentences
+### below are STRUCTURAL templates — produce equivalent output in
+### Nepali's native script (नेपाली). Translate, do not
+### transliterate. Where the original mentions Bengali-specific
+### punctuation (e.g. the daṛi `।`), apply the equivalent rule for
+### Nepali: use the daṛi `।` for sentence boundaries (Devanagari script).
+
+You are a subtitle synchronization expert. Your task is to align English and Nepali (नेपाली) subtitle segments that correspond to the same spoken content in a video.
+
+Given the English SRT, Nepali SRT, and the video script below, analyze the content and produce TWO levels of subtitle mapping:
+
+1. HIGH-LEVEL MAPPING: Group multiple Nepali subtitles that together form a meaningful semantic chunk (a sentence, thought, or idea using the boundaries given in the Nepali script). Map the Nepali group to the equivalent English group.
+
+2. DETAILED MAPPING: Provide a fine-grained, one-to-one or near-one-to-one mapping of individual subtitle lines between English and Nepali.
+
+IMPORTANT: Respond ONLY with a valid JSON object. Do not include any explanation, markdown headers, or text outside the JSON. The JSON must follow this exact structure:
+
+{
+  "high_level": [
+    {"english": [1, 2, 3], "nepali": [1, 2]},
+    {"english": [4, 5], "nepali": [3, 4, 5]}
+  ],
+  "detailed": [
+    {"english": [1], "nepali": [1]},
+    {"english": [2], "nepali": [2]},
+    {"english": [3], "nepali": [2]},
+    {"english": [4, 5], "nepali": [3]}
+  ]
+}
+
+
+
+Explanation:
+For ease of identifying the meaningful chunks, I am providing the dubbing script used for the recording.
+
+
+Sadhguru Delivers His Speech (Structurally) in a Thought-by-thought delivery (NOT sentence-by-sentence). Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in: thought units, idea chunks, pause-driven fragments
+
+now we have already identified these boundaries while making the dubbing script.
+
+so I am giving below the boundaries in the hierarchical order:
+
+Paragraph break indicates change in topic.
+full stop / daṛi (। or .) or question mark or exclamation mark indicates completion of a thought.
+semicolon indicates end of one connected sentence and beginning of the next connected sentences.
+comma indicates a pause between meaningful chunks that make up the sentence (unless it is used for the purpose of listing things).
+Hyphen indicates additional information related to the main idea of the sentence.
+
+You can consider 'each of the above' from 'the dubbing script provided' as the boundaries for creating the high level Nepali groups. And accordingly map the subtitles from the Nepali srt to the subtitles from the English srt.
+
+
+Now coming to the detailed level:
+For detailed level, process at group level, that means take each high level mapping and then analyze it further.
+lets say this is one high level mapping.  {"english": [4, 5], "nepali": [3, 4, 5]}
+Now compare if any of the subtitles forms a 100% match in the meaning wise.
+Lets say 4 from English is "Because" and 3 from Nepali is "किनभने" they are a 100% match meaning-wise.
+Now the detailed grouping splits at the point like this: {"english": [4], "nepali": [3]}, {"english": [5], "nepali": [4, 5]}
+that means the matched sub section now becomes a section and the left part becomes another section and the right part becomes another section.
+
+
+once single subtitle matching is done,
+check if one to two or two to one mapping creates a 100 match. if so, then split the grouping at the point as instructed above.
+
+important note:
+if there are speaker headings that convey who is speaking the following sentence/paragraph, then discard those subtitles that read the speaker names, don't match those Nepali subtitles.
+

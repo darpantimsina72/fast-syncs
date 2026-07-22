@@ -1,0 +1,768 @@
+"""
+Text-to-speech: ElevenLabs synthesis (chunked, tag-safe) and the Google
+Cloud TTS port, plus the byte/char chunkers shared by both engines.
+
+Extracted from Translation_and_Syncing_App.py (bulk app, v1.8.0):
+    lines 127-132   google-cloud-texttospeech optional import guard
+    lines 2531-3072 "TTS helpers" (chunkers, Google TTS, ElevenLabs TTS)
+
+Skipped on purpose (out of scope for the standalone engine):
+    lines 2817-2844 _indic_matplotlib_font (matplotlib UI helper)
+    lines 3093-3095, 3112-3204 multi-speaker dubbing (_speakers_save and
+                    synthesize_tts_elevenlabs_multi). The read-only speaker
+                    map helpers (lines 3080-3109 minus _speakers_save) ARE
+                    ported so the engine can keep detecting and reporting a
+                    saved voice map before ignoring it (v0.2 behaviour).
+
+Adaptations (everything else is verbatim):
+  * _build_tts_client() reads the Google service-account key path from
+    config/tts_settings.json ("google_tts_key_path"); a blank value falls
+    back to config/TTS_Key.json.
+"""
+
+import io
+import json
+import os
+import re
+import urllib.error
+import urllib.request
+import uuid
+from typing import Dict, List
+
+from .config import (_SSL_CTX, ELEVENLABS_CHUNK_CHARS, ELEVENLABS_TTS_MODEL,
+                     ELEVENLABS_TTS_VOICE_ID, CONFIG_DIR, PYDUB_AVAILABLE,
+                     TTS_DEFAULT_LANGUAGE, TTS_DEFAULT_VOICE, TTS_LANGUAGES,
+                     TTS_MAX_BYTES, _AudioSegment, _strip_emotion_tags,
+                     load_tts_settings)
+from .stt import _sanitize_voice_id
+
+try:
+    from google.cloud import texttospeech as _tts_module
+    from google.oauth2 import service_account as _sa_module
+    TTS_AVAILABLE = True
+except ImportError:
+    TTS_AVAILABLE = False
+
+
+def _split_text_into_chunks(text: str, max_bytes: int = TTS_MAX_BYTES) -> list:
+    """
+    Split *text* into a list of chunks where every chunk's UTF-8 encoded size
+    is ≤ max_bytes.  Splits preferentially at:
+      1. Paragraph breaks  (\\n)
+      2. Sentence endings  (. ! ? ।)
+      3. Word boundaries   (space)
+      4. Hard character split (last resort)
+    """
+    if len(text.encode("utf-8")) <= max_bytes:
+        return [text]
+
+    def _fits(s):
+        return len(s.encode("utf-8")) <= max_bytes
+
+    def _split_para(para: str) -> list:
+        pieces  = []
+        current = ""
+        sentences = re.split(r'(?<=[.!?।])\s+', para)
+        for sent in sentences:
+            if not sent:
+                continue
+            candidate = (current + " " + sent).strip() if current else sent
+            if _fits(candidate):
+                current = candidate
+            else:
+                if current:
+                    pieces.append(current)
+                if _fits(sent):
+                    current = sent
+                else:
+                    words   = sent.split()
+                    current = ""
+                    for word in words:
+                        candidate = (current + " " + word).strip() if current else word
+                        if _fits(candidate):
+                            current = candidate
+                        else:
+                            if current:
+                                pieces.append(current)
+                            if not _fits(word):
+                                buf = ""
+                                for ch in word:
+                                    if _fits(buf + ch):
+                                        buf += ch
+                                    else:
+                                        pieces.append(buf)
+                                        buf = ch
+                                current = buf
+                            else:
+                                current = word
+        if current:
+            pieces.append(current)
+        return pieces
+
+    chunks     = []
+    current    = ""
+    paragraphs = text.split("\n")
+
+    for idx, para in enumerate(paragraphs):
+        sep       = "\n" if idx < len(paragraphs) - 1 else ""
+        candidate = (current + "\n" + para).lstrip("\n") if current else para
+
+        if _fits(candidate + sep):
+            current = candidate + sep
+        else:
+            if current:
+                chunks.append(current.strip())
+                current = ""
+            if _fits(para):
+                current = para + sep
+            else:
+                sub = _split_para(para)
+                if sub:
+                    chunks.extend(sub[:-1])
+                    current = sub[-1] + sep if sub else ""
+
+    if current.strip():
+        chunks.append(current.strip())
+
+    return chunks or [text]
+
+
+def _build_tts_client():
+    if not TTS_AVAILABLE:
+        raise ImportError(
+            "google-cloud-texttospeech not installed.\n"
+            "Run: pip install google-cloud-texttospeech google-auth")
+    key_file = (load_tts_settings().get("google_tts_key_path") or "").strip() \
+               or os.path.join(CONFIG_DIR, "TTS_Key.json")
+    if not os.path.exists(key_file):
+        raise FileNotFoundError(
+            f"Google TTS service-account JSON not found at {key_file} — "
+            "set \"google_tts_key_path\" in config/tts_settings.json or "
+            "copy the key to config/TTS_Key.json.")
+    creds = _sa_module.Credentials.from_service_account_file(
+        key_file,
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    )
+    return _tts_module.TextToSpeechClient(credentials=creds)
+
+
+def synthesize_tts(text: str, output_path: str, status_cb=None,
+                   lang_code: str = None,
+                   voice_name: str = TTS_DEFAULT_VOICE) -> str:
+    """
+    Convert text to speech and save WAV to output_path.
+    Splits text into byte-safe chunks (≤ 4800 UTF-8 bytes) and joins the audio.
+    lang_code is derived from voice_name when not provided.
+    Returns output_path.
+    """
+    import wave as _wave_mod
+
+    # Derive lang_code from voice_name (e.g. "hi-IN-Chirp3-HD-Aoede" → "hi-IN")
+    if not lang_code:
+        parts     = voice_name.split("-")
+        lang_code = "-".join(parts[:2]) if len(parts) >= 2 else \
+            TTS_LANGUAGES.get(TTS_DEFAULT_LANGUAGE, {}).get("code", "bn-IN")
+
+    if status_cb:
+        status_cb("TTS: Connecting to Google Cloud TTS…")
+    client = _build_tts_client()
+
+    # Split into byte-safe chunks
+    chunks = _split_text_into_chunks(text)
+    total  = len(chunks)
+
+    _SAMPLE_RATE = 24000
+    voice_params = _tts_module.VoiceSelectionParams(
+        language_code=lang_code, name=voice_name)
+    audio_config = _tts_module.AudioConfig(
+        audio_encoding=_tts_module.AudioEncoding.LINEAR16,
+        sample_rate_hertz=_SAMPLE_RATE)
+
+    out_base         = os.path.splitext(output_path)[0]
+    chunk_log_path   = out_base + "_chunks.txt"
+    chunk_log_lines  = [
+        f"TTS Chunk Log — {os.path.basename(output_path)}",
+        f"Platform : Google Cloud TTS",
+        f"Voice    : {voice_name}  ({lang_code})",
+        f"Total chunks: {total}",
+        "",
+    ]
+
+    chunk_pcm_list = []
+    for i, chunk in enumerate(chunks, 1):
+        if status_cb:
+            if total > 1:
+                status_cb(f"TTS: Generating audio… chunk {i} of {total}")
+            else:
+                status_cb("TTS: Generating audio…")
+
+        synthesis_input = _tts_module.SynthesisInput(text=chunk)
+        response = client.synthesize_speech(
+            input=synthesis_input, voice=voice_params, audio_config=audio_config)
+        pcm_bytes = response.audio_content
+        chunk_pcm_list.append(pcm_bytes)
+
+        # Save individual chunk as WAV
+        chunk_audio_path = f"{out_base}_chunk_{i:02d}.wav"
+        with _wave_mod.open(chunk_audio_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(_SAMPLE_RATE)
+            wf.writeframes(pcm_bytes)
+
+        chunk_log_lines += [
+            f"=== CHUNK {i} of {total} ===",
+            f"Characters : {len(chunk)}",
+            f"Bytes (UTF-8): {len(chunk.encode('utf-8'))}",
+            f"Audio saved : {os.path.basename(chunk_audio_path)}",
+            "--- Text ---",
+            chunk,
+            "",
+        ]
+
+    # Write chunk manifest
+    with open(chunk_log_path, "w", encoding="utf-8") as lf:
+        lf.write("\n".join(chunk_log_lines))
+
+    if status_cb:
+        chunk_note = f" ({total} chunks joined)" if total > 1 else ""
+        status_cb(f"TTS: Saving → {os.path.basename(output_path)}…{chunk_note}")
+
+    # Concatenate all PCM chunks and write single WAV
+    all_pcm = b"".join(chunk_pcm_list)
+    with _wave_mod.open(output_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(_SAMPLE_RATE)
+        wf.writeframes(all_pcm)
+
+    return output_path
+
+
+def _split_text_for_elevenlabs(text: str,
+                               max_chars: int = ELEVENLABS_CHUNK_CHARS) -> list:
+    """
+    Split text into chunks of at most max_chars characters.
+
+    Strategy (in priority order):
+      1. Accumulate consecutive paragraphs into one chunk as long as the total
+         stays under max_chars.  Blank lines between paragraphs are ignored —
+         they are NOT flush points.  This prevents tiny single-paragraph chunks.
+      2. If a single paragraph exceeds max_chars, split it at sentence boundaries.
+      3. If a sentence exceeds max_chars, split it at word boundaries.
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    def _fits(s: str) -> bool:
+        return len(s) <= max_chars
+
+    def _split_para(para: str) -> list:
+        pieces, current = [], ""
+        for sent in re.split(r'(?<=[.!?।])\s+', para):
+            if not sent:
+                continue
+            candidate = (current + " " + sent).strip() if current else sent
+            if _fits(candidate):
+                current = candidate
+            else:
+                if current:
+                    pieces.append(current)
+                if _fits(sent):
+                    current = sent
+                else:
+                    # Split at word boundaries
+                    current = ""
+                    for word in sent.split():
+                        candidate = (current + " " + word).strip() if current else word
+                        if _fits(candidate):
+                            current = candidate
+                        else:
+                            if current:
+                                pieces.append(current)
+                            current = word
+        if current:
+            pieces.append(current)
+        return pieces
+
+    # Walk paragraph by paragraph.  Blank lines are skipped — they are NOT
+    # treated as chunk boundaries.  Paragraphs keep accumulating into `current`
+    # until adding the next one would exceed max_chars.  This ensures that
+    # several short paragraphs are joined into a single chunk rather than each
+    # being sent as a separate (tiny) API call.
+    chunks, current = [], ""
+    for para in text.split("\n"):
+        if not para.strip():
+            continue                    # skip blank lines — don't flush here
+        candidate = (current + "\n" + para).strip() if current else para
+        if _fits(candidate):
+            current = candidate         # still under limit — keep accumulating
+        else:
+            if current:
+                chunks.append(current)  # flush what we have
+            if _fits(para):
+                current = para          # start fresh with this paragraph
+            else:
+                sub = _split_para(para) # paragraph itself is too long — split it
+                chunks.extend(sub[:-1])
+                current = sub[-1] if sub else ""
+    if current:
+        chunks.append(current)
+    chunks = chunks if chunks else [text]
+
+    # Safety: never split inside an ElevenLabs v3 tag like "[bengali accent]"
+    # or "[calm]". If a chunk ends with an unclosed "[" (more "[" than "]"),
+    # peel the trailing fragment off and prepend it to the next chunk so the
+    # tag stays intact when sent to ElevenLabs.
+    if len(chunks) > 1:
+        fixed = []
+        for idx, ch in enumerate(chunks):
+            if idx < len(chunks) - 1 and ch.count("[") > ch.count("]"):
+                cut = ch.rfind("[")
+                if cut > 0:
+                    head, tail = ch[:cut].rstrip(), ch[cut:]
+                    fixed.append(head)
+                    chunks[idx + 1] = tail + " " + chunks[idx + 1].lstrip()
+                    continue
+            fixed.append(ch)
+        chunks = fixed
+
+    return chunks
+
+
+# ─── Multi-speaker voice map (read-only detection helpers) ──────────────────
+# Per-project map of paragraph-index → ElevenLabs voice, saved by the bulk
+# app next to the other pipeline outputs as <base>_speakers.json. The engine
+# only DETECTS such a map to warn that multi-speaker dubbing is unsupported
+# — multi-speaker synthesis itself is out of scope (see module header).
+
+def _speakers_file_path(base: str) -> str:
+    return base + "_speakers.json"
+
+
+def _speakers_load(base: str) -> dict:
+    try:
+        with open(_speakers_file_path(base), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _speakers_voice_map(base: str) -> Dict[int, str]:
+    """{paragraph_index: voice_id} for every valid saved assignment."""
+    out: Dict[int, str] = {}
+    for k, v in (_speakers_load(base).get("assignments") or {}).items():
+        try:
+            idx = int(k)
+        except Exception:
+            continue
+        vid = _sanitize_voice_id((v or {}).get("voice_id", ""))
+        if vid:
+            out[idx] = vid
+    return out
+
+
+# Sentence terminators: ASCII . ! ? …  plus Indic danda । and double-danda ॥
+_SENTENCE_END_RE = re.compile(r'(?<=[.!?…।॥])\s+')
+_ONLY_TAGS_RE    = re.compile(r'(?:\[[^\]]+\]\s*)+$')
+
+
+def _split_script_into_sentences(text: str) -> List[str]:
+    """
+    Split a script into sentence-level segments for per-sentence TTS.
+    Blank lines are hard paragraph breaks; single newlines inside a paragraph
+    are treated as spaces. Inline emotion tags ([calm], [pause]…) that stand
+    alone stay attached to the sentence that follows them.
+    """
+    sentences = []
+    for para in re.split(r'\n\s*\n', text):
+        para = re.sub(r'\s*\n\s*', ' ', para.strip())
+        if not para:
+            continue
+        parts = [p.strip() for p in _SENTENCE_END_RE.split(para) if p.strip()]
+        carry = ""
+        for p in parts:
+            if carry:
+                p = carry + " " + p
+                carry = ""
+            if _ONLY_TAGS_RE.fullmatch(p):
+                carry = p          # tag-only fragment → prefix of next sentence
+                continue
+            sentences.append(p)
+        if carry:                  # trailing tag-only fragment
+            if sentences:
+                sentences[-1] += " " + carry
+            else:
+                sentences.append(carry)
+    return sentences
+
+
+def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
+                         previous_text: str = None, next_text: str = None) -> bytes:
+    """
+    Single ElevenLabs text-to-speech request → raw MP3 bytes.
+
+    previous_text / next_text enable request-stitching: when synthesizing one
+    sentence in isolation the surrounding script is sent as context so prosody
+    matches the neighbouring segments. Models that reject those fields get one
+    automatic retry without them.
+    """
+    body = {
+        "text": chunk,
+        "model_id": model_id,
+        "voice_settings": {
+            "stability": 0.35,
+            "similarity_boost": 0.80,
+            "style": 0.40,
+            "use_speaker_boost": True,
+        },
+    }
+    # ElevenLabs caps stitching context; trailing/leading 600 chars is plenty
+    # for prosody continuity without bloating the request.
+    if previous_text:
+        body["previous_text"] = previous_text[-600:]
+    if next_text:
+        body["next_text"] = next_text[:600]
+
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    req = urllib.request.Request(
+        url, data=payload, method="POST",
+        headers={
+            "xi-api-key": api_key,
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "audio/mpeg",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180, context=_SSL_CTX) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        if e.code in (400, 422) and (previous_text or next_text):
+            return _elevenlabs_tts_post(chunk, api_key, voice_id, model_id)
+        if e.code == 401:
+            raise ValueError("ElevenLabs rejected the API key (401). Re-paste a valid key.") from None
+        if e.code == 404:
+            raise ValueError(
+                f"ElevenLabs voice not found (404). voice_id={voice_id!r} "
+                "is not on this account. Fetch the voice list again and pick "
+                "a voice from it.") from None
+        if e.code == 422:
+            raise ValueError(
+                "ElevenLabs rejected the request (422). "
+                f"Voice may not support the target language. Details: {err_body}") from None
+        if e.code == 429:
+            raise ValueError("ElevenLabs rate limit hit (429). Try again shortly.") from None
+        raise ValueError(f"ElevenLabs TTS error (HTTP {e.code}): {err_body}") from None
+    except urllib.error.URLError as e:
+        raise ValueError(f"Network error during ElevenLabs TTS: {e.reason}") from None
+
+
+def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
+                               voice_id: str = ELEVENLABS_TTS_VOICE_ID,
+                               model_id: str = ELEVENLABS_TTS_MODEL,
+                               status_cb=None) -> str:
+    """
+    Convert target-language text to speech using ElevenLabs TTS (eleven_v3
+    auto-detects the script) and save to output_path (MP3 decoded to WAV via
+    pydub). Sends text in chunks of ~ELEVENLABS_CHUNK_CHARS characters and
+    concatenates the resulting audio. Returns output_path.
+
+    Validates inputs up-front so we never POST a broken request:
+      • API key non-empty
+      • voice_id non-empty (raises a clear error if no voice is loaded)
+      • text non-empty (after stripping)
+    """
+    if not api_key or not api_key.strip():
+        raise ValueError("ElevenLabs API key is missing — set "
+                         "\"elevenlabs_api_key\" in config/tts_settings.json.")
+    if not voice_id or not str(voice_id).strip():
+        raise ValueError(
+            "No ElevenLabs voice selected. Pass --voice-id or let the engine "
+            "auto-resolve one from the account's voice catalogue.")
+    if not text or not text.strip():
+        raise ValueError("TTS text is empty — nothing to synthesize.")
+
+    api_key  = api_key.strip()
+    # Sanitize voice_id BEFORE it ever touches the URL. If a display label
+    # (e.g. "✦ Aria — abc12345…") leaks through here, urllib raises
+    # "URL can't contain control characters (found at least ' ')".
+    raw_voice_id = str(voice_id).strip()
+    voice_id = _sanitize_voice_id(raw_voice_id)
+    if not voice_id:
+        raise ValueError(
+            "Invalid ElevenLabs voice_id "
+            f"(received: {raw_voice_id!r}). The value must be the raw "
+            "voice ID, not a display label.")
+    model_id = (model_id or ELEVENLABS_TTS_MODEL).strip() or ELEVENLABS_TTS_MODEL
+
+    # Inline audio tags ([calm], [pause], [fast]…) are an eleven_v3 feature.
+    # Older models (multilingual v2, turbo/flash v2.5) would read them aloud,
+    # so strip them from the script for anything that isn't v3.
+    if not model_id.startswith("eleven_v3"):
+        stripped = _strip_emotion_tags(text)
+        if stripped.strip():
+            text = stripped
+
+    if status_cb:
+        status_cb("TTS: Connecting to ElevenLabs…")
+
+    chunks = _split_text_for_elevenlabs(text)
+    total  = len(chunks)
+
+    out_base        = os.path.splitext(output_path)[0]
+    chunk_log_path  = out_base + "_chunks.txt"
+    chunk_log_lines = [
+        f"TTS Chunk Log — {os.path.basename(output_path)}",
+        f"Platform : ElevenLabs",
+        f"Voice ID : {voice_id}",
+        f"Model    : {model_id}",
+        f"Total chunks: {total}",
+        "",
+    ]
+
+    chunk_bytes_list = []
+
+    for i, chunk in enumerate(chunks, 1):
+        if status_cb:
+            if total > 1:
+                status_cb(f"TTS: ElevenLabs generating audio… chunk {i} of {total}")
+            else:
+                status_cb("TTS: ElevenLabs generating audio…")
+
+        # Indic-tuned voice settings: slightly higher stability + style 0
+        # produce cleaner pronunciation of conjunct consonants and matras
+        # across Devanagari / Bengali / Tamil / Telugu / Kannada / Malayalam /
+        # Gujarati / Odia / Assamese scripts.
+        # NOTE: do NOT send `language_code` — eleven_v3 auto-detects the
+        # target language from the input text. Passing language_code triggers
+        # HTTP 400 `unsupported_language` on multilingual models.
+        # Lower stability + raised style give eleven_v3 room to act on the
+        # inline emotion / accent tags injected by Step4 (e.g. [bengali accent],
+        # [calm], [slow], [pause]) so delivery feels human and reflective —
+        # closer to a wise teacher (Sadhguru-style cadence) than a flat read.
+        audio_bytes = _elevenlabs_tts_post(chunk, api_key, voice_id, model_id)
+        chunk_bytes_list.append(audio_bytes)
+
+        # Save individual chunk as MP3 (ElevenLabs returns MP3 bytes)
+        chunk_audio_path = f"{out_base}_chunk_{i:02d}.mp3"
+        with open(chunk_audio_path, "wb") as cf:
+            cf.write(audio_bytes)
+
+        # Add entry to chunk log
+        chunk_log_lines += [
+            f"=== CHUNK {i} of {total} ===",
+            f"Characters : {len(chunk)}",
+            f"Bytes (UTF-8): {len(chunk.encode('utf-8'))}",
+            f"Audio saved : {os.path.basename(chunk_audio_path)}",
+            "--- Text ---",
+            chunk,
+            "",
+        ]
+
+    # Write chunk manifest
+    with open(chunk_log_path, "w", encoding="utf-8") as lf:
+        lf.write("\n".join(chunk_log_lines))
+
+    if status_cb:
+        chunk_note = f" ({total} chunks joined)" if total > 1 else ""
+        status_cb(f"TTS: Saving → {os.path.basename(output_path)}…{chunk_note}")
+
+    # ElevenLabs returns MP3 — decode with pydub and export as WAV
+    try:
+        from pydub import AudioSegment
+        combined = AudioSegment.empty()
+        for raw in chunk_bytes_list:
+            seg = AudioSegment.from_file(io.BytesIO(raw), format="mp3")
+            combined += seg
+        combined.export(output_path, format="wav")
+    except ImportError:
+        if status_cb:
+            status_cb("TTS: Warning — pydub not found; saving raw MP3 bytes (install pydub for WAV output).")
+        with open(output_path, "wb") as f:
+            for raw in chunk_bytes_list:
+                f.write(raw)
+
+    return output_path
+
+
+# ─── ElevenLabs Speech-to-Speech (voice changer) ────────────────────────────
+# NEW in v0.4 (not extracted from the bulk app): convert an existing voice
+# recording to a different ElevenLabs voice while keeping timing, pacing and
+# intonation — used by the panel's "Change track voice" feature on a rendered
+# REAPER track.
+
+ELEVENLABS_STS_MODEL = "eleven_multilingual_sts_v2"
+
+# The ElevenLabs voice changer accepts ~5 minutes of audio per request.
+# Stay well under it and split long inputs at the quietest point near the
+# boundary so we never cut mid-word.
+_STS_CHUNK_MS = 4 * 60 * 1000     # 4-minute target chunk length
+_STS_SEARCH_MS = 20 * 1000        # look back this far for a quiet split point
+_STS_PROBE_MS = 100               # RMS probe window
+
+
+def _quietest_split_ms(seg, target_ms: int) -> int:
+    """Quietest probe position in (target-search, target] — a natural pause
+    to split at. Falls back to target_ms itself."""
+    start = max(0, target_ms - _STS_SEARCH_MS)
+    best_pos, best_rms = target_ms, None
+    pos = start
+    while pos + _STS_PROBE_MS <= target_ms:
+        rms = seg[pos:pos + _STS_PROBE_MS].rms
+        if best_rms is None or rms < best_rms:
+            best_pos, best_rms = pos, rms
+        pos += _STS_PROBE_MS
+    return best_pos
+
+
+def _split_audio_for_sts(seg) -> list:
+    """Split a pydub AudioSegment into ≤ ~4-minute pieces at quiet points."""
+    pieces = []
+    remaining = seg
+    while len(remaining) > _STS_CHUNK_MS:
+        cut = _quietest_split_ms(remaining, _STS_CHUNK_MS)
+        if cut <= 0:
+            cut = _STS_CHUNK_MS
+        pieces.append(remaining[:cut])
+        remaining = remaining[cut:]
+    if len(remaining) > 0:
+        pieces.append(remaining)
+    return pieces or [seg]
+
+
+def _elevenlabs_sts_post(audio_bytes: bytes, api_key: str, voice_id: str,
+                         model_id: str) -> bytes:
+    """One ElevenLabs speech-to-speech request (multipart) → raw MP3 bytes."""
+    boundary = "----ReaperDubSTS" + uuid.uuid4().hex
+    fields = {"model_id": model_id,
+              # Keep the source performance: timing/emotion come from the
+              # input audio, the timbre from the target voice.
+              "voice_settings": json.dumps({"stability": 0.5,
+                                            "similarity_boost": 0.8,
+                                            "use_speaker_boost": True})}
+    body = io.BytesIO()
+    for name, value in fields.items():
+        body.write(f"--{boundary}\r\n".encode())
+        body.write(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                   .encode())
+        body.write(value.encode("utf-8"))
+        body.write(b"\r\n")
+    body.write(f"--{boundary}\r\n".encode())
+    body.write(b'Content-Disposition: form-data; name="audio"; '
+               b'filename="audio.mp3"\r\n')
+    body.write(b"Content-Type: audio/mpeg\r\n\r\n")
+    body.write(audio_bytes)
+    body.write(f"\r\n--{boundary}--\r\n".encode())
+
+    # No output_format override: the default (mp3_44100_128) is available
+    # on every ElevenLabs tier; higher bitrates are plan-gated.
+    url = f"https://api.elevenlabs.io/v1/speech-to-speech/{voice_id}"
+    req = urllib.request.Request(
+        url, data=body.getvalue(), method="POST",
+        headers={
+            "xi-api-key": api_key,
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "audio/mpeg",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=600, context=_SSL_CTX) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        if e.code == 401:
+            raise ValueError("ElevenLabs rejected the API key (401). "
+                             "Re-paste a valid key.") from None
+        if e.code == 404:
+            raise ValueError(
+                f"ElevenLabs voice not found (404). voice_id={voice_id!r} "
+                "is not on this account. Fetch the voice list again and pick "
+                "a voice from it.") from None
+        if e.code == 429:
+            raise ValueError("ElevenLabs rate limit hit (429). "
+                             "Try again shortly.") from None
+        raise ValueError(
+            f"ElevenLabs voice-change error (HTTP {e.code}): {err_body}"
+        ) from None
+    except urllib.error.URLError as e:
+        raise ValueError(
+            f"Network error during ElevenLabs voice change: {e.reason}"
+        ) from None
+
+
+def voice_change_elevenlabs(input_path: str, output_path: str, api_key: str,
+                            voice_id: str,
+                            model_id: str = ELEVENLABS_STS_MODEL,
+                            status_cb=None) -> str:
+    """
+    Re-voice *input_path* with the ElevenLabs voice changer (speech-to-speech)
+    and save the result as WAV to *output_path*. Long inputs are split into
+    ≤ ~4-minute chunks at quiet points and the converted pieces are joined.
+    Returns output_path.
+    """
+    if not api_key or not api_key.strip():
+        raise ValueError("ElevenLabs API key is missing — set "
+                         "\"elevenlabs_api_key\" in config/tts_settings.json.")
+    raw_voice_id = str(voice_id or "").strip()
+    voice_id = _sanitize_voice_id(raw_voice_id)
+    if not voice_id:
+        raise ValueError(
+            "Invalid ElevenLabs voice_id for voice change "
+            f"(received: {raw_voice_id!r}). Pick a voice from the fetched "
+            "list or paste the raw voice ID.")
+    if not os.path.isfile(input_path):
+        raise ValueError(f"Voice-change input audio not found: {input_path}")
+    if not PYDUB_AVAILABLE:
+        raise ImportError(
+            "pydub is required for voice change (audio chunking + WAV "
+            "export). Run the setup script to install the engine "
+            "dependencies, and make sure ffmpeg is installed.")
+    api_key = api_key.strip()
+    model_id = (model_id or ELEVENLABS_STS_MODEL).strip() or ELEVENLABS_STS_MODEL
+
+    if status_cb:
+        status_cb("Voice change: loading the input audio…")
+    seg = _AudioSegment.from_file(input_path)
+    if len(seg) < 200:
+        raise ValueError("Voice-change input audio is empty (or shorter "
+                         "than 0.2 s).")
+    pieces = _split_audio_for_sts(seg)
+    total = len(pieces)
+    if status_cb:
+        status_cb(f"Voice change: {len(seg)/1000.0:.1f}s of audio in "
+                  f"{total} chunk(s), voice {voice_id}, model {model_id}.")
+
+    out_parent = os.path.dirname(os.path.abspath(output_path))
+    if out_parent:
+        os.makedirs(out_parent, exist_ok=True)
+
+    converted = []
+    for i, piece in enumerate(pieces, 1):
+        if status_cb:
+            status_cb(f"Voice change: converting chunk {i} of {total} "
+                      f"({len(piece)/1000.0:.0f}s)…")
+        buf = io.BytesIO()
+        piece.export(buf, format="mp3", bitrate="192k")
+        audio_bytes = _elevenlabs_sts_post(buf.getvalue(), api_key,
+                                           voice_id, model_id)
+        converted.append(_AudioSegment.from_file(io.BytesIO(audio_bytes),
+                                                 format="mp3"))
+
+    if status_cb:
+        status_cb(f"Voice change: saving → {os.path.basename(output_path)}…")
+    combined = converted[0]
+    for piece in converted[1:]:
+        combined += piece
+    combined.export(output_path, format="wav")
+    return output_path
