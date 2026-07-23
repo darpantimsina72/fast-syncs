@@ -2082,8 +2082,8 @@ local function enter_review_phase(m)
     edited_path = (m.out_dir or "") .. SEP .. base .. "_translation_edited.txt",
     dirty       = false,
   }
-  if (m.out_dir or "") ~= ""  then _regen_out_dir = m.out_dir end
-  if (m.language or "") ~= "" then _regen_lang    = m.language end
+  -- Remember (and persist) the run's out_dir for the regen section.
+  V5.set_regen_target(m.out_dir, m.language)
   _ui_phase = "review"
   return true
 end
@@ -2659,8 +2659,9 @@ local function _finish_run(exit_code)
 
   if m and m.status == "ok" and exit_code == 0 and not cancelled then
     _manifest    = m
-    if (m.out_dir or "") ~= ""  then _regen_out_dir = m.out_dir end
-    if (m.language or "") ~= "" then _regen_lang    = m.language end
+    -- Remember (and persist) where this run's outputs live, so regen works
+    -- in later REAPER sessions without re-picking engine_done.json.
+    V5.set_regen_target(m.out_dir, m.language)
     _ui_progress = 1.0
     _ui_phase    = "success"
     return
@@ -2792,12 +2793,81 @@ local function _render_log_child(ctx, height)
   end
 end
 
+-- ─── Regen target persistence (v0.6) ─────────────────────────
+-- The regen out_dir used to live only in session-local state, so every new
+-- REAPER session forced a manual "pick engine_done.json" before the first
+-- regen (the panel forgets it on restart; regen-mode manifests carry no
+-- out_dir, so the status-dir engine_done.json alone is not enough either).
+-- Persist the target per project as a manifest-shaped sidecar in the
+-- status dir, and reload it automatically.
+-- (All in the V5 table — the main chunk is near Lua's 200-local limit.)
+
+function V5.regen_target_path()
+  return STATUS_DIR .. SEP .. "regen_target.json"
+end
+
+-- Single setter for the regen target: updates the session state AND writes
+-- the per-project sidecar (shaped like a mini manifest, so the tolerant
+-- load_manifest_json reader parses it back).
+function V5.set_regen_target(out_dir, lang)
+  if (out_dir or "") == "" then return end
+  _regen_out_dir = out_dir
+  if (lang or "") ~= "" then _regen_lang = lang end
+  reaper.RecursiveCreateDirectory(STATUS_DIR, 0)
+  local f = io.open(V5.regen_target_path(), "wb")
+  if f then
+    f:write(string.format('{"status":"ok","out_dir":"%s","language":"%s"}\n',
+                          _json_escape(_regen_out_dir),
+                          _json_escape(_regen_lang)))
+    f:close()
+  end
+end
+
+-- Called when the regen section renders with no target. Probes once per
+-- status dir: the last full-run manifest in this project's status dir,
+-- the legacy shared status root, then the persisted sidecar (which
+-- survives regen runs overwriting engine_done.json).
+function V5.prefill_regen_target()
+  if _regen_out_dir ~= "" then return end
+  -- Same guard as preflight: only re-point the status paths while idle on
+  -- setup — a run in flight keeps the paths it launched with.
+  if _ui_phase == "setup" then V5.set_status_paths() end
+  if V5.regen_prefill_done == STATUS_DIR then return end
+  V5.regen_prefill_done = STATUS_DIR
+  local probes = { DONE_JSON,
+                   V5.STATUS_ROOT .. SEP .. "engine_done.json",
+                   V5.regen_target_path() }
+  for _, p in ipairs(probes) do
+    if file_exists(p) then
+      local m = load_manifest_json(p)
+      if m and m.status == "ok" and (m.out_dir or "") ~= "" then
+        V5.set_regen_target(m.out_dir, m.language)
+        return
+      end
+    end
+  end
+end
+
+-- Shared "pick engine_done.json" dialog (first-time picker + Change…).
+function V5.pick_regen_manifest()
+  local ok, picked = reaper.GetUserFileNameForRead(
+    "", "Pick engine_done.json of a finished run", "json")
+  if not ok or not picked or picked == "" then return end
+  local m, why = load_manifest_json(picked)
+  if m and (m.out_dir or "") ~= "" then
+    V5.set_regen_target(m.out_dir, m.language)
+  else
+    ui_set_banner("error", why or ("No out_dir in that manifest:\n" .. picked))
+  end
+end
+
 -- ─── Regen section (shared by setup + success phases) ────────
 -- Reads the currently selected media item, loads its note into an editable
 -- text box and offers "⟳ Regenerate". The out_dir comes from the last
--- manifest this panel saw; when unknown, the user can point the section at
--- any finished run's engine_done.json.
+-- manifest this panel saw, the persisted per-project regen target, or a
+-- manually picked engine_done.json.
 local function ui_regen_section(ctx, default_open)
+  V5.prefill_regen_target()
   local flags = 0
   if default_open and reaper.ImGui_TreeNodeFlags_DefaultOpen then
     flags = reaper.ImGui_TreeNodeFlags_DefaultOpen()
@@ -2813,24 +2883,17 @@ local function ui_regen_section(ctx, default_open)
       'Output folder unknown — pick the engine_done.json of a finished run.')
     reaper.ImGui_PopStyleColor(ctx)
     if reaper.ImGui_Button(ctx, 'Pick engine_done.json…') then
-      local ok, picked = reaper.GetUserFileNameForRead(
-        "", "Pick engine_done.json of a finished run", "json")
-      if ok and picked and picked ~= "" then
-        local m, why = load_manifest_json(picked)
-        if m and (m.out_dir or "") ~= "" then
-          _regen_out_dir = m.out_dir
-          if (m.language or "") ~= "" then _regen_lang = m.language end
-        else
-          ui_set_banner("error",
-            why or ("No out_dir in that manifest:\n" .. picked))
-        end
-      end
+      V5.pick_regen_manifest()
     end
   else
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
     reaper.ImGui_TextWrapped(ctx, 'Regen output: ' .. _regen_out_dir
                                   .. SEP .. 'regen')
     reaper.ImGui_PopStyleColor(ctx)
+    -- Wrong target (another project's run)? Re-point without a restart.
+    if reaper.ImGui_SmallButton(ctx, 'Change…') then
+      V5.pick_regen_manifest()
+    end
   end
 
   local item = reaper.CountSelectedMediaItems(0) > 0
