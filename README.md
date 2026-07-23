@@ -31,6 +31,9 @@ Works on **Windows** and **macOS**. The instructions below are Windows-first.
    *Download ZIP*) and unzip it, **or** `git clone` it.
 2. **Double-click `setup.bat`.** It creates a `venv` folder and installs the
    dependencies. Wait for `Setup complete`, then close the window.
+   - **"Windows protected your PC" / SmartScreen warning?** That's normal for
+     files downloaded from the internet: click **More info → Run anyway**
+     (or right-click `setup.bat` → *Properties* → tick *Unblock* → OK).
    - **No Python on the PC?** `setup.bat` detects that and offers to install
      Python 3.12 for you automatically (via winget, built into Windows 10/11) —
      just press **Y**. Manual alternative: install from

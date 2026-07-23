@@ -14,11 +14,15 @@ set -e
 
 ZIP_URL="https://codeload.github.com/darpantimsina72/fast-syncs/zip/refs/heads/main"
 
+# Set when the new files could NOT be fetched, so the final message never
+# claims an update that did not happen.
+NO_DL=0
+
 # ZIP installs (no .git): download the latest ZIP and overlay it onto this
 # folder. Settings, venv and .direct-mode aren't in the ZIP, so they survive.
 # Runs inside main() (fully parsed), so rewriting update.sh mid-run is safe.
 zip_update() {
-    echo "[update] Not a git checkout — downloading the latest version from GitHub…"
+    echo "[update] Downloading the latest version from GitHub…"
     local tmp="${TMPDIR:-/tmp}/fast-syncs-zip"
     rm -rf "$tmp" && mkdir -p "$tmp"
     if ! curl -fsSL -o "$tmp/repo.zip" "$ZIP_URL"; then
@@ -26,10 +30,12 @@ zip_update() {
         echo "         repository is private / moved). Update manually instead:"
         echo "         re-download the ZIP and unzip it OVER this folder"
         echo "         (your settings and venv are kept)."
+        NO_DL=1
         return 0
     fi
     if ! unzip -oq "$tmp/repo.zip" -d "$tmp"; then
         echo "[update] Could not unpack the update — update manually (re-download the ZIP)."
+        NO_DL=1
         return 0
     fi
     # The ZIP contains one folder (fast-syncs-<branch>); copy its contents here.
@@ -37,6 +43,7 @@ zip_update() {
     src=$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)
     if [ -z "$src" ]; then
         echo "[update] Unexpected ZIP layout — update manually (re-download the ZIP)."
+        NO_DL=1
         return 0
     fi
     cp -R "$src/." .
@@ -62,6 +69,18 @@ main() {
         zip_update
     fi
 
+    # A venv whose base Python was uninstalled or upgraded (a Homebrew
+    # upgrade breaks the symlinks) still exists on disk but cannot run.
+    # Probe by executing; a broken venv is deleted and rebuilt through
+    # setup.sh (this used to abort the whole update at the pip step).
+    if [ -d venv ] && ! ./venv/bin/python3 -c 'import sys' >/dev/null 2>&1; then
+        echo "[update] The venv is broken (its Python was removed or upgraded) — rebuilding…"
+        rm -rf venv
+    fi
+
+    # setup.sh sets up the dubbing app itself, so the dubbing step below
+    # can be skipped when it ran.
+    SETUP_RAN=0
     if [ -d venv ]; then
         # Migrate installs made before the .direct-mode marker existed: if the
         # direct-mode libs are importable, this venv was set up with --direct.
@@ -75,7 +94,8 @@ main() {
             ./venv/bin/pip install --quiet --upgrade -r requirements-direct.txt
         fi
     else
-        echo "[update] No venv found — running setup.sh first."
+        echo "[update] No working venv — running setup.sh first."
+        SETUP_RAN=1
         if [ -f .direct-mode ]; then bash setup.sh --direct; else bash setup.sh; fi
     fi
 
@@ -83,15 +103,21 @@ main() {
     # EVERY update — first update after the merge it creates dubbing/venv
     # and installs ffmpeg (this used to be a manual step people hit as
     # "venv not found" errors); later updates just refresh deps (fast).
-    # Never fails the whole update.
-    if [ -f dubbing/setup_mac.command ]; then
+    # Never fails the whole update. Skipped when setup.sh just ran — it
+    # already did this itself.
+    if [ "$SETUP_RAN" = "0" ] && [ -f dubbing/setup_mac.command ]; then
         echo "[update] Setting up / refreshing the dubbing app (first time can take a few minutes)…"
         bash dubbing/setup_mac.command --auto \
             || echo "[update] Dubbing setup reported a problem — run dubbing/setup_mac.command manually."
     fi
 
     echo
-    echo "Update complete. Re-run the script in REAPER to use the new version."
+    if [ "$NO_DL" = "1" ]; then
+        echo "Update finished, but the new version could NOT be downloaded —"
+        echo "see the messages above. Your current version keeps working."
+    else
+        echo "Update complete. Re-run the script in REAPER to use the new version."
+    fi
 }
 
 main "$@"; exit $?

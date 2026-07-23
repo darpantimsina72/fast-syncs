@@ -23,21 +23,48 @@ rem Each probe RUNS the candidate: on stock Windows 10/11, "python" on the
 rem PATH is often the Microsoft Store alias stub, which exists but only
 rem opens the Store page and exits with an error. Running it is the only
 rem reliable check.
+rem Probe 3.12/3.13/3.11 BEFORE the generic "py -3": the launcher picks the
+rem NEWEST install, and a brand-new Python (3.14+) often has no prebuilt
+rem wheels yet for the optional direct-mode libs.
 set "PYEXE="
-call :try_python py -3
+call :try_python py -3.12
+if not defined PYEXE call :try_python py -3.13
+if not defined PYEXE call :try_python py -3.11
+if not defined PYEXE call :try_python py -3
 if not defined PYEXE call :try_python python
 if not defined PYEXE call :try_python python3
 if not defined PYEXE call :try_userdir
+if not defined PYEXE call :try_progfiles
 if not defined PYEXE call :offer_winget
 if not defined PYEXE goto no_python
 
 echo [setup] Using: %PYEXE%
+
+rem ── Create / reuse the virtualenv ─────────────────────────────
+rem A venv whose base Python was uninstalled or upgraded still has
+rem python.exe on disk but cannot run — probe by executing, and rebuild
+rem from scratch when it is broken (stale site-packages from another
+rem Python version cause import errors otherwise).
+set "VPY=.\venv\Scripts\python.exe"
+set "VENV_OK="
+if exist "%VPY%" (
+  "%VPY%" -c "import sys" >nul 2>&1
+  if not errorlevel 1 set "VENV_OK=1"
+)
+if defined VENV_OK (
+  echo [setup] Reusing the existing virtualenv in .\venv
+  goto have_venv
+)
+if exist ".\venv" (
+  echo [setup] The existing virtualenv is broken - its Python was removed
+  echo         or upgraded. Rebuilding it from scratch...
+  rmdir /s /q ".\venv" 2>nul
+)
 echo [setup] Creating virtualenv in .\venv ...
 %PYEXE% -m venv venv
 if errorlevel 1 ( echo ERROR: could not create virtualenv. & pause & exit /b 1 )
 
-set "VPY=.\venv\Scripts\python.exe"
-
+:have_venv
 if not exist "%VPY%" (
   echo ERROR: virtualenv python not found at %VPY%
   echo The Python install may be incomplete. Reinstall Python 3.11+ from
@@ -116,6 +143,17 @@ for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
 )
 exit /b 0
 
+:try_progfiles
+rem All-users installs (python.org "for all users", winget run elevated)
+rem live under Program Files — also invisible to an already-open console.
+for /d %%D in ("%ProgramFiles%\Python3*") do (
+  if not defined PYEXE (
+    "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=9" >nul 2>&1
+    if not errorlevel 1 set "PYEXE="%%D\python.exe""
+  )
+)
+exit /b 0
+
 :offer_winget
 where winget >nul 2>&1
 if errorlevel 1 exit /b 0
@@ -130,8 +168,10 @@ if errorlevel 1 (
   exit /b 0
 )
 rem The fresh install is not on THIS console's PATH yet - probe known spots.
-call :try_python py -3
+call :try_python py -3.12
+if not defined PYEXE call :try_python py -3
 if not defined PYEXE call :try_userdir
+if not defined PYEXE call :try_progfiles
 if not defined PYEXE call :try_python python
 exit /b 0
 

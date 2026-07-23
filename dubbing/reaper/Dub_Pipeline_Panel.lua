@@ -1664,7 +1664,13 @@ end
 -- opens normally either way; Run's preflight still guards until it's done.
 function V5.autorun_setup_if_needed()
   if PYTHON_CMD ~= "" then return end                 -- user pinned an interpreter
-  if file_exists(project_venv_python()) then return end
+  -- A broken venv (its base Python was removed or upgraded) counts as
+  -- missing: the --auto setup deletes and rebuilds it. Probe by executing,
+  -- not just io.open (old REAPER builds without ExecProcess keep the
+  -- existence check).
+  local proj = project_venv_python()
+  if file_exists(proj) and (not reaper.ExecProcess
+                            or probe_python('"' .. proj .. '"')) then return end
   if APP_DIR ~= "" and file_exists(venv_python_path()) then return end
   if reaper.GetExtState("dub_pipeline", "setup_autorun") == "1" then return end
   local script = BASE_DIR .. SEP .. SETUP_SCRIPT
@@ -1672,9 +1678,9 @@ function V5.autorun_setup_if_needed()
   reaper.SetExtState("dub_pipeline", "setup_autorun", "1", false)
   V5.run_in_terminal(script, "--auto")
   reaper.MB(
-    "First-time setup has started in a separate terminal window.\n\n" ..
-    "It installs the dubbing engine's Python packages and ffmpeg\n" ..
-    "automatically (takes a few minutes, one time only).\n\n" ..
+    "Automatic setup has started in a separate terminal window.\n\n" ..
+    "It installs (or repairs) the dubbing engine's Python packages\n" ..
+    "and ffmpeg automatically (takes a few minutes, one time only).\n\n" ..
     "You can keep using this panel — the Auto Sync tab works right\n" ..
     "away. When the terminal says 'Setup complete', the Dubbing tabs\n" ..
     "are ready too.",
@@ -1765,6 +1771,21 @@ local function preflight_engine()
       "No Python interpreter found. Expected the project venv at:\n" ..
       proj_py ..
       "\n\nRun " .. SETUP_SCRIPT .. " once, or set a Python override below.")
+    return nil
+  end
+
+  -- The venv interpreter can exist on disk yet be broken (its base Python
+  -- was uninstalled or upgraded) — the engine would then die instantly and
+  -- the run only fail via the 90 s watchdog. Probe by EXECUTING it and
+  -- offer the rebuild right away instead.
+  if PYTHON_CMD == "" and reaper.ExecProcess
+     and (py == proj_py or (legacy_py ~= "" and py == legacy_py))
+     and not probe_python('"' .. py .. '"') then
+    ui_set_banner("error",
+      "The engine's Python venv is broken — its Python was removed or " ..
+      "upgraded. Run " .. SETUP_SCRIPT .. " to rebuild it.")
+    V5.offer_run_setup("The dubbing engine's venv exists but its Python " ..
+      "no longer runs (removed or upgraded).\nSetup will rebuild it.")
     return nil
   end
 
@@ -2722,8 +2743,10 @@ local function poll_engine()
     _ui_failure = {
       error_tail = "Python produced no output for 90 seconds — the launch " ..
                    "probably failed.\n\nThings to check:\n" ..
-                   "  - the project venv exists (" .. project_venv_python() ..
-                   ") — run " .. SETUP_SCRIPT .. " once\n" ..
+                   "  - the project venv exists and runs (" ..
+                   project_venv_python() .. ")\n" ..
+                   "    — run " .. SETUP_SCRIPT .. " once; it also rebuilds " ..
+                   "a broken venv\n" ..
                    "  - the interpreter path is valid\n" ..
                    "  - engine/run_dub.py exists next to this script's folder",
       log_path = LOG_PATH,

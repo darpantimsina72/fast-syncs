@@ -31,6 +31,12 @@ setlocal
 cd /d "%~2"
 
 set "ZIP_URL=https://codeload.github.com/darpantimsina72/fast-syncs/zip/refs/heads/main"
+rem NO_DL is set when the new files could NOT be fetched, so the final
+rem message never claims an update that did not happen.
+set "NO_DL="
+rem SETUP_RAN is set when setup.bat ran (it already sets up the dubbing
+rem app itself, so the dubbing step below can be skipped).
+set "SETUP_RAN="
 
 if exist ".git" goto git_update
 goto zip_update
@@ -42,6 +48,7 @@ where git >nul 2>&1
 if errorlevel 1 (
   echo [update] WARNING: git is not on PATH - cannot pull the latest version.
   echo          Install "Git for Windows", or use the ZIP flow instead.
+  set "NO_DL=1"
   goto deps
 )
 git pull --ff-only
@@ -54,7 +61,7 @@ goto deps
 
 rem ── ZIP install: download latest ZIP and overlay it ───────────
 :zip_update
-echo [update] Not a git checkout - downloading the latest version from GitHub...
+echo [update] Downloading the latest version from GitHub...
 where curl >nul 2>&1
 if errorlevel 1 goto zip_manual
 where tar >nul 2>&1
@@ -86,6 +93,7 @@ echo [update] Files updated to the latest version.
 goto deps
 
 :zip_manual
+set "NO_DL=1"
 echo [update] Automatic download failed - update manually instead:
 echo          re-download the ZIP from GitHub and unzip it OVER this
 echo          folder ^(your settings and venv are kept^).
@@ -93,38 +101,65 @@ goto deps
 
 rem ── refresh Python dependencies ───────────────────────────────
 :deps
+rem A venv whose base Python was uninstalled or upgraded still has
+rem python.exe on disk but cannot run. Probe by executing; a broken venv
+rem is deleted and rebuilt through setup.bat (this used to hard-fail here
+rem with "dependency update failed").
+set "VENV_OK="
 if exist ".\venv\Scripts\python.exe" (
-  rem Migrate installs made before the .direct-mode marker existed: if the
-  rem direct-mode libs are importable, this venv was set up with --direct.
-  if not exist ".direct-mode" (
-    ".\venv\Scripts\python.exe" -c "import google.genai" >nul 2>&1
-    if not errorlevel 1 ( type nul > ".direct-mode" )
-  )
-  echo [update] Updating Python dependencies...
-  ".\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r requirements.txt
-  if errorlevel 1 ( echo ERROR: dependency update failed. & pause & exit /b 1 )
-  if exist ".direct-mode" (
-    echo [update] Updating direct-mode dependencies...
-    ".\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r requirements-direct.txt
-    if errorlevel 1 ( echo ERROR: direct-mode dependency update failed. & pause & exit /b 1 )
-  )
-) else (
-  echo [update] No venv found - running setup.bat ...
-  if exist ".direct-mode" ( call setup.bat --direct ) else ( call setup.bat )
-  if errorlevel 1 ( exit /b 1 )
+  ".\venv\Scripts\python.exe" -c "import sys" >nul 2>&1
+  if not errorlevel 1 set "VENV_OK=1"
 )
+if defined VENV_OK goto deps_pip
+
+if exist ".\venv" (
+  echo [update] The venv is broken - its Python was removed or upgraded.
+  echo          Rebuilding it from scratch...
+  rmdir /s /q ".\venv" 2>nul
+)
+echo [update] Running setup.bat ...
+set "SETUP_RAN=1"
+if exist ".direct-mode" ( call setup.bat --direct ) else ( call setup.bat )
+if errorlevel 1 ( exit /b 1 )
+goto dubbing
+
+:deps_pip
+rem Migrate installs made before the .direct-mode marker existed: if the
+rem direct-mode libs are importable, this venv was set up with --direct.
+if not exist ".direct-mode" (
+  ".\venv\Scripts\python.exe" -c "import google.genai" >nul 2>&1
+  if not errorlevel 1 ( type nul > ".direct-mode" )
+)
+echo [update] Updating Python dependencies...
+".\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r requirements.txt
+if errorlevel 1 ( echo ERROR: dependency update failed. & pause & exit /b 1 )
+if exist ".direct-mode" (
+  echo [update] Updating direct-mode dependencies...
+  ".\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r requirements-direct.txt
+  if errorlevel 1 ( echo ERROR: direct-mode dependency update failed. & pause & exit /b 1 )
+)
+goto dubbing
 
 rem ── bundled dubbing app (dubbing\) ─────────────────────────────
 rem Run its setup in automatic mode on EVERY update - the first update
 rem after the merge it creates dubbing\venv and installs ffmpeg (this used
 rem to be a manual step people hit as "venv not found" errors); later
 rem updates just refresh deps (fast). Never fails the whole update.
+rem Skipped when setup.bat just ran - it already did this itself.
+:dubbing
+if defined SETUP_RAN goto finish
 if exist ".\dubbing\setup_windows.bat" (
   echo [update] Setting up / refreshing the dubbing app ^(first time can take a few minutes^)...
   call ".\dubbing\setup_windows.bat" --auto
   if errorlevel 1 ( echo WARNING: dubbing setup reported a problem - run dubbing\setup_windows.bat manually. )
 )
 
+:finish
 echo.
-echo Update complete. Re-run the script in REAPER to use the new version.
+if defined NO_DL (
+  echo Update finished, but the new version could NOT be downloaded -
+  echo see the messages above. Your current version keeps working.
+) else (
+  echo Update complete. Re-run the script in REAPER to use the new version.
+)
 pause

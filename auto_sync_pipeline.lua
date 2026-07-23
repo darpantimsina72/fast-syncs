@@ -703,9 +703,16 @@ local function probe_python(cmd)
   return nil
 end
 
+-- Set by find_python() when the local venv exists on disk but its
+-- interpreter no longer runs (its base Python was removed or upgraded).
+-- start_sync_run() then routes to ensure_setup() for a rebuild instead of
+-- silently running on a system interpreter.
+local _venv_broken = false
+
 -- Returns the first working python path among the candidates, or nil.
 local function find_python()
   local script_dir = get_script_dir()
+  _venv_broken = false
 
   -- 1. User-pinned override (loaded from settings.json) takes priority.
   if PYTHON_CMD ~= "" then
@@ -725,8 +732,17 @@ local function find_python()
   local bin = _is_windows() and "Scripts\\python.exe" or "bin/python3"
 
   -- 2. Local venv next to this script — what setup.bat / setup.sh create.
+  -- A venv whose base Python was uninstalled or upgraded still has its
+  -- interpreter on disk but cannot run — probe by EXECUTING it, not just
+  -- io.open (on old REAPER builds without ExecProcess, keep the old
+  -- existence check).
   local local_venv = script_dir .. sep .. "venv" .. sep .. bin
-  if file_exists(local_venv) then return local_venv end
+  if file_exists(local_venv) then
+    if not reaper.ExecProcess or probe_python('"' .. local_venv .. '"') then
+      return local_venv
+    end
+    _venv_broken = true
+  end
 
   -- 3. Common system installs (fallback when the venv is missing — the thin
   --    client needs only the standard library, so any Python 3 works).
@@ -803,11 +819,21 @@ local function ensure_setup()
   local script_dir = get_script_dir()
   local venv_py    = script_dir .. (_is_windows() and "\\venv\\Scripts\\python.exe"
                                                   or "/venv/bin/python3")
-  if file_exists(venv_py) then return true end
+  -- Healthy = exists AND runs. A venv whose base Python was removed or
+  -- upgraded still has its interpreter on disk but cannot run; setup
+  -- deletes and rebuilds it.
+  local venv_exists = file_exists(venv_py)
+  if venv_exists and (not reaper.ExecProcess
+                      or probe_python('"' .. venv_py .. '"')) then
+    return true
+  end
 
   local choice = reaper.MB(
-    "First-time setup — Python virtualenv not found.\n\n" ..
-    "I'll create one in:\n  " .. script_dir .. "/venv\n\n" ..
+    (venv_exists
+      and ("The Python virtualenv is broken — its Python was removed or " ..
+           "upgraded.\n\nI'll rebuild it in:\n  ")
+      or  ("First-time setup — Python virtualenv not found.\n\n" ..
+           "I'll create one in:\n  ")) .. script_dir .. "/venv\n\n" ..
     "and install the required Python packages.\n\n" ..
     "Continue?",
     "Auto Sync Pipeline — Setup", 1)
@@ -1779,7 +1805,9 @@ local function poll_python_step()
     _ui_failure = {
       error_tail = "Python produced no output for 90 seconds — the launch " ..
                    "probably failed.\n\nThings to check:\n" ..
-                   "  - the venv exists (re-run setup if it was deleted)\n" ..
+                   "  - the venv exists and runs — run the updater " ..
+                   "(update.bat / update.sh) once;\n" ..
+                   "    it rebuilds a broken venv automatically\n" ..
                    "  - the interpreter path is valid",
       log_path = _poll_log_path,
     }
@@ -1817,6 +1845,14 @@ local function start_sync_run()
           or  "Install Python 3.11+ and re-run setup.sh."))
       return false
     end
+  end
+  if _venv_broken then
+    -- The venv exists but its Python no longer runs (removed/upgraded).
+    -- Running on a system interpreter instead would break direct-mode
+    -- installs and mask the problem — offer the rebuild now; the user
+    -- clicks Start again once setup finishes.
+    ensure_setup()
+    return false
   end
   PYTHON_CMD = py
   log(string.format("  Python    : %s", PYTHON_CMD))

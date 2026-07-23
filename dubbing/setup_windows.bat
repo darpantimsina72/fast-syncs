@@ -4,14 +4,17 @@ rem
 rem Double-click this file, or run it from a terminal:  setup_windows.bat
 rem
 rem   setup_windows.bat          interactive (pauses at the end)
-rem   setup_windows.bat --auto   fully automatic: no prompts, no pause on
-rem                              success. Used by update.bat and by the
-rem                              REAPER panel's first-open bootstrap.
+rem   setup_windows.bat --auto   fully automatic: no prompts, no pause. Used
+rem                              by update.bat and by the REAPER panel's
+rem                              first-open bootstrap.
 rem
 rem What it does - safe to re-run at any time:
-rem   1. Finds Python 3.11+ (py launcher, PATH, per-user installs); in
-rem      --auto mode installs Python 3.12 via winget when none is found.
+rem   1. Finds Python 3.11+ (py launcher, PATH, per-user + all-users
+rem      installs); in --auto mode installs Python 3.12 via winget when
+rem      none is found. Prefers 3.12/3.13 over brand-new releases, which
+rem      often have no prebuilt wheels for the audio libraries yet.
 rem   2. Creates a local .\venv and installs requirements.txt into it.
+rem      A broken venv (its Python was removed/upgraded) is rebuilt.
 rem   3. Installs ffmpeg automatically when missing (winget first, then a
 rem      portable build into .\ffmpeg\bin) - the engine needs it to decode
 rem      TTS audio; without it dub runs fail at the save step.
@@ -34,20 +37,15 @@ rem 1. Find a Python 3.11+ interpreter.
 rem    The bare "python" on a stock Windows can be the Microsoft Store
 rem    placeholder alias, which exits non-zero on -c - the version probe
 rem    below rejects it automatically.
+rem    All version asserts are written WITHOUT parentheses on purpose: a ")"
+rem    inside a parenthesized for-block can prematurely close the block on
+rem    some cmd.exe versions.
 rem ---------------------------------------------------------------------------
 
 set "PY_CMD="
 call :find_python
 if defined PY_CMD goto have_python
-
-rem Per-user python.org installs are NOT on a console's PATH that was opened
-rem before the install (PATH is read once at launch) - probe them directly.
-for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
-  if not defined PY_CMD (
-    "%%D\python.exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1
-    if !errorlevel! == 0 set "PY_CMD="%%D\python.exe""
-  )
-)
+call :probe_localdirs
 if defined PY_CMD goto have_python
 
 rem No Python 3.11+ anywhere - install one via winget (automatically in
@@ -65,40 +63,45 @@ if defined AUTO (
 winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
 rem The fresh install is not on THIS console's PATH yet - probe known spots.
 call :find_python
-if not defined PY_CMD (
-  for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
-    if not defined PY_CMD (
-      "%%D\python.exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1
-      if !errorlevel! == 0 set "PY_CMD="%%D\python.exe""
-    )
-  )
-)
+if not defined PY_CMD call :probe_localdirs
 if not defined PY_CMD goto no_python
 
 :have_python
-for /f "delims=" %%V in ('%PY_CMD% -c "import sys;print(sys.version.split()[0])"') do set "PY_VER=%%V"
+%PY_CMD% --version > "%TEMP%\dub-pyver.txt" 2>&1
+set "PY_VER="
+set /p PY_VER=<"%TEMP%\dub-pyver.txt"
+del "%TEMP%\dub-pyver.txt" 2>nul
 echo Python      : %PY_CMD%  (%PY_VER%)
 
 rem ---------------------------------------------------------------------------
-rem 2. Create .\venv (reused when it already works) + install requirements
+rem 2. Create .\venv (reused when it already works) + install requirements.
+rem    "Works" means: it runs AND is 3.11+. A venv whose base Python was
+rem    uninstalled or upgraded still has python.exe on disk but cannot run -
+rem    delete it and rebuild (stale site-packages from another Python
+rem    version cause import errors otherwise).
 rem ---------------------------------------------------------------------------
 
 set "VENV_OK="
 if exist "%VENV_PY%" (
-  "%VENV_PY%" -c "import sys" >nul 2>&1
+  "%VENV_PY%" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=11" >nul 2>&1
   if !errorlevel! == 0 set "VENV_OK=1"
 )
 if defined VENV_OK (
   echo venv        : %HERE%\venv  (already exists - reusing)
-) else (
-  echo venv        : creating %HERE%\venv ...
-  %PY_CMD% -m venv "%HERE%\venv"
-  if errorlevel 1 (
-    echo ERROR: could not create the venv.
-    goto end_fail
-  )
+  goto venv_ready
+)
+if exist "%HERE%\venv" (
+  echo venv        : broken or outdated - rebuilding it from scratch ...
+  rmdir /s /q "%HERE%\venv" 2>nul
+)
+echo venv        : creating %HERE%\venv ...
+%PY_CMD% -m venv "%HERE%\venv"
+if errorlevel 1 (
+  echo ERROR: could not create the venv.
+  goto end_fail
 )
 
+:venv_ready
 if not exist "%HERE%\requirements.txt" (
   echo ERROR: requirements.txt not found next to this script.
   goto end_fail
@@ -213,10 +216,33 @@ rem helpers
 rem ---------------------------------------------------------------------------
 
 :find_python
-for %%P in ("py -3.14" "py -3.13" "py -3.12" "py -3.11" "py -3" "python" "python3") do (
+rem 3.12/3.13/3.11 BEFORE 3.14+ and the generic "py -3" (which picks the
+rem newest install): brand-new Python releases often have no prebuilt
+rem wheels for the audio deps (librosa/numba), so pip would try - and
+rem fail - to compile them from source.
+for %%P in ("py -3.12" "py -3.13" "py -3.11" "py -3.14" "py -3" "python" "python3") do (
   if not defined PY_CMD (
-    %%~P -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1
+    %%~P -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=11" >nul 2>&1
     if !errorlevel! == 0 set "PY_CMD=%%~P"
+  )
+)
+exit /b 0
+
+:probe_localdirs
+rem Installs that are NOT on a console's PATH that was opened before the
+rem install (PATH is read once at launch): per-user python.org / winget
+rem installs, then all-users installs (python.org "for all users", winget
+rem run elevated).
+for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
+  if not defined PY_CMD (
+    "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=11" >nul 2>&1
+    if !errorlevel! == 0 set "PY_CMD="%%D\python.exe""
+  )
+)
+for /d %%D in ("%ProgramFiles%\Python3*") do (
+  if not defined PY_CMD (
+    "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=11" >nul 2>&1
+    if !errorlevel! == 0 set "PY_CMD="%%D\python.exe""
   )
 )
 exit /b 0
@@ -233,5 +259,6 @@ echo then re-run this script.
 :end_fail
 echo.
 echo == Setup did NOT finish ==
+if defined AUTO exit /b 1
 pause
 exit /b 1

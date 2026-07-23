@@ -45,20 +45,28 @@ echo
 # ---------------------------------------------------------------------------
 
 find_python() {
+  # Ordered by PREFERENCE, first match wins. 3.12/3.13/3.11 come BEFORE
+  # 3.14+: brand-new Python releases often have no prebuilt wheels for the
+  # audio deps (librosa/numba), so pip would try — and fail — to compile
+  # them from source. The bleeding-edge versions are still probed last, so
+  # a machine that ONLY has 3.14 keeps working.
   local candidates=()
-  # Versioned Homebrew interpreters first (newest wins), then the generic
-  # symlinks, then framework/system installs.
   local d v
   for d in /opt/homebrew/bin /usr/local/bin; do
-    for v in 3.14 3.13 3.12 3.11; do
+    for v in 3.13 3.12 3.11; do
       candidates+=("$d/python$v")
     done
-    candidates+=("$d/python3")
   done
+  candidates+=("/opt/homebrew/bin/python3" "/usr/local/bin/python3")
   candidates+=("/Library/Frameworks/Python.framework/Versions/Current/bin/python3")
   candidates+=("/usr/bin/python3")
+  for d in /opt/homebrew/bin /usr/local/bin; do
+    for v in 3.14 3.15; do
+      candidates+=("$d/python$v")
+    done
+  done
 
-  local best="" best_ver=0 c ver
+  local c ver
   for c in "${candidates[@]}"; do
     [ -x "$c" ] || continue
     # /usr/bin/python3 without the Command Line Tools is Apple's GUI stub —
@@ -66,11 +74,15 @@ find_python() {
     ver="$("$c" -c 'import sys; print(sys.version_info[0]*1000 + sys.version_info[1])' 2>/dev/null)" || continue
     case "$ver" in (''|*[!0-9]*) continue ;; esac
     [ "$ver" -ge 3011 ] || continue          # need Python 3.11+
-    if [ "$ver" -gt "$best_ver" ]; then
-      best="$c"; best_ver="$ver"
-    fi
+    # The venv inherits pip from its base interpreter — make sure this one
+    # can actually provide it (pip directly, or the bundled ensurepip).
+    "$c" -m pip --version >/dev/null 2>&1 \
+      || "$c" -m ensurepip --version >/dev/null 2>&1 \
+      || continue
+    printf '%s\n' "$c"
+    return 0
   done
-  [ -n "$best" ] && printf '%s\n' "$best"
+  return 1
 }
 
 PY_BASE="$(find_python)"
@@ -88,10 +100,19 @@ echo "Python      : $PY_BASE  ($("$PY_BASE" -c 'import sys;print(sys.version.spl
 # 2. Create ./venv (reused when it already works) + install requirements
 # ---------------------------------------------------------------------------
 
+# Reuse the venv only when it runs AND is 3.11+. A venv whose base Python
+# was uninstalled or upgraded (a Homebrew upgrade breaks the symlinks) still
+# exists on disk but cannot run — delete it and rebuild, so stale
+# site-packages never linger.
 VENV_PY="$VENV/bin/python3"
-if [ -x "$VENV_PY" ] && "$VENV_PY" -c 'import sys' >/dev/null 2>&1; then
+if [ -x "$VENV_PY" ] \
+   && "$VENV_PY" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)' >/dev/null 2>&1; then
   echo "venv        : $VENV (already exists — reusing)"
 else
+  if [ -e "$VENV" ]; then
+    echo "venv        : broken or outdated — rebuilding it from scratch ..."
+    rm -rf "$VENV"
+  fi
   echo "venv        : creating $VENV ..."
   "$PY_BASE" -m venv "$VENV" || { echo "ERROR: could not create the venv."; exit 1; }
 fi

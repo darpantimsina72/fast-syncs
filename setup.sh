@@ -50,6 +50,15 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 
 echo "[setup] Using Python: $PYTHON_BIN"
+
+# A venv whose base Python was uninstalled or upgraded (e.g. a Homebrew
+# upgrade breaks the symlinks) still exists on disk but cannot run —
+# delete it and rebuild, so stale site-packages never linger.
+if [ -d venv ] && ! ./venv/bin/python3 -c 'import sys' >/dev/null 2>&1; then
+    echo "[setup] Existing venv is broken (its Python was removed or upgraded) — rebuilding..."
+    rm -rf venv
+fi
+
 echo "[setup] Creating virtualenv in ./venv ..."
 "$PYTHON_BIN" -m venv venv
 
