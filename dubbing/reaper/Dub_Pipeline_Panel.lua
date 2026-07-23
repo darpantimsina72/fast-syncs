@@ -2798,12 +2798,23 @@ end
 -- REAPER session forced a manual "pick engine_done.json" before the first
 -- regen (the panel forgets it on restart; regen-mode manifests carry no
 -- out_dir, so the status-dir engine_done.json alone is not enough either).
--- Persist the target per project as a manifest-shaped sidecar in the
--- status dir, and reload it automatically.
+-- Persist the target per project as a manifest-shaped sidecar and reload
+-- it automatically.
+-- CRITICAL: the sidecar must NOT live inside the per-project status dir —
+-- run_dub.py deletes that whole directory (shutil.rmtree) at EVERY launch,
+-- so a sidecar stored there died on the very next run (including the regen
+-- run itself) and the picker came back each session. It lives in the
+-- status ROOT instead, named after the project slug: launches never
+-- wholesale-clean the root (legacy no---status-dir launches remove only
+-- the four fixed status filenames there).
 -- (All in the V5 table — the main chunk is near Lua's 200-local limit.)
 
 function V5.regen_target_path()
-  return STATUS_DIR .. SEP .. "regen_target.json"
+  -- Slug taken from STATUS_DIR (not recomputed from the current project):
+  -- STATUS_DIR stays pinned to the launched project for a run in flight,
+  -- so a finish-time write can never land under another project's slug.
+  local slug = STATUS_DIR:match("([^/\\]+)$") or "default"
+  return V5.STATUS_ROOT .. SEP .. "regen_target_" .. slug .. ".json"
 end
 
 -- Single setter for the regen target: updates the session state AND writes
@@ -2813,7 +2824,7 @@ function V5.set_regen_target(out_dir, lang)
   if (out_dir or "") == "" then return end
   _regen_out_dir = out_dir
   if (lang or "") ~= "" then _regen_lang = lang end
-  reaper.RecursiveCreateDirectory(STATUS_DIR, 0)
+  reaper.RecursiveCreateDirectory(V5.STATUS_ROOT, 0)
   local f = io.open(V5.regen_target_path(), "wb")
   if f then
     f:write(string.format('{"status":"ok","out_dir":"%s","language":"%s"}\n',
@@ -2825,8 +2836,9 @@ end
 
 -- Called when the regen section renders with no target. Probes once per
 -- status dir: the last full-run manifest in this project's status dir,
--- the legacy shared status root, then the persisted sidecar (which
--- survives regen runs overwriting engine_done.json).
+-- then the persisted sidecar (survives both regen runs overwriting
+-- engine_done.json AND run_dub.py's wholesale status-dir clean), then the
+-- pre-relocation sidecar location, then the legacy shared status root.
 function V5.prefill_regen_target()
   if _regen_out_dir ~= "" then return end
   -- Same guard as preflight: only re-point the status paths while idle on
@@ -2835,8 +2847,9 @@ function V5.prefill_regen_target()
   if V5.regen_prefill_done == STATUS_DIR then return end
   V5.regen_prefill_done = STATUS_DIR
   local probes = { DONE_JSON,
-                   V5.STATUS_ROOT .. SEP .. "engine_done.json",
-                   V5.regen_target_path() }
+                   V5.regen_target_path(),
+                   STATUS_DIR .. SEP .. "regen_target.json",
+                   V5.STATUS_ROOT .. SEP .. "engine_done.json" }
   for _, p in ipairs(probes) do
     if file_exists(p) then
       local m = load_manifest_json(p)
