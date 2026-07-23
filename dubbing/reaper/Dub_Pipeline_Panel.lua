@@ -935,13 +935,24 @@ local function _font_candidates(script)
                          :gsub("\\", "/") .. "/Microsoft/Windows/Fonts"
     -- User-installed Noto fonts first (best coverage), then Nirmala UI —
     -- ships with Windows 8.1+ and covers ALL 11 target languages' scripts.
-    paths[#paths+1] = local_fonts .. "/NotoSans" .. script .. "-Regular.ttf"
-    paths[#paths+1] = "C:/Windows/Fonts/NotoSans" .. script .. "-Regular.ttf"
-    paths[#paths+1] = local_fonts .. "/NotoSerif" .. script .. "-Regular.ttf"
-    paths[#paths+1] = "C:/Windows/Fonts/NotoSerif" .. script .. "-Regular.ttf"
+    -- Noto comes under two names: the hinted "-Regular.ttf" build and the
+    -- variable-font file that fonts.google.com serves by default — a
+    -- per-user install ("Install for me") lands in LOCALAPPDATA, an
+    -- all-users install in C:/Windows/Fonts. Probe every combination.
+    -- segoeui.ttf is deliberately NOT a fallback: it has no Indic glyphs,
+    -- so "loading" it only masked the failure while still drawing '?'.
+    for _, dir in ipairs({ local_fonts, "C:/Windows/Fonts" }) do
+      paths[#paths+1] = dir .. "/NotoSans" .. script .. "-Regular.ttf"
+      paths[#paths+1] = dir .. "/NotoSans" .. script ..
+                        "-VariableFont_wdth,wght.ttf"
+      paths[#paths+1] = dir .. "/NotoSerif" .. script .. "-Regular.ttf"
+      paths[#paths+1] = dir .. "/NotoSerif" .. script ..
+                        "-VariableFont_wdth,wght.ttf"
+    end
     paths[#paths+1] = "C:/Windows/Fonts/Nirmala.ttf"
     paths[#paths+1] = "C:/Windows/Fonts/NirmalaS.ttf"
-    paths[#paths+1] = "C:/Windows/Fonts/segoeui.ttf"
+    paths[#paths+1] = "C:/Windows/Fonts/NirmalaB.ttf"
+    paths[#paths+1] = local_fonts .. "/Nirmala.ttf"
   else
     paths[#paths+1] = '/Library/Fonts/NotoSans' .. script .. '-Regular.ttf'
     paths[#paths+1] = '/Library/Fonts/NotoSerif' .. script .. '-Regular.ttf'
@@ -990,6 +1001,47 @@ local function _ensure_lang_font(ctx)
     _lang_fonts[script] = _create_script_font(ctx, script) or false
   end
   _ui_font = _lang_fonts[script] or nil
+end
+
+-- ReaImGui older than 0.9 rasterizes only a fixed Latin glyph range — an
+-- Indic font may load fine and STILL draw every character as '?'. 0.9+
+-- rasterizes glyphs on demand. Cached; used to explain '?' text honestly.
+function V5.reaimgui_pre09()
+  if V5.pre09 ~= nil then return V5.pre09 end
+  V5.pre09 = false
+  if reaper.ImGui_GetVersion then
+    local ok, _, _, rv = pcall(reaper.ImGui_GetVersion)
+    if ok and type(rv) == "string" then
+      local maj, min = rv:match("^(%d+)%.(%d+)")
+      if maj then
+        V5.pre09 = (tonumber(maj) == 0 and tonumber(min) < 9)
+      end
+    end
+  end
+  return V5.pre09
+end
+
+-- Visible one-line explanation wherever script text is shown, instead of
+-- the silent '?' rendering users hit on machines without a usable font
+-- (or with a pre-0.9 ReaImGui). Reads _ui_font as set by _ensure_lang_font
+-- for the CURRENT language this frame.
+function V5.script_font_warning(ctx)
+  local msg
+  local script = _LANG_TO_SCRIPT[LANGUAGE or ""] or "Devanagari"
+  if V5.reaimgui_pre09() then
+    msg = "Your ReaImGui version is too old to draw " .. script ..
+          " text — it shows every character as '?'. Update it via " ..
+          "Extensions → ReaPack → Synchronize packages, then restart REAPER."
+  elseif _ui_font == nil then
+    msg = "No " .. script .. " font was found on this system — the text " ..
+          "shows as '?'. Install \"Noto Sans " .. script ..
+          "\" (free, fonts.google.com), then restart REAPER. " ..
+          "The dubbing AUDIO is not affected."
+  end
+  if not msg then return end
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+  reaper.ImGui_TextWrapped(ctx, msg)
+  reaper.ImGui_PopStyleColor(ctx)
 end
 
 -- ---------------------------------------------------------------------------
@@ -2889,6 +2941,7 @@ local function ui_regen_section(ctx, default_open)
     return
   end
   reaper.ImGui_Indent(ctx, 12)
+  V5.script_font_warning(ctx)
 
   if _regen_out_dir == "" then
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
@@ -3143,6 +3196,7 @@ local function ui_phase_review(ctx)
 
   -- Side-by-side panes: EN transcript read-only left, translation editable
   -- right. -52 leaves room for the button row below.
+  V5.script_font_warning(ctx)
   local pane_h = -52
   local pushed = _push_font(ctx, 17)
   if _review.use_table then
