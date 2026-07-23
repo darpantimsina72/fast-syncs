@@ -75,5 +75,14 @@ fi
 # direct-mode installs direct across updates and venv rebuilds.
 if [ "$DIRECT" = "1" ]; then touch .direct-mode; else rm -f .direct-mode; fi
 
+# Bundled dubbing app: set it up too, so the one-window app works
+# end-to-end right after install (venv + deps + ffmpeg, no prompts).
+if [ -f dubbing/setup_mac.command ]; then
+    echo
+    echo "[setup] Setting up the bundled dubbing app (can take a few minutes) ..."
+    bash dubbing/setup_mac.command --auto \
+        || echo "WARNING: dubbing setup reported a problem — run dubbing/setup_mac.command manually."
+fi
+
 echo
 echo "Setup complete. You can now run auto_sync_pipeline.lua in Reaper."

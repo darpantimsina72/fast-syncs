@@ -11,6 +11,9 @@ venv/
 __pycache__/
 *.pyc
 
+# Portable ffmpeg dropped in by setup_windows.bat's fallback installer.
+ffmpeg/
+
 # Engine runtime status files.
 engine/status/
 

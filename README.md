@@ -55,10 +55,14 @@ Works on **Windows** and **macOS**. The instructions below are Windows-first.
        `https://github.com/ReaTeam/Extensions/raw/master/index.xml`, then
        *Browse packages* → search **ReaImGui** → right-click → *Install* →
        *Apply* → restart REAPER.
-   - A window opens with collapsible sections (tracks & mode, server, Gemini
-     matcher, keys, script), a **Start Sync** button, a live progress bar with
-     **Progress**/**Logs** tabs, and success/failure screens.
-   - If the `venv` is missing, the script offers to run `setup.bat` for you.
+   - **One window**: running `auto_sync_pipeline.lua` opens the **Dub
+     Pipeline** panel — the merged app. The sync tool lives in its **Auto
+     Sync** tab (collapsible sections, **Start Sync**, live progress with
+     **Progress**/**Logs**), next to the dubbing tabs. Old toolbar buttons
+     and actions that point at `auto_sync_pipeline.lua` keep working — they
+     open the same panel.
+   - If the `venv` is missing, the script offers to run `setup.bat` for you;
+     the dubbing engine's own venv is created automatically on first open.
    - Optional: load `Sync_Item.lua` the same way for the one-clip manual
      align helper.
 
@@ -89,8 +93,12 @@ The updater handles both install styles:
   the `venv`, and the `.direct-mode` marker are untouched.
 
 Either way it then refreshes the Python dependencies in `venv` (including the
-direct-mode extras, if you installed with `--direct`). When it says
-`Update complete`, re-run the script in REAPER.
+direct-mode extras, if you installed with `--direct`) **and sets up the
+bundled dubbing app automatically** — on the first update after the merge it
+creates `dubbing/venv`, installs the engine dependencies and installs
+**ffmpeg** if missing (no prompts); later updates just refresh them (fast).
+When it says `Update complete`, re-run the script in REAPER — the same
+button/action you always used now opens the merged one-window app.
 
 If the automatic ZIP download ever fails (offline / repo moved), fall back to
 manual: re-download the ZIP and unzip it **over** the old folder so your
@@ -115,14 +123,16 @@ recording and get a translated, voice-synthesized, time-synced dub in one of
 11 Indian languages, imported straight onto the timeline. It arrives (and
 stays current) through the same **Update…** button as the sync tool.
 
-- **Open it**: click the **Dubbing...** button at the bottom of the sync
-  window (it registers + runs `dubbing/reaper/Dub_Pipeline_Panel.lua` for
-  you), or load that file manually via *Actions → Load ReaScript…*.
-- **First-time setup**: the panel offers to run it when needed, or run
-  `dubbing/setup_windows.bat` / `bash dubbing/setup_mac.command` yourself.
-  It creates a separate `dubbing/venv` (the dubbing deps are heavier, so
-  sync-only installs never pull them). Enter your API keys in the panel's
-  **Settings** tab.
+- **Open it**: just run `auto_sync_pipeline.lua` — it opens this panel
+  directly (the sync tool is its **Auto Sync** tab). You can also load
+  `dubbing/reaper/Dub_Pipeline_Panel.lua` manually via *Actions → Load
+  ReaScript…* — same window either way.
+- **First-time setup is automatic**: `update.bat`/`update.sh` and
+  `setup.bat`/`setup.sh` create `dubbing/venv`, install the engine deps and
+  install **ffmpeg** when missing — and if the panel opens before that ever
+  ran, it starts the setup itself in a terminal (once, no prompts). Manual
+  fallback: `dubbing/setup_windows.bat` / `bash dubbing/setup_mac.command`.
+  Enter your API keys in the panel's **Settings** tab.
 - **Panel tabs**: **Full Pipeline** (transcribe → translate → pauses for
   your review of the script/translation → TTS → sync), **Paste
   Translation** (bring your own translated script — skips the LLM),

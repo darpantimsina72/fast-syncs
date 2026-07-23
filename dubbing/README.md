@@ -1,10 +1,10 @@
 # Reaper Dubbing App
 
-> **Bundled with fast-syncs** (v0.5): this app lives in the `dubbing/`
+> **Bundled with fast-syncs** (v0.6): this app lives in the `dubbing/`
 > folder of the fast-syncs repo and arrives / stays current through the
-> same **Update…** button as the sync tool. Open it from the sync window's
-> **Dubbing...** button, or load `dubbing/reaper/Dub_Pipeline_Panel.lua`
-> as a REAPER action.
+> same **Update…** button as the sync tool. Running `auto_sync_pipeline.lua`
+> opens this panel directly (the sync tool is its **Auto Sync** tab); you
+> can also load `dubbing/reaper/Dub_Pipeline_Panel.lua` as a REAPER action.
 
 Automatic voice dubbing for [REAPER](https://www.reaper.fm/): take an English
 voice recording, and get a translated, voice-synthesized, time-synced dub in
@@ -42,8 +42,18 @@ Telugu, Gujarati, Marathi, Assamese, Odia, Nepali.
 ## Installation
 
 The app ships inside the fast-syncs repo — if you have fast-syncs, you
-already have the files (click **Update…** in the sync window if `dubbing/`
-is missing). Then run the one-time setup:
+already have the files (click **Update…** in the panel's Settings tab if
+`dubbing/` is missing).
+
+**Setup is automatic.** The fast-syncs updater (`update.bat`/`update.sh`)
+and installers (`setup.bat`/`setup.sh`) run the dubbing setup in `--auto`
+mode: create `dubbing/venv`, install the Python dependencies, install
+**ffmpeg** when missing (winget on Windows, with a portable-build fallback
+into `ffmpeg\bin\`; Homebrew on macOS), and run an engine self-check — no
+prompts. If the panel ever opens before that ran, it starts the same setup
+itself in a terminal, once.
+
+Manual fallback (safe to re-run any time):
 
 ### macOS
 
@@ -55,13 +65,6 @@ bash setup_mac.command
 ### Windows
 
 **Double-click `dubbing\setup_windows.bat`** (or run it from a terminal).
-
-The dubbing panel also offers to run this setup for you the first time you
-click Run without a venv.
-
-Both setup scripts do the same thing: create a local `venv/`, install the
-Python dependencies from `requirements.txt`, run an engine self-check, and
-print the REAPER steps below. They are safe to re-run at any time.
 
 Then, in REAPER (both platforms):
 
@@ -242,9 +245,13 @@ dubbing/                    (inside the fast-syncs repo)
   editor → **📥 Paste script** (or **Open in editor** → **⟲ Reload file**)
   for a perfect view. Installing Noto Sans fonts for your script improves
   in-panel rendering further.
-- **mp3 decode / "ffmpeg not found" errors (Windows)** — install ffmpeg:
-  `winget install -e --id Gyan.FFmpeg` (or unzip a build to `ffmpeg\bin\`
-  inside the project folder), then re-run.
+- **mp3 decode / "ffmpeg not found" errors** — re-run the setup script
+  (`setup_windows.bat` / `setup_mac.command`): it installs ffmpeg
+  automatically (winget → portable fallback on Windows, Homebrew on macOS).
+  The engine now also refuses to start a dub run without ffmpeg, so this
+  can no longer surface mid-run after the LLM/TTS spend. Manual install:
+  `winget install -e --id Gyan.FFmpeg` / `brew install ffmpeg`, or unzip a
+  build to `ffmpeg\bin\` inside the `dubbing\` folder.
 - **💾 / ▶ / ⟳ render as boxes** — the default ImGui font lacks those glyphs
   on some systems; the buttons still work.
 

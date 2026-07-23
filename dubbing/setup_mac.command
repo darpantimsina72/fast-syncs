@@ -1,22 +1,36 @@
 #!/bin/bash
-# Reaper Dubbing App — one-time macOS setup (v0.3, standalone).
+# Reaper Dubbing App — one-time macOS setup (v0.6, standalone).
 #
 # Double-click this file, or run:  bash setup_mac.command
 # (If double-click is blocked on a new Mac, see README "First run on a new Mac".)
 #
+#   bash setup_mac.command          interactive
+#   bash setup_mac.command --auto   fully automatic: no prompts. Used by
+#                                   update.sh and by the REAPER panel's
+#                                   first-open bootstrap.
+#
 # What it does — safe to re-run at any time:
 #   1. Creates a local ./venv with the newest python3 it can find
 #      (Homebrew locations first) and installs requirements.txt into it.
-#   2. Runs the engine self-check (imports the pipeline modules).
-#   3. OPTIONAL: if the legacy bulk-app install is present, offers to COPY
-#      its API keys/settings into ./config (originals are never modified).
-#   4. Prints the REAPER script-install steps.
+#   2. Installs ffmpeg via Homebrew when missing (the engine needs it to
+#      decode TTS audio).
+#   3. Runs the engine self-check (imports the pipeline modules).
+#   4. OPTIONAL (interactive only): if the legacy bulk-app install is
+#      present, offers to COPY its API keys/settings into ./config.
+#   5. Prints the REAPER script-install steps.
 set -u
 
 cd "$(dirname "$0")" || exit 1
 HERE="$(pwd)"
 VENV="$HERE/venv"
 CONFIG="$HERE/config"
+
+AUTO=0
+for arg in "$@"; do
+  case "$arg" in
+    --auto) AUTO=1 ;;
+  esac
+done
 
 # Legacy bulk-app install — only ever READ, and only for the optional
 # one-time key migration below.
@@ -96,7 +110,44 @@ echo "Installing engine dependencies (idempotent — re-runs are fast) ..."
 }
 
 # ---------------------------------------------------------------------------
-# 3. Engine self-check (imports the pipeline modules, verifies prompts)
+# 3. ffmpeg — REQUIRED by the engine (pydub decodes ElevenLabs MP3 with it;
+#    a missing ffmpeg fails dub runs at the "Saving" step). Install it
+#    automatically with Homebrew when missing. The engine also checks the
+#    Homebrew paths directly at run time, so no PATH changes are needed.
+# ---------------------------------------------------------------------------
+
+echo
+have_ffmpeg() {
+  command -v ffmpeg >/dev/null 2>&1 && return 0
+  [ -x /opt/homebrew/bin/ffmpeg ] && return 0
+  [ -x /usr/local/bin/ffmpeg ] && return 0
+  [ -x "$HERE/ffmpeg/bin/ffmpeg" ] && return 0
+  return 1
+}
+if have_ffmpeg; then
+  echo "ffmpeg      : found."
+else
+  BREW=""
+  [ -x /opt/homebrew/bin/brew ] && BREW=/opt/homebrew/bin/brew
+  [ -z "$BREW" ] && [ -x /usr/local/bin/brew ] && BREW=/usr/local/bin/brew
+  if [ -n "$BREW" ]; then
+    echo "ffmpeg      : not found — installing via Homebrew (needed to decode TTS audio) ..."
+    "$BREW" install ffmpeg || true
+    if have_ffmpeg; then
+      echo "ffmpeg      : installed."
+    else
+      echo "WARNING: ffmpeg install failed — dub runs will fail at the"
+      echo "  audio-save step until it is installed:  brew install ffmpeg"
+    fi
+  else
+    echo "WARNING: ffmpeg not found and Homebrew is not installed."
+    echo "  Install Homebrew (https://brew.sh), then:  brew install ffmpeg"
+    echo "  Dub runs will fail at the audio-save step until then."
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Engine self-check (imports the pipeline modules, verifies prompts)
 # ---------------------------------------------------------------------------
 
 echo
@@ -109,8 +160,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Optional one-time key migration from the legacy bulk-app install.
+# 5. Optional one-time key migration from the legacy bulk-app install.
 #    COPY only — the bulk app's files are never moved or modified.
+#    Skipped entirely in --auto mode (no prompts).
 # ---------------------------------------------------------------------------
 
 # ask "question" -> returns 0 on yes. Defaults to No; non-interactive = No.
@@ -141,7 +193,9 @@ copy_if_confirmed() {
   fi
 }
 
-if [ -d "$BULK_APP_DIR" ]; then
+if [ "$AUTO" = "1" ]; then
+  : # --auto: never prompt; keys are entered in the panel's Settings instead.
+elif [ -d "$BULK_APP_DIR" ]; then
   echo
   echo "Legacy bulk-app install found at:"
   echo "  $BULK_APP_DIR"
@@ -197,11 +251,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5. REAPER script-install steps
+# 6. REAPER script-install steps (interactive runs only — the panel
+#    bootstraps itself when this ran via --auto)
 # ---------------------------------------------------------------------------
 
 echo
 echo "== Setup complete =="
+if [ "$AUTO" = "1" ]; then exit 0; fi
 echo
 echo "Install the REAPER scripts (load them IN PLACE — do not copy them):"
 echo "  1. In REAPER: Actions -> Show action list -> New action -> Load ReaScript..."

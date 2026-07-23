@@ -582,6 +582,14 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
             seg = AudioSegment.from_file(io.BytesIO(raw), format="mp3")
             combined += seg
         combined.export(output_path, format="wav")
+    except FileNotFoundError:
+        # pydub shells out to ffmpeg/ffprobe; a bare WinError 2 here means
+        # they are not installed. Fail with the fix instead of a traceback.
+        raise RuntimeError(
+            "ffmpeg/ffprobe not found — pydub needs it to decode the "
+            "ElevenLabs MP3 audio. Re-run the setup script "
+            "(setup_windows.bat / setup_mac.command); it installs ffmpeg "
+            "automatically. Then run the dub again.")
     except ImportError:
         if status_cb:
             status_cb("TTS: Warning — pydub not found; saving raw MP3 bytes (install pydub for WAV output).")

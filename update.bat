@@ -115,19 +115,14 @@ if exist ".\venv\Scripts\python.exe" (
 )
 
 rem ── bundled dubbing app (dubbing\) ─────────────────────────────
-rem Refresh ITS venv only when the user already set it up - dubbing deps
-rem are heavy (librosa/numpy), sync-only installs never pull them. First
-rem setup happens from the dubbing panel (dubbing\setup_windows.bat).
-if exist ".\dubbing\venv\Scripts\python.exe" (
-  if exist ".\dubbing\requirements.txt" (
-    echo [update] Updating dubbing app dependencies...
-    ".\dubbing\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r ".\dubbing\requirements.txt"
-    if errorlevel 1 ( echo WARNING: dubbing deps failed to update - re-run dubbing\setup_windows.bat. )
-  )
-) else (
-  if exist ".\dubbing" (
-    echo [update] Dubbing app present ^(not set up yet - use the Dubbing... button in REAPER^).
-  )
+rem Run its setup in automatic mode on EVERY update - the first update
+rem after the merge it creates dubbing\venv and installs ffmpeg (this used
+rem to be a manual step people hit as "venv not found" errors); later
+rem updates just refresh deps (fast). Never fails the whole update.
+if exist ".\dubbing\setup_windows.bat" (
+  echo [update] Setting up / refreshing the dubbing app ^(first time can take a few minutes^)...
+  call ".\dubbing\setup_windows.bat" --auto
+  if errorlevel 1 ( echo WARNING: dubbing setup reported a problem - run dubbing\setup_windows.bat manually. )
 )
 
 echo.

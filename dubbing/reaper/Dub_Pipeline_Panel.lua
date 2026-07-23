@@ -79,6 +79,12 @@
 
 local SEP = package.config:sub(1, 1)
 
+-- Re-running this action while the panel is already open restarts it (no
+-- "ReaScript task control" dialog): the legacy auto_sync_pipeline.lua action
+-- now redirects here, so the one button users always pressed must reliably
+-- bring this window up. REAPER 7.03+; older builds keep the stock prompt.
+if reaper.set_action_options then reaper.set_action_options(2) end
+
 -- ---------------------------------------------------------------------------
 -- Paths — this script lives in <project>/reaper/, engine in <project>/engine/
 -- ---------------------------------------------------------------------------
@@ -1579,7 +1585,10 @@ function V5.run_in_terminal(path, extra_args)
   local osname = reaper.GetOS() or ""
   local opener = (osname:match("OSX") or osname:match("[Mm]ac")) and "open"
                  or "xdg-open"
-  if path:match("%.command$") then
+  -- A .command target can be opened directly — but `open` cannot pass
+  -- arguments to it, so any call WITH extra_args must go through the
+  -- wrapper below (which bakes the args into its bash line).
+  if path:match("%.command$") and extra_args == "" then
     local cmd = opener .. ' "' .. path .. '"'
     os.execute(cmd)
     return cmd
@@ -1643,6 +1652,33 @@ function V5.offer_run_setup(reason)
     return true
   end
   return false
+end
+
+-- v0.6: zero-click bootstrap — when the engine venv is missing at panel
+-- open (fresh install, or the first launch right after an Update that
+-- shipped this app), start the one-time setup NOW in a terminal instead of
+-- letting the first Run click fail with "venv not found". Non-interactive
+-- (--auto): creates dubbing/venv, installs the engine deps and ffmpeg, no
+-- prompts. Once per REAPER session (non-persistent ExtState) so a setup
+-- already grinding away in a terminal is never launched twice. The panel
+-- opens normally either way; Run's preflight still guards until it's done.
+function V5.autorun_setup_if_needed()
+  if PYTHON_CMD ~= "" then return end                 -- user pinned an interpreter
+  if file_exists(project_venv_python()) then return end
+  if APP_DIR ~= "" and file_exists(venv_python_path()) then return end
+  if reaper.GetExtState("dub_pipeline", "setup_autorun") == "1" then return end
+  local script = BASE_DIR .. SEP .. SETUP_SCRIPT
+  if not file_exists(script) then return end
+  reaper.SetExtState("dub_pipeline", "setup_autorun", "1", false)
+  V5.run_in_terminal(script, "--auto")
+  reaper.MB(
+    "First-time setup has started in a separate terminal window.\n\n" ..
+    "It installs the dubbing engine's Python packages and ffmpeg\n" ..
+    "automatically (takes a few minutes, one time only).\n\n" ..
+    "You can keep using this panel — the Auto Sync tab works right\n" ..
+    "away. When the terminal says 'Setup complete', the Dubbing tabs\n" ..
+    "are ready too.",
+    "Dub Pipeline — automatic setup", 0)
 end
 
 -- v0.5: load the fast-syncs Auto Sync pipeline as an EMBEDDED module, so it
@@ -3866,6 +3902,10 @@ local function main()
     end
     return
   end
+
+  -- Engine venv missing? Kick off the automatic one-time setup before the
+  -- window even appears (v0.6) — the panel stays fully usable meanwhile.
+  V5.autorun_setup_if_needed()
 
   _ui_ctx = reaper.ImGui_CreateContext('Dub Pipeline')
   _ensure_lang_font(_ui_ctx)

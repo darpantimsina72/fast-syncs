@@ -79,16 +79,15 @@ main() {
         if [ -f .direct-mode ]; then bash setup.sh --direct; else bash setup.sh; fi
     fi
 
-    # Bundled dubbing app (dubbing/): refresh ITS venv only when the user has
-    # already set it up — dubbing deps are heavy (librosa/numpy), so sync-only
-    # installs never pull them. First-time setup happens from the dubbing
-    # panel itself (dubbing/setup_mac.command / dubbing/setup_windows.bat).
-    if [ -d dubbing/venv ] && [ -f dubbing/requirements.txt ]; then
-        echo "[update] Updating dubbing app dependencies…"
-        ./dubbing/venv/bin/pip install --quiet --upgrade -r dubbing/requirements.txt \
-            || echo "[update] Dubbing deps failed to update — re-run dubbing/setup_mac.command."
-    elif [ -d dubbing ]; then
-        echo "[update] Dubbing app present (not set up yet — use the Dubbing... button in REAPER)."
+    # Bundled dubbing app (dubbing/): run its setup in automatic mode on
+    # EVERY update — first update after the merge it creates dubbing/venv
+    # and installs ffmpeg (this used to be a manual step people hit as
+    # "venv not found" errors); later updates just refresh deps (fast).
+    # Never fails the whole update.
+    if [ -f dubbing/setup_mac.command ]; then
+        echo "[update] Setting up / refreshing the dubbing app (first time can take a few minutes)…"
+        bash dubbing/setup_mac.command --auto \
+            || echo "[update] Dubbing setup reported a problem — run dubbing/setup_mac.command manually."
     fi
 
     echo

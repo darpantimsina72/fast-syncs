@@ -764,6 +764,27 @@ def _stage_dub(pl, args, api_key, manifest, ctx, voice_id):
     _say("S3e", f"Synced audio saved: {os.path.basename(synced_path)}")
 
 
+_FFMPEG_MSG = ("ffmpeg not found — the engine needs it to decode TTS audio "
+               "(pydub shells out to it). Re-run the setup script "
+               "(setup_windows.bat / setup_mac.command); it installs ffmpeg "
+               "automatically. Then start the run again.")
+
+
+def _require_ffmpeg(pl, hard):
+    """Fail (or warn) BEFORE any LLM/TTS spend when ffmpeg is missing.
+
+    Without this, a run burns transcription + translation + TTS credits and
+    then dies at the audio-save step with a bare WinError 2 (real report
+    from a Windows install where the setup's ffmpeg step was skipped).
+    """
+    if getattr(pl, "FFMPEG_PATH", None):
+        return
+    if hard:
+        raise RuntimeError(_FFMPEG_MSG)
+    _note("WARNING: " + _FFMPEG_MSG + " (The dub stage will need it; "
+          "translate-only runs on WAV input can proceed.)")
+
+
 def _begin_run(args, manifest):
     """Common head of full/translate/dub: audio checks + pipeline import +
     keys.
@@ -779,6 +800,7 @@ def _begin_run(args, manifest):
     pl, api_key = _load_pipeline_and_keys(args, need_llm=True)
     _note(f"Pipeline loaded. LLM model: {pl.GEMINI_DEFAULT_MODEL}; "
           f"TTS model: {args.el_model}.")
+    _require_ffmpeg(pl, hard=(args.steps in ("full", "dub")))
     return pl, api_key, {"audio_path": audio_path}
 
 
@@ -949,6 +971,7 @@ def _run_regen(args, manifest):
         raise RuntimeError(f"--text-file is empty: {text_path}")
 
     pl, api_key = _load_pipeline_and_keys(args, need_llm=False)
+    _require_ffmpeg(pl, hard=True)
     voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
                                          args.voice_id)
     _note(f"Regen voice: {voice_id} ({voice_how})")
@@ -991,6 +1014,7 @@ def _run_voice_change(args, manifest):
     out_wav = os.path.abspath(os.path.expanduser(args.out_wav))
 
     pl, api_key = _load_pipeline_and_keys(args, need_llm=False)
+    _require_ffmpeg(pl, hard=True)
     voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
                                          args.voice_id)
     _note(f"Voice-change target voice: {voice_id} ({voice_how})")

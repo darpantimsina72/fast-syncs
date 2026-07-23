@@ -79,6 +79,15 @@ rem Remember the install mode, so update.bat (and the Lua bootstrapper) keep
 rem direct-mode installs direct across updates and venv rebuilds.
 if "%DIRECT%"=="1" ( type nul > ".direct-mode" ) else ( del ".direct-mode" 2>nul )
 
+rem ── bundled dubbing app: set it up too, so the one-window app works
+rem    end-to-end right after install (venv + deps + ffmpeg, no prompts).
+if exist ".\dubbing\setup_windows.bat" (
+  echo.
+  echo [setup] Setting up the bundled dubbing app ^(can take a few minutes^)...
+  call ".\dubbing\setup_windows.bat" --auto
+  if errorlevel 1 ( echo WARNING: dubbing setup reported a problem - run dubbing\setup_windows.bat manually. )
+)
+
 echo.
 echo Setup complete. You can now run auto_sync_pipeline.lua in Reaper.
 pause

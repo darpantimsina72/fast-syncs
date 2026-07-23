@@ -2119,5 +2119,28 @@ if EMBED then
     reload_settings = function() load_settings() end,
   }
 else
-  reaper.defer(main)
+  -- v1.2: the bundled Dub Pipeline panel is the app now — Auto Sync lives
+  -- inside it as a tab. When the panel is present (any install updated via
+  -- Update...), REDIRECT there: register it as an action and run it, so
+  -- every old toolbar button / action pointing at THIS script opens the new
+  -- one-window app instead of the legacy standalone window. Users keep
+  -- pressing the same button they always did; only the window changes.
+  -- Falls back to the classic window when the panel is missing (partial
+  -- install) or REAPER is too old to register scripts.
+  local function launch_dub_panel()
+    local psep  = package.config:sub(1, 1)
+    local panel = get_script_dir() .. psep .. "dubbing" .. psep .. "reaper"
+                  .. psep .. "Dub_Pipeline_Panel.lua"
+    if not file_exists(panel) then return false end
+    if not reaper.AddRemoveReaScript then return false end
+    local ok, cmd = pcall(reaper.AddRemoveReaScript, true, 0, panel, true)
+    if not ok or not cmd or cmd == 0 then return false end
+    reaper.Main_OnCommand(cmd, 0)
+    return true
+  end
+  -- Re-running this action never shows the "ReaScript task control" dialog
+  -- (REAPER 7.03+): the redirect instance exits immediately anyway, and the
+  -- legacy fallback window simply restarts.
+  if reaper.set_action_options then reaper.set_action_options(2) end
+  if not launch_dub_panel() then reaper.defer(main) end
 end
