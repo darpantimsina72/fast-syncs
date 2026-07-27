@@ -16,7 +16,8 @@ rem ─────────────────────────�
 if "%~1"=="--from-temp" goto run
 copy /y "%~f0" "%TEMP%\fast-syncs-update.bat" >nul
 if errorlevel 1 (
-  echo ERROR: could not copy the updater to %TEMP%.
+  rem No %TEMP% in this echo: a TEMP containing ")" would break this block.
+  echo ERROR: could not copy the updater to the temp folder.
   pause
   exit /b 1
 )
@@ -85,8 +86,7 @@ rem they are left untouched. This updater itself runs from %TEMP%, so
 rem overwriting update.bat here is safe.
 set "COPIED=0"
 for /d %%D in ("%ZIPTMP%\*") do (
-  xcopy /e /y /q /i "%%D\*" . >nul
-  if not errorlevel 1 set "COPIED=1"
+  xcopy /e /y /q /i "%%D\*" . >nul && set "COPIED=1"
 )
 if "%COPIED%"=="0" goto zip_manual
 echo [update] Files updated to the latest version.
@@ -106,9 +106,10 @@ rem python.exe on disk but cannot run. Probe by executing; a broken venv
 rem is deleted and rebuilt through setup.bat (this used to hard-fail here
 rem with "dependency update failed").
 set "VENV_OK="
+rem "&& set", not "if not errorlevel 1": a venv whose base Python was removed
+rem dies with a NEGATIVE exit code, which "not errorlevel 1" reads as success.
 if exist ".\venv\Scripts\python.exe" (
-  ".\venv\Scripts\python.exe" -c "import sys" >nul 2>&1
-  if not errorlevel 1 set "VENV_OK=1"
+  ".\venv\Scripts\python.exe" -c "import sys" >nul 2>&1 && set "VENV_OK=1"
 )
 if defined VENV_OK goto deps_pip
 
@@ -119,26 +120,48 @@ if exist ".\venv" (
 )
 echo [update] Running setup.bat ...
 set "SETUP_RAN=1"
-if exist ".direct-mode" ( call setup.bat --direct ) else ( call setup.bat )
-if errorlevel 1 ( exit /b 1 )
+rem Flat flow, NOT a parenthesized block: setup.bat cd's around, and the
+rem "cd /d" that restores our directory must not expand a project path
+rem inside a block (a folder named "fast-syncs-main (1)" closes it on its ")").
+if exist ".direct-mode" goto setup_direct
+call setup.bat
+goto setup_done
+
+:setup_direct
+call setup.bat --direct
+
+:setup_done
+if errorlevel 1 exit /b 1
+rem cd (below) resets errorlevel, so it goes AFTER the check.
+cd /d "%~2"
 goto dubbing
 
 :deps_pip
 rem Migrate installs made before the .direct-mode marker existed: if the
 rem direct-mode libs are importable, this venv was set up with --direct.
 if not exist ".direct-mode" (
-  ".\venv\Scripts\python.exe" -c "import google.genai" >nul 2>&1
-  if not errorlevel 1 ( type nul > ".direct-mode" )
+  ".\venv\Scripts\python.exe" -c "import google.genai" >nul 2>&1 && type nul > ".direct-mode"
 )
+rem "|| goto", not "if errorlevel 1" (which only catches >= 1): a python.exe that
+rem cannot start exits with a NEGATIVE code, and this update would then print
+rem "Update complete" over a failed dependency install.
 echo [update] Updating Python dependencies...
-".\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r requirements.txt
-if errorlevel 1 ( echo ERROR: dependency update failed. & pause & exit /b 1 )
+".\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r requirements.txt || goto deps_failed
 if exist ".direct-mode" (
   echo [update] Updating direct-mode dependencies...
-  ".\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r requirements-direct.txt
-  if errorlevel 1 ( echo ERROR: direct-mode dependency update failed. & pause & exit /b 1 )
+  ".\venv\Scripts\python.exe" -m pip install --quiet --upgrade -r requirements-direct.txt || goto direct_failed
 )
 goto dubbing
+
+:deps_failed
+echo ERROR: dependency update failed.
+pause
+exit /b 1
+
+:direct_failed
+echo ERROR: direct-mode dependency update failed.
+pause
+exit /b 1
 
 rem ── bundled dubbing app (dubbing\) ─────────────────────────────
 rem Run its setup in automatic mode on EVERY update - the first update
@@ -148,11 +171,13 @@ rem updates just refresh deps (fast). Never fails the whole update.
 rem Skipped when setup.bat just ran - it already did this itself.
 :dubbing
 if defined SETUP_RAN goto finish
-if exist ".\dubbing\setup_windows.bat" (
-  echo [update] Setting up / refreshing the dubbing app ^(first time can take a few minutes^)...
-  call ".\dubbing\setup_windows.bat" --auto
-  if errorlevel 1 ( echo WARNING: dubbing setup reported a problem - run dubbing\setup_windows.bat manually. )
-)
+if not exist ".\dubbing\setup_windows.bat" goto finish
+echo [update] Setting up / refreshing the dubbing app ^(first time can take a few minutes^)...
+call ".\dubbing\setup_windows.bat" --auto
+if errorlevel 1 echo WARNING: dubbing setup reported a problem - run dubbing\setup_windows.bat manually.
+rem Restore the project dir the sub-script cd'd out of: every relative path
+rem below resolves against it, and this updater itself runs from %TEMP%.
+cd /d "%~2"
 
 :finish
 echo.

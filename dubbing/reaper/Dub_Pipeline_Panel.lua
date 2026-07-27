@@ -4065,11 +4065,56 @@ local function main()
 
   local function close_window() _ui_window_open = false end
 
+  -- ReaImGui saves this window's position in its own .ini (ViewportPos in
+  -- REAPER/ReaImGui/<hash>.ini). A position saved on a monitor that is no
+  -- longer attached — or a negative cache like ViewportPos=-740,-660 — puts
+  -- the panel completely off-screen: the action ticks, the script runs, and
+  -- NOTHING appears, with no way back except editing that .ini by hand.
+  -- Check the real position once per session and pull it back on screen only
+  -- when it is unreachable, so anyone who moved the window keeps their spot.
+  local _pos_checked = false
+  local _pos_fix     = nil   -- {x, y} to apply before the NEXT Begin()
+
+  local function check_offscreen(ctx)
+    if _pos_checked then return end
+    _pos_checked = true
+    if not (reaper.ImGui_GetWindowPos and reaper.ImGui_SetNextWindowPos
+            and reaper.my_getViewport) then return end
+    local ok, x, y = pcall(reaper.ImGui_GetWindowPos, ctx)
+    if not ok or type(x) ~= "number" or type(y) ~= "number" then return end
+    local w, h = 760, 680
+    if reaper.ImGui_GetWindowSize then
+      local ok2, gw, gh = pcall(reaper.ImGui_GetWindowSize, ctx)
+      if ok2 and type(gw) == "number" and gw > 0 then w, h = gw, gh end
+    end
+    -- Work area of the monitor nearest that rect — the primary monitor when
+    -- the rect sits on no monitor at all, which is exactly the broken case.
+    local okv, l, t, r, b = pcall(reaper.my_getViewport,
+                                  x, y, x + w, y + h,
+                                  x, y, x + w, y + h, true)
+    if not okv or type(l) ~= "number" then return end
+    -- Enough of the title bar has to be inside the work area to grab it.
+    if x >= l - 8 and y >= t - 8 and x <= r - 80 and y <= b - 40 then return end
+    _pos_fix = { l + 60, t + 60 }
+    log_append(string.format(
+      "[panel] Window was off-screen at %d,%d (monitor work area %d,%d..%d,%d)"
+      .. " - moved it back on screen.", x, y, l, t, r, b))
+  end
+
   local function frame()
+    -- SetNextWindowPos has to precede Begin, so the rescue queued while the
+    -- previous frame was inside Begin/End applies here.
+    if _pos_fix then
+      reaper.ImGui_SetNextWindowPos(_ui_ctx, _pos_fix[1], _pos_fix[2])
+      _pos_fix = nil
+    end
     -- Wide enough for the side-by-side review table.
     reaper.ImGui_SetNextWindowSize(_ui_ctx, 760, 680, reaper.ImGui_Cond_FirstUseEver())
     local visible, open = reaper.ImGui_Begin(_ui_ctx, 'Dub Pipeline',
       true, reaper.ImGui_WindowFlags_NoCollapse())
+    -- Outside the `visible` guard on purpose: a fully off-screen window can
+    -- report itself as not visible, which is the case we must still rescue.
+    check_offscreen(_ui_ctx)
     if visible then
       -- Follow the language combo with a matching Indic font (v0.4).
       _ensure_lang_font(_ui_ctx)

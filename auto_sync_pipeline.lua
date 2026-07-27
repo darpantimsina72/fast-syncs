@@ -2120,10 +2120,48 @@ local function main()
 
   local function close_window() _ui_window_open = false end
 
+  -- ReaImGui restores this window's last position from its own .ini. A stale
+  -- position (monitor unplugged, or a corrupted negative cache) leaves the
+  -- window fully off-screen: the action runs, nothing appears. Same rescue as
+  -- the Dub Pipeline panel: once per session, move it back only when the
+  -- title bar is unreachable on the nearest monitor's work area.
+  local _pos_checked = false
+  local _pos_fix     = nil   -- {x, y} to apply before the NEXT Begin()
+
+  local function check_offscreen(ctx)
+    if _pos_checked then return end
+    _pos_checked = true
+    if not (reaper.ImGui_GetWindowPos and reaper.ImGui_SetNextWindowPos
+            and reaper.my_getViewport) then return end
+    local ok, x, y = pcall(reaper.ImGui_GetWindowPos, ctx)
+    if not ok or type(x) ~= "number" or type(y) ~= "number" then return end
+    local w, h = 680, 720
+    if reaper.ImGui_GetWindowSize then
+      local ok2, gw, gh = pcall(reaper.ImGui_GetWindowSize, ctx)
+      if ok2 and type(gw) == "number" and gw > 0 then w, h = gw, gh end
+    end
+    local okv, l, t, r, b = pcall(reaper.my_getViewport,
+                                  x, y, x + w, y + h,
+                                  x, y, x + w, y + h, true)
+    if not okv or type(l) ~= "number" then return end
+    if x >= l - 8 and y >= t - 8 and x <= r - 80 and y <= b - 40 then return end
+    _pos_fix = { l + 60, t + 60 }
+    log_append(string.format(
+      "[ui] Window was off-screen at %d,%d (monitor work area %d,%d..%d,%d)"
+      .. " - moved it back on screen.", x, y, l, t, r, b))
+  end
+
   local function frame()
+    if _pos_fix then
+      reaper.ImGui_SetNextWindowPos(_ui_ctx, _pos_fix[1], _pos_fix[2])
+      _pos_fix = nil
+    end
     reaper.ImGui_SetNextWindowSize(_ui_ctx, 680, 720, reaper.ImGui_Cond_FirstUseEver())
     local visible, open = reaper.ImGui_Begin(_ui_ctx, 'Auto Sync Pipeline',
       true, reaper.ImGui_WindowFlags_NoCollapse())
+    -- Outside the `visible` guard: a fully off-screen window can report
+    -- itself as not visible — the exact case that needs the rescue.
+    check_offscreen(_ui_ctx)
     if visible then
       if _ui_phase == "running" then
         poll_python_step()   -- refresh log/progress before rendering

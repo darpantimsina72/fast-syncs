@@ -23,7 +23,14 @@ rem   4. Runs the engine self-check (imports the pipeline modules).
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 set "HERE=%CD%"
-set "VENV_PY=%HERE%\venv\Scripts\python.exe"
+rem Paths used in COMMANDS below are relative to this folder (we cd'd into it
+rem above); %HERE% is only ever echoed, outside parenthesized blocks. Reason:
+rem a folder name containing parentheses - "fast-syncs-main (1)", the name
+rem Windows gives a second ZIP download - expands its ")" into the middle of a
+rem parenthesized if-block, which derails cmd.exe's parser ("<rest of path>
+rem was unexpected at this time") and silently skipped the venv creation.
+rem Relative paths can never carry a parenthesis, so they are immune.
+set "VENV_PY=venv\Scripts\python.exe"
 set "AUTO="
 if /I "%~1"=="--auto" set "AUTO=1"
 
@@ -81,40 +88,33 @@ rem    delete it and rebuild (stale site-packages from another Python
 rem    version cause import errors otherwise).
 rem ---------------------------------------------------------------------------
 
-set "VENV_OK="
-if exist "%VENV_PY%" (
-  "%VENV_PY%" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=11" >nul 2>&1
-  if !errorlevel! == 0 set "VENV_OK=1"
-)
-if defined VENV_OK (
-  echo venv        : %HERE%\venv  (already exists - reusing)
-  goto venv_ready
-)
-if exist "%HERE%\venv" (
-  echo venv        : broken or outdated - rebuilding it from scratch ...
-  rmdir /s /q "%HERE%\venv" 2>nul
-)
+if not exist "%VENV_PY%" goto venv_create
+rem "|| goto", not "if errorlevel 1": when the base Python was uninstalled this
+rem python.exe dies with STATUS_DLL_NOT_FOUND, whose exit code is NEGATIVE, and
+rem "if errorlevel 1" (which means ">= 1") would call that broken venv healthy.
+"%VENV_PY%" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=11" >nul 2>&1 || goto venv_rebuild
+echo venv        : %HERE%\venv - already exists, reusing it.
+goto venv_ready
+
+:venv_rebuild
+echo venv        : broken or outdated - rebuilding it from scratch ...
+
+:venv_create
+rem Always start from an empty dir: a half-created venv, or one whose base
+rem Python was removed/upgraded, otherwise keeps stale Lib\site-packages.
+rmdir /s /q "venv" 2>nul
 echo venv        : creating %HERE%\venv ...
-%PY_CMD% -m venv "%HERE%\venv"
-if errorlevel 1 (
-  echo ERROR: could not create the venv.
-  goto end_fail
-)
+%PY_CMD% -m venv venv
+if not exist "%VENV_PY%" goto venv_failed
 
 :venv_ready
-if not exist "%HERE%\requirements.txt" (
-  echo ERROR: requirements.txt not found next to this script.
-  goto end_fail
-)
+if not exist "requirements.txt" goto no_reqs
 
 echo.
 echo Installing engine dependencies (idempotent - re-runs are fast) ...
 "%VENV_PY%" -m pip install --upgrade pip --quiet
-"%VENV_PY%" -m pip install -r "%HERE%\requirements.txt"
-if errorlevel 1 (
-  echo ERROR: pip install failed. Check your network and re-run.
-  goto end_fail
-)
+"%VENV_PY%" -m pip install -r requirements.txt
+if not !errorlevel! == 0 goto pip_failed
 
 rem ---------------------------------------------------------------------------
 rem 3. ffmpeg - REQUIRED by the engine (pydub decodes ElevenLabs MP3 with it;
@@ -126,23 +126,22 @@ rem ---------------------------------------------------------------------------
 echo.
 set "FFMPEG_FOUND="
 where ffmpeg >nul 2>&1 && set "FFMPEG_FOUND=1"
-if not defined FFMPEG_FOUND if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe" set "FFMPEG_FOUND=1"
-if not defined FFMPEG_FOUND if exist "%HERE%\ffmpeg\bin\ffmpeg.exe" set "FFMPEG_FOUND=1"
-if defined FFMPEG_FOUND (
-  echo ffmpeg      : found.
-  goto ffmpeg_done
-)
+if not defined FFMPEG_FOUND if exist "!LOCALAPPDATA!\Microsoft\WinGet\Links\ffmpeg.exe" set "FFMPEG_FOUND=1"
+if not defined FFMPEG_FOUND if exist "ffmpeg\bin\ffmpeg.exe" set "FFMPEG_FOUND=1"
+if not defined FFMPEG_FOUND goto ffmpeg_install
+echo ffmpeg      : found.
+goto ffmpeg_done
 
+:ffmpeg_install
 echo ffmpeg      : not found - installing it now ...
 where winget >nul 2>&1
 if errorlevel 1 goto ffmpeg_portable
 winget install -e --id Gyan.FFmpeg --accept-source-agreements --accept-package-agreements
 where ffmpeg >nul 2>&1 && set "FFMPEG_FOUND=1"
-if not defined FFMPEG_FOUND if exist "%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe" set "FFMPEG_FOUND=1"
-if defined FFMPEG_FOUND (
-  echo ffmpeg      : installed via winget.
-  goto ffmpeg_done
-)
+if not defined FFMPEG_FOUND if exist "!LOCALAPPDATA!\Microsoft\WinGet\Links\ffmpeg.exe" set "FFMPEG_FOUND=1"
+if not defined FFMPEG_FOUND goto ffmpeg_portable
+echo ffmpeg      : installed via winget.
+goto ffmpeg_done
 
 :ffmpeg_portable
 echo ffmpeg      : winget unavailable or failed - downloading a portable build ...
@@ -156,11 +155,11 @@ if errorlevel 1 goto ffmpeg_manual
 set "FFSRC="
 for /d %%D in ("%FFTMP%\ffmpeg-*") do set "FFSRC=%%D"
 if not defined FFSRC goto ffmpeg_manual
-if not exist "%HERE%\ffmpeg\bin" mkdir "%HERE%\ffmpeg\bin"
-copy /y "%FFSRC%\bin\ffmpeg.exe"  "%HERE%\ffmpeg\bin\" >nul
-copy /y "%FFSRC%\bin\ffprobe.exe" "%HERE%\ffmpeg\bin\" >nul
+if not exist "ffmpeg\bin" mkdir "ffmpeg\bin"
+copy /y "%FFSRC%\bin\ffmpeg.exe"  "ffmpeg\bin\" >nul
+copy /y "%FFSRC%\bin\ffprobe.exe" "ffmpeg\bin\" >nul
 rmdir /s /q "%FFTMP%" 2>nul
-if not exist "%HERE%\ffmpeg\bin\ffmpeg.exe" goto ffmpeg_manual
+if not exist "ffmpeg\bin\ffmpeg.exe" goto ffmpeg_manual
 echo ffmpeg      : portable build installed to ffmpeg\bin\.
 goto ffmpeg_done
 
@@ -179,13 +178,16 @@ rem ---------------------------------------------------------------------------
 
 echo.
 echo Running engine self-check ...
-"%VENV_PY%" "%HERE%\engine\dub_engine.py" --selfcheck
-if errorlevel 1 (
-  echo WARNING: engine self-check failed (see messages above).
-  echo Setup continues - fix the reported issue, then re-run this script.
-) else (
-  echo Self-check passed.
-)
+"%VENV_PY%" "engine\dub_engine.py" --selfcheck
+if not !errorlevel! == 0 goto selfcheck_warn
+echo Self-check passed.
+goto selfcheck_done
+
+:selfcheck_warn
+echo WARNING: engine self-check failed (see messages above).
+echo Setup continues - fix the reported issue, then re-run this script.
+
+:selfcheck_done
 
 rem ---------------------------------------------------------------------------
 rem 5. Done. (REAPER script-install steps only shown interactively - the
@@ -233,19 +235,37 @@ rem Installs that are NOT on a console's PATH that was opened before the
 rem install (PATH is read once at launch): per-user python.org / winget
 rem installs, then all-users installs (python.org "for all users", winget
 rem run elevated).
-for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
+rem !VAR! (not %VAR%) inside these blocks on purpose: delayed expansion runs
+rem AFTER cmd.exe has parsed the block, so a value containing parentheses -
+rem "C:\Program Files (x86)" when a 32-bit shell runs this - cannot close the
+rem block early.
+for /d %%D in ("!LOCALAPPDATA!\Programs\Python\Python3*") do (
   if not defined PY_CMD (
     "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=11" >nul 2>&1
     if !errorlevel! == 0 set "PY_CMD="%%D\python.exe""
   )
 )
-for /d %%D in ("%ProgramFiles%\Python3*") do (
+for /d %%D in ("!ProgramFiles!\Python3*") do (
   if not defined PY_CMD (
     "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=11" >nul 2>&1
     if !errorlevel! == 0 set "PY_CMD="%%D\python.exe""
   )
 )
 exit /b 0
+
+rem Failure exits, kept flat and out of any parenthesized block so a project
+rem path with parentheses can never break them.
+:venv_failed
+echo ERROR: could not create the venv.
+goto end_fail
+
+:no_reqs
+echo ERROR: requirements.txt not found next to this script.
+goto end_fail
+
+:pip_failed
+echo ERROR: pip install failed. Check your network and re-run.
+goto end_fail
 
 :no_python
 echo ERROR: no Python 3.11+ interpreter found.

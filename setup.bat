@@ -12,7 +12,12 @@ rem  via winget (built into Windows 10/11).
 rem
 rem  Run once (double-click). To update later, run update.bat.
 rem ──────────────────────────────────────────────────────────────
-setlocal
+rem Delayed expansion is on so the helpers below can expand paths as !VAR!
+rem INSIDE parenthesized blocks: %VAR% is expanded while cmd.exe parses the
+rem block, so a value containing ")" — "C:\Program Files (x86)", or a project
+rem folder named "fast-syncs-main (1)" — closes the block early and derails
+rem the whole script. No literal "!" appears in this file.
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 set "DIRECT=0"
@@ -47,9 +52,12 @@ rem from scratch when it is broken (stale site-packages from another
 rem Python version cause import errors otherwise).
 set "VPY=.\venv\Scripts\python.exe"
 set "VENV_OK="
-if exist "%VPY%" (
-  "%VPY%" -c "import sys" >nul 2>&1
-  if not errorlevel 1 set "VENV_OK=1"
+rem "&& set", not "if not errorlevel 1": after the base Python is uninstalled
+rem this python.exe dies with STATUS_DLL_NOT_FOUND, whose exit code is NEGATIVE,
+rem and "not errorlevel 1" (which means "< 1") would call it healthy. "&&" runs
+rem only on exit code 0, whatever the sign of a failure.
+if exist "!VPY!" (
+  "!VPY!" -c "import sys" >nul 2>&1 && set "VENV_OK=1"
 )
 if defined VENV_OK (
   echo [setup] Reusing the existing virtualenv in .\venv
@@ -62,11 +70,11 @@ if exist ".\venv" (
 )
 echo [setup] Creating virtualenv in .\venv ...
 %PYEXE% -m venv venv
-if errorlevel 1 ( echo ERROR: could not create virtualenv. & pause & exit /b 1 )
+if not !errorlevel! == 0 ( echo ERROR: could not create virtualenv. & pause & exit /b 1 )
 
 :have_venv
-if not exist "%VPY%" (
-  echo ERROR: virtualenv python not found at %VPY%
+if not exist "!VPY!" (
+  echo ERROR: virtualenv python not found at !VPY!
   echo The Python install may be incomplete. Reinstall Python 3.11+ from
   echo https://www.python.org/downloads/ ^(tick "Add python.exe to PATH"^).
   pause
@@ -74,8 +82,8 @@ if not exist "%VPY%" (
 )
 
 rem Confirm the venv's pip actually works before relying on it.
-"%VPY%" -m pip --version >nul 2>&1
-if errorlevel 1 (
+"!VPY!" -m pip --version >nul 2>&1
+if not !errorlevel! == 0 (
   echo ERROR: pip is not working in the new virtualenv.
   echo Reinstall Python 3.11+ from https://www.python.org/downloads/ and re-run.
   pause
@@ -83,24 +91,24 @@ if errorlevel 1 (
 )
 
 echo [setup] Installing thin-client dependencies ...
-"%VPY%" -m pip install --quiet --upgrade pip
-"%VPY%" -m pip install --quiet -r requirements.txt
-if errorlevel 1 ( echo ERROR: dependency install failed. & pause & exit /b 1 )
+"!VPY!" -m pip install --quiet --upgrade pip
+"!VPY!" -m pip install --quiet -r requirements.txt
+if not !errorlevel! == 0 ( echo ERROR: dependency install failed. & pause & exit /b 1 )
 
 if "%DIRECT%"=="1" (
   echo [setup] Installing direct-mode dependencies ...
-  "%VPY%" -m pip install --quiet -r requirements-direct.txt
-  if errorlevel 1 ( echo ERROR: direct-mode dependency install failed. & pause & exit /b 1 )
+  "!VPY!" -m pip install --quiet -r requirements-direct.txt
+  if not !errorlevel! == 0 ( echo ERROR: direct-mode dependency install failed. & pause & exit /b 1 )
 )
 
 echo.
 echo [setup] Verifying ...
 if "%DIRECT%"=="1" (
-  "%VPY%" -c "from google import genai; import soundfile; print('OK (direct mode)')"
+  "!VPY!" -c "from google import genai; import soundfile; print('OK (direct mode)')"
 ) else (
-  "%VPY%" -c "import ssl, wave, urllib.request; print('OK (thin client)')"
+  "!VPY!" -c "import ssl, wave, urllib.request; print('OK (thin client)')"
 )
-if errorlevel 1 ( echo ERROR: verification failed - dependencies did not import. & pause & exit /b 1 )
+if not !errorlevel! == 0 ( echo ERROR: verification failed - dependencies did not import. & pause & exit /b 1 )
 
 rem Remember the install mode, so update.bat (and the Lua bootstrapper) keep
 rem direct-mode installs direct across updates and venv rebuilds.
@@ -108,12 +116,20 @@ if "%DIRECT%"=="1" ( type nul > ".direct-mode" ) else ( del ".direct-mode" 2>nul
 
 rem ── bundled dubbing app: set it up too, so the one-window app works
 rem    end-to-end right after install (venv + deps + ffmpeg, no prompts).
-if exist ".\dubbing\setup_windows.bat" (
-  echo.
-  echo [setup] Setting up the bundled dubbing app ^(can take a few minutes^)...
-  call ".\dubbing\setup_windows.bat" --auto
-  if errorlevel 1 ( echo WARNING: dubbing setup reported a problem - run dubbing\setup_windows.bat manually. )
-)
+rem    Flat flow, NOT a parenthesized block: the sub-script cd's into
+rem    dubbing\, and the "cd /d" that restores our directory below must not
+rem    expand a project path inside a block — a folder named
+rem    "fast-syncs-main (1)" would close the block on its ")".
+if not exist ".\dubbing\setup_windows.bat" goto no_dubbing
+echo.
+echo [setup] Setting up the bundled dubbing app ^(can take a few minutes^)...
+call ".\dubbing\setup_windows.bat" --auto
+if errorlevel 1 echo WARNING: dubbing setup reported a problem - run dubbing\setup_windows.bat manually.
+rem cmd.exe re-reads THIS file from disk as it runs: returning from a sub-script
+rem in a different working directory corrupts everything after this line.
+cd /d "%~dp0"
+
+:no_dubbing
 
 echo.
 echo Setup complete. You can now run auto_sync_pipeline.lua in Reaper.
@@ -128,17 +144,15 @@ rem Probe a command (all args, e.g. "py -3") as a working Python 3.9+.
 rem The assert is written WITHOUT parentheses on purpose: a ")" inside a
 rem parenthesized for-block (see :try_userdir) can prematurely close it on
 rem some cmd.exe versions, so we keep the same paren-free form everywhere.
-%* -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=9" >nul 2>&1
-if not errorlevel 1 set "PYEXE=%*"
+%* -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=9" >nul 2>&1 && set "PYEXE=%*"
 exit /b 0
 
 :try_userdir
 rem Per-user python.org installs live here and are NOT on a console's PATH
 rem that was opened before the install (PATH is read once at launch).
-for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
+for /d %%D in ("!LOCALAPPDATA!\Programs\Python\Python3*") do (
   if not defined PYEXE (
-    "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=9" >nul 2>&1
-    if not errorlevel 1 set "PYEXE="%%D\python.exe""
+    "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=9" >nul 2>&1 && set "PYEXE="%%D\python.exe""
   )
 )
 exit /b 0
@@ -146,10 +160,11 @@ exit /b 0
 :try_progfiles
 rem All-users installs (python.org "for all users", winget run elevated)
 rem live under Program Files — also invisible to an already-open console.
-for /d %%D in ("%ProgramFiles%\Python3*") do (
+rem !ProgramFiles! (delayed), not %ProgramFiles%: a 32-bit shell expands it to
+rem "C:\Program Files (x86)", whose ")" would close this block early.
+for /d %%D in ("!ProgramFiles!\Python3*") do (
   if not defined PYEXE (
-    "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=9" >nul 2>&1
-    if not errorlevel 1 set "PYEXE="%%D\python.exe""
+    "%%D\python.exe" -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=9" >nul 2>&1 && set "PYEXE="%%D\python.exe""
   )
 )
 exit /b 0
