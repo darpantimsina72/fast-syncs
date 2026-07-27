@@ -464,6 +464,59 @@ def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
         raise ValueError(f"Network error during ElevenLabs TTS: {e.reason}") from None
 
 
+def _output_locked(path: str) -> bool:
+    """True when *path* cannot be (over)written.
+
+    On Windows a wav that is loaded in an open REAPER project (or playing
+    in a media player) holds a share lock; overwriting it fails with
+    PermissionError even though the folder is writable — CPython maps
+    ERROR_SHARING_VIOLATION to the same "[Errno 13] Permission denied" a
+    real ACL denial gives. A read-only file or a directory squatting on
+    the name fails the same way, so all three count as locked here."""
+    if os.path.isdir(path):
+        return True
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path, "r+b"):
+            return False
+    except OSError:
+        return True
+
+
+def ensure_writable_output(output_path: str, status_cb=None) -> str:
+    """Return *output_path*, or a numbered sibling when it is locked.
+
+    Re-dubbing a file whose previous output is still open in REAPER must
+    not crash (and must never crash AFTER the TTS credits are spent), so
+    a locked target is diverted to "<name>-2", "<name>-3", … The "_tts" /
+    "_synced" suffix is kept in place ("Nepali_(x)-2_tts.wav") because
+    the REAPER importer's fallback scan matches on that suffix. Callers
+    must use the returned path."""
+    if not _output_locked(output_path):
+        return output_path
+    root, ext = os.path.splitext(output_path)
+    stem, suffix = root, ""
+    for s in ("_tts", "_synced"):
+        if root.endswith(s):
+            stem, suffix = root[:-len(s)], s
+            break
+    for n in range(2, 21):
+        candidate = f"{stem}-{n}{suffix}{ext}"
+        if not _output_locked(candidate):
+            if status_cb:
+                status_cb(
+                    f"WARNING: {os.path.basename(output_path)} is locked by "
+                    "another program (usually still loaded in an open REAPER "
+                    "project or a media player) — saving as "
+                    f"{os.path.basename(candidate)} instead.")
+            return candidate
+    raise RuntimeError(
+        f"Cannot write {output_path} — the file is locked by another "
+        "program (usually the wav is still loaded in an open REAPER "
+        "project or a media player). Close it and run again.")
+
+
 def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
                                voice_id: str = ELEVENLABS_TTS_VOICE_ID,
                                model_id: str = ELEVENLABS_TTS_MODEL,
@@ -509,6 +562,12 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
         stripped = _strip_emotion_tags(text)
         if stripped.strip():
             text = stripped
+
+    # Probe the output BEFORE the first ElevenLabs call: a locked previous
+    # wav (open REAPER project / media player) must divert to a "-2" name
+    # here, not crash with Errno 13 after the TTS credits are already spent.
+    # The chunk mp3s / chunk log below derive from the resolved name too.
+    output_path = ensure_writable_output(output_path, status_cb=status_cb)
 
     if status_cb:
         status_cb("TTS: Connecting to ElevenLabs…")
@@ -581,7 +640,15 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
         for raw in chunk_bytes_list:
             seg = AudioSegment.from_file(io.BytesIO(raw), format="mp3")
             combined += seg
-        combined.export(output_path, format="wav")
+        try:
+            combined.export(output_path, format="wav")
+        except PermissionError:
+            # Lock acquired while the chunks were synthesizing (e.g. the
+            # user opened the previous wav mid-run). Divert instead of
+            # losing the audio the credits already paid for.
+            output_path = ensure_writable_output(output_path,
+                                                 status_cb=status_cb)
+            combined.export(output_path, format="wav")
     except FileNotFoundError:
         # pydub shells out to ffmpeg/ffprobe; a bare WinError 2 here means
         # they are not installed. Fail with the fix instead of a traceback.

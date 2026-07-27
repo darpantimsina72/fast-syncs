@@ -118,6 +118,7 @@ REQUIRED_FUNCTIONS = [
     "_sanitize_voice_id",            # strict ElevenLabs voice_id validation
     "_fetch_voices_for_language",    # account voice catalogue, matches first
     "synthesize_tts_elevenlabs",     # single-voice TTS -> WAV
+    "ensure_writable_output",        # locked-output divert (open REAPER project)
     "voice_change_elevenlabs",       # speech-to-speech re-voice (--voice-change)
     "_build_english_subtitle_srt",   # sync-quality English SRT
     "_build_target_subtitle_srt",    # target-language SRT from TTS audio
@@ -684,7 +685,9 @@ def _stage_dub(pl, args, api_key, manifest, ctx, voice_id):
                 f"model {args.el_model})…")
     tts_path = os.path.join(
         out_dir, pl._tts_output_name(language, audio_path, "_tts"))
-    pl.synthesize_tts_elevenlabs(
+    # synthesize_tts_elevenlabs may divert to a "-2" name when the previous
+    # wav is still locked (open REAPER project) — use the returned path.
+    tts_path = pl.synthesize_tts_elevenlabs(
         tts_text, tts_path, api_key=api_key, voice_id=voice_id,
         model_id=args.el_model,
         status_cb=lambda m: _say("S2d", m))
@@ -757,6 +760,10 @@ def _stage_dub(pl, args, api_key, manifest, ctx, voice_id):
     _say("S3e", "Rendering the synced audio…")
     synced_path = os.path.join(
         out_dir, pl._tts_output_name(language, audio_path, "_synced"))
+    # Same lock hazard as the TTS wav: a previous _synced.wav imported into
+    # an open REAPER project holds a share lock — divert instead of Errno 13.
+    synced_path = pl.ensure_writable_output(
+        synced_path, status_cb=lambda m: _say("S3e", m))
     pl.sync_audio_with_timestamps(
         tts_path, ts_list, synced_path,
         status_cb=lambda m: _say("S3e", m))
@@ -991,7 +998,9 @@ def _run_regen(args, manifest):
 
     _say("S2d", f"Regenerating chunk ({len(text)} chars, voice {voice_id}, "
                 f"model {args.el_model})…")
-    pl.synthesize_tts_elevenlabs(
+    # A locked --out-wav (previous regen still loaded in REAPER) diverts to
+    # a "-2" name; the panel applies whatever path the manifest reports.
+    out_wav = pl.synthesize_tts_elevenlabs(
         text, out_wav, api_key=api_key, voice_id=voice_id,
         model_id=args.el_model,
         status_cb=lambda m: _say("S2d", m))
@@ -1019,6 +1028,10 @@ def _run_voice_change(args, manifest):
                                          args.voice_id)
     _note(f"Voice-change target voice: {voice_id} ({voice_how})")
 
+    # Same lock hazard as the dub outputs: a previous vc wav still loaded in
+    # an open REAPER project would fail the save AFTER the STS credits are
+    # spent — divert to a "-2" name up front instead.
+    out_wav = pl.ensure_writable_output(out_wav, status_cb=lambda m: _note(m))
     pl.voice_change_elevenlabs(
         in_wav, out_wav, api_key=api_key, voice_id=voice_id,
         model_id=args.sts_model,
