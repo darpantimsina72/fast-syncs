@@ -228,6 +228,26 @@ file + line ranges it was extracted from.
   (accepted for backward compat, warning logged).
 - Keys/settings resolution: `config/llm_settings.json` + `config/tts_settings.json`
   ONLY. Clear actionable error when missing ("run setup / open panel Settings").
+  `openai_base_url` is an API base (host, or host + path such as `/v1`), never
+  the chat-UI address and never with `/chat/completions` appended; the panel
+  strips those on save. Optional `http_user_agent` overrides the engine's HTTP
+  agent string for gateway calls (blank → browser default, needed because
+  Cloudflare-fronted gateways reject `Python-urllib/*` with 403 / code 1010);
+  `DUB_HTTP_USER_AGENT` in the environment does the same. The panel round-trips
+  the key so a Settings save cannot drop it.
+- Credentials are entered in ONE place: the panel's Settings tab. Every save also
+  mirrors the shared keys into `<fast-syncs>/sync_pipeline_settings.json`
+  (Auto Sync's own file, read by `run_sync.py`), touching only those keys —
+  tracks, language, match mode, script text and `python_cmd` stay as Auto Sync
+  left them. Vocabulary differs by design: `provider` here vs `conn_mode` there
+  (`gemini`→`studio`, `openai`→`gateway`), and Auto Sync keeps both the Gemini
+  key and the gateway Bearer token in one `gemini_key` field, so the mirror hands
+  over whichever matches the selected provider. `run_sync.py` back-fills any
+  credential missing from the sync file from `config/llm_settings.json`.
+- `provider` may also be `"Server proxy (Auto Sync only)"` (alias `server`) with
+  `server_url` + `server_token`: Auto Sync routes all AI calls through the user's
+  own server. The engine has no server path, so every LLM entry point raises an
+  actionable error instead of falling back to another provider's key.
 - New modes (all through run_dub.py, same status/log/pid/done plumbing):
   - `--test-llm` → manifest `{"status":"ok","provider":"…","model":"…","reply":"…"}`
     (one tiny LLM call) or status error.

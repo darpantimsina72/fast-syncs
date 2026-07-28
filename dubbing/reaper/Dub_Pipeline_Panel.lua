@@ -330,17 +330,30 @@ local LLM_GEMINI_KEY  = ""
 local LLM_OPENAI_URL  = ""
 local LLM_OPENAI_KEY  = ""
 local LLM_PROMPT_CACHING = "1"
+-- Advanced, no UI field: the engine's HTTP agent string for gateway calls.
+-- Blank means its built-in default. Round-tripped here so saving Settings
+-- cannot wipe a value someone set by hand in config/llm_settings.json.
+local LLM_USER_AGENT  = ""
+-- Server/proxy credentials. Only Auto Sync can use these (it routes every AI
+-- call through your server, which holds the real provider keys), but they are
+-- entered and stored here so there is exactly ONE place for credentials.
+local LLM_SERVER_URL   = ""
+local LLM_SERVER_TOKEN = ""
 
 -- v0.3 TTS settings — mirror of config/tts_settings.json.
 local EL_KEY              = ""
 local GOOGLE_TTS_KEY_PATH = ""
 
 -- JSON provider strings used by the bulk app (schema compatibility).
-local PROVIDER_UI     = { "vertex", "gemini", "openai" }
+local PROVIDER_UI     = { "vertex", "gemini", "openai", "server" }
 local PROVIDER_TO_JSON = {
   vertex = "Vertex AI (JSON file)",
   gemini = "Gemini API key",
   openai = "OpenAI-compatible (Base URL)",
+  -- Auto-Sync-only: the dub engine has no server path and says so when a run
+  -- starts. It lives here because this tab is the single home for every
+  -- credential, Auto Sync's included.
+  server = "Server proxy (Auto Sync only)",
 }
 local PROVIDER_FROM_JSON = {}
 for ui, js in pairs(PROVIDER_TO_JSON) do PROVIDER_FROM_JSON[js] = ui end
@@ -439,6 +452,9 @@ local function load_llm_config()
   v = jval("gemini_model")     if v and v ~= "" then LLM_MODEL = v; got_model = true end
   v = jval("openai_model")     if v and v ~= "" and not got_model then LLM_MODEL = v end
   v = jval("prompt_caching")   if v and v ~= "" then LLM_PROMPT_CACHING = v end
+  v = jval("http_user_agent")  if v then LLM_USER_AGENT = v end
+  v = jval("server_url")       if v then LLM_SERVER_URL   = v end
+  v = jval("server_token")     if v then LLM_SERVER_TOKEN = v end
 end
 
 -- Load config/tts_settings.json (if present). Its voice_id / el_model win
@@ -458,6 +474,115 @@ local function load_tts_config()
   v = jval("google_tts_key_path") if v then GOOGLE_TTS_KEY_PATH = v end
 end
 
+-- Normalise the OpenAI-compatible base URL before it reaches the engine, which
+-- appends "/v1/chat/completions" itself. Users paste the full endpoint (doubling
+-- the path) or the chat UI's address (…/ui, which serves HTML and redirects API
+-- calls to a login page) — strip both, plus any trailing slash.
+local function _clean_base_url(u)
+  u = (u or ""):gsub("^%s+", ""):gsub("%s+$", ""):gsub("/+$", "")
+  u = u:gsub("/[Cc][Hh][Aa][Tt]/[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Ii][Oo][Nn][Ss]$", "")
+  u = u:gsub("/[Uu][Ii]$", "")
+  return (u:gsub("/+$", ""))
+end
+
+-- ── Single source of truth for credentials ──────────────────────────────────
+-- Auto Sync keeps its own flat settings file in the fast-syncs root, read by
+-- run_sync.py. The keys it needs are the SAME keys typed in this tab, so rather
+-- than asking for them twice, every save pushes them over there. Only the
+-- shared keys are touched: tracks, language, match mode, script text and the
+-- python override stay exactly as Auto Sync left them.
+--
+-- BASE_DIR is <root>/dubbing (this panel lives in <root>/dubbing/reaper), so the
+-- root is one level up. Computed here, not from V5.FS_ROOT, because a migration
+-- save can run at load time before V5.FS_ROOT is assigned further down.
+local SYNC_SETTINGS_PATH = (BASE_DIR:match("^(.*)[/\\][^/\\]*$") or BASE_DIR)
+                           .. SEP .. "sync_pipeline_settings.json"
+
+-- Set one flat "key": "value" pair in raw JSON text, preserving every other
+-- key byte-for-byte (script_text is multi-line and must not be re-encoded).
+-- Replacement goes through a function so a "%" in a key or URL is never read
+-- as a gsub capture reference.
+local function _json_set_flat(content, key, value)
+  local esc = _json_escape(value)
+  local n
+  content, n = content:gsub('("' .. key .. '"%s*:%s*")[^"]*(")',
+                            function(pre, post) return pre .. esc .. post end, 1)
+  if n > 0 then return content end
+  -- Key not in the file yet: splice it in before the closing brace.
+  local i = content:find("}[^}]*$")
+  if not i then return content end
+  local head = content:sub(1, i - 1):gsub("%s+$", "")
+  local sep  = (head:sub(-1) == "{") and "\n" or ",\n"
+  return head .. sep .. '  "' .. key .. '": "' .. esc .. '"\n' .. content:sub(i)
+end
+
+-- Mirror this tab's credentials into sync_pipeline_settings.json.
+-- Returns true, or false + the path on write failure (non-fatal: the dub
+-- engine's own config files are already written by then).
+local function save_sync_credentials()
+  -- Provider vocabularies differ by design: Auto Sync says "studio" for a
+  -- Gemini API key and "gateway" for an OpenAI-compatible base URL.
+  local conn = ({ vertex = "vertex", gemini = "studio",
+                  openai = "gateway", server = "server" })[LLM_PROVIDER] or "vertex"
+  -- gemini_backend is what run_sync.py actually reads; mirror Auto Sync's own
+  -- _apply_conn_mode() mapping. In server mode the backend is irrelevant
+  -- (api_base routes everything through the proxy) — leave a sane default.
+  local backend = ({ vertex = "vertex", studio = "rest",
+                     gateway = "gateway", server = "vertex" })[conn]
+  -- Auto Sync stores BOTH the Gemini key and the gateway Bearer token in one
+  -- field, so hand over the one that matches the chosen mode. Sending the
+  -- other would look like an auth failure on the far side.
+  local shared_key = (LLM_PROVIDER == "openai") and LLM_OPENAI_KEY or LLM_GEMINI_KEY
+  local pairs_out = {
+    { "conn_mode",       conn },
+    { "gemini_backend",  backend },
+    { "gemini_model",    LLM_MODEL },
+    { "gemini_key",      shared_key },
+    { "gemini_base_url", LLM_OPENAI_URL },
+    { "vertex_key_path", LLM_VERTEX_JSON },
+    { "elevenlabs_key",  EL_KEY },
+    { "server_url",      LLM_SERVER_URL },
+    { "api_token",       LLM_SERVER_TOKEN },
+    -- api_base is the switch that turns proxy mode on for the Python worker:
+    -- the server URL in server mode, empty in every direct mode.
+    { "api_base",        (conn == "server") and LLM_SERVER_URL or "" },
+  }
+
+  local content
+  local rf = io.open(SYNC_SETTINGS_PATH, "r")
+  if rf then content = rf:read("*a"); rf:close() end
+
+  -- One-time safety net: an install that had its OWN keys in here (set up
+  -- through the Auto Sync tab before this tab owned credentials) gets a copy
+  -- kept beside the file the first time we rewrite it. Only ever written once,
+  -- so it always holds the pre-unification values. Gitignored like the original.
+  if content and content:find("{") then
+    local bak = SYNC_SETTINGS_PATH .. ".bak"
+    local probe = io.open(bak, "r")
+    if probe then
+      probe:close()
+    else
+      local bf = io.open(bak, "w")
+      if bf then bf:write(content); bf:close() end
+    end
+  end
+
+  if not content or not content:find("{") then content = "{\n}\n" end
+  for _, kv in ipairs(pairs_out) do
+    content = _json_set_flat(content, kv[1], kv[2])
+  end
+
+  local wf = io.open(SYNC_SETTINGS_PATH, "w")
+  if not wf then return false, SYNC_SETTINGS_PATH end
+  wf:write(content)
+  wf:close()
+  return true
+end
+
+-- Non-nil when the last save could not reach sync_pipeline_settings.json; the
+-- Save button surfaces it instead of claiming a clean save.
+local LAST_SYNC_CRED_ERR = nil
+
 -- Write BOTH config files. Creates config/ when missing. Returns true on
 -- success; false with an error banner path string on failure.
 local function save_config_files()
@@ -471,6 +596,7 @@ local function save_config_files()
     _json_escape(PROVIDER_TO_JSON[LLM_PROVIDER] or PROVIDER_TO_JSON.gemini)))
   f:write(string.format('  "vertex_json": "%s",\n',     _json_escape(LLM_VERTEX_JSON)))
   f:write(string.format('  "gemini_api_key": "%s",\n',  _json_escape(LLM_GEMINI_KEY)))
+  LLM_OPENAI_URL = _clean_base_url(LLM_OPENAI_URL)
   f:write(string.format('  "openai_base_url": "%s",\n', _json_escape(LLM_OPENAI_URL)))
   f:write(string.format('  "openai_api_key": "%s",\n',  _json_escape(LLM_OPENAI_KEY)))
   -- One Model field drives every provider: write it to both keys so the engine
@@ -478,6 +604,9 @@ local function save_config_files()
   -- vertex / gemini-key paths).
   f:write(string.format('  "openai_model": "%s",\n',    _json_escape(LLM_MODEL)))
   f:write(string.format('  "gemini_model": "%s",\n',    _json_escape(LLM_MODEL)))
+  f:write(string.format('  "http_user_agent": "%s",\n', _json_escape(LLM_USER_AGENT)))
+  f:write(string.format('  "server_url": "%s",\n',      _json_escape(LLM_SERVER_URL)))
+  f:write(string.format('  "server_token": "%s",\n',    _json_escape(LLM_SERVER_TOKEN)))
   f:write(string.format('  "prompt_caching": "%s"\n',   _json_escape(LLM_PROMPT_CACHING)))
   f:write('}\n')
   f:close()
@@ -492,7 +621,60 @@ local function save_config_files()
   f:write(string.format('  "google_tts_key_path": "%s"\n', _json_escape(GOOGLE_TTS_KEY_PATH)))
   f:write('}\n')
   f:close()
+
+  -- Hand the shared credentials to Auto Sync, then let its embedded module pick
+  -- them up so the tab shows the new values without a panel restart. A failure
+  -- here does not fail the save: the dub engine's own config is already on disk.
+  local synced, sync_path = save_sync_credentials()
+  LAST_SYNC_CRED_ERR = (not synced) and sync_path or nil
+  if V5 and V5.SYNC and V5.SYNC.reload_settings then
+    pcall(V5.SYNC.reload_settings)
+  end
   return true
+end
+
+-- Adopt credentials that only Auto Sync knows about. Installs that set Auto Sync
+-- up FIRST have keys — and a remembered proxy URL + token — in its settings file
+-- and nothing here; without this, the first save from this tab would overwrite
+-- them with blanks. Only fields that are still EMPTY here get filled, so a value
+-- already in config/llm_settings.json always wins and nothing typed in this tab
+-- can be undone.
+local function seed_credentials_from_sync()
+  local f = io.open(SYNC_SETTINGS_PATH, "r")
+  if not f then return end
+  local content = f:read("*a")
+  f:close()
+  local function jval(key)
+    local v = content:match('"' .. key .. '"%s*:%s*"([^"]*)"')
+    if v then v = v:gsub('\\(["\\])', '%1') end
+    return v or ""
+  end
+
+  if EL_KEY == ""           then EL_KEY = jval("elevenlabs_key") end
+  if LLM_VERTEX_JSON == ""  then LLM_VERTEX_JSON = jval("vertex_key_path") end
+  if LLM_OPENAI_URL == ""   then LLM_OPENAI_URL = jval("gemini_base_url") end
+  if LLM_SERVER_URL == ""   then LLM_SERVER_URL = jval("server_url") end
+  if LLM_SERVER_TOKEN == "" then LLM_SERVER_TOKEN = jval("api_token") end
+
+  -- Auto Sync stores one key field whose meaning depends on its mode: an
+  -- "AIza…" Google key in studio mode, a Bearer token in gateway mode.
+  local conn, shared_key = jval("conn_mode"), jval("gemini_key")
+  if conn == "gateway" and LLM_OPENAI_KEY == "" then
+    LLM_OPENAI_KEY = shared_key
+  elseif conn == "studio" and LLM_GEMINI_KEY == "" then
+    LLM_GEMINI_KEY = shared_key
+  end
+
+  -- No llm_settings.json at all: this tab has never been used, so Auto Sync's
+  -- mode is the only stated intent — adopt it instead of showing a default that
+  -- would overwrite a working setup on the first save.
+  if not file_exists(LLM_SETTINGS_PATH) then
+    local from_conn = { server = "server", studio = "gemini",
+                        vertex = "vertex", gateway = "openai" }
+    if from_conn[conn] then LLM_PROVIDER = from_conn[conn] end
+    local m = jval("gemini_model")
+    if m ~= "" then LLM_MODEL = m end
+  end
 end
 
 -- app_dir default chain: panel settings → engine/engine_settings.json →
@@ -513,6 +695,9 @@ if APP_DIR == "" then APP_DIR = resolve_default_app_dir() end
 -- written into config/ on the next save).
 load_llm_config()
 load_tts_config()
+-- Then fill any credential this tab still lacks from Auto Sync's file, so the
+-- two never disagree and nothing is lost the first time Settings is saved.
+seed_credentials_from_sync()
 -- One-time migration: voice_id / el_model used to live in
 -- dub_panel_settings.json. Persist them into config/tts_settings.json right
 -- away so they cannot be lost when the panel settings file is rewritten.
@@ -3314,10 +3499,15 @@ local function ui_settings_section(ctx, always_open)
   reaper.ImGui_Text(ctx, 'LLM — translation / review / mapping')
   reaper.ImGui_PopStyleColor(ctx)
 
+  _grey_hint(ctx, 'These keys are the only copy — the Auto Sync tab uses the ' ..
+                  'same ones and has no fields of its own.')
   _, LLM_PROVIDER = _ui_combo(ctx, 'Provider', LLM_PROVIDER, PROVIDER_UI)
   rv, LLM_MODEL = reaper.ImGui_InputText(ctx, 'Model', LLM_MODEL or '')
   if LLM_PROVIDER == 'openai' then
     _grey_hint(ctx, 'Model id your gateway serves, e.g. gemini-3-flash-preview.')
+  elseif LLM_PROVIDER == 'server' then
+    _grey_hint(ctx, 'Model Auto Sync asks your server for — the server may ' ..
+                    'override it.')
   else
     _grey_hint(ctx, 'Gemini model, e.g. gemini-2.5-pro or gemini-3.5-flash.')
   end
@@ -3338,20 +3528,35 @@ local function ui_settings_section(ctx, always_open)
     end
     _grey_hint(ctx, 'Path to a Google service-account JSON. Leave blank to ' ..
                     'use config/vertex_key.json when it exists.')
+  elseif LLM_PROVIDER == 'server' then
+    rv, LLM_SERVER_URL = reaper.ImGui_InputText(ctx, 'Server URL',
+                                                LLM_SERVER_URL or '')
+    rv, LLM_SERVER_TOKEN = reaper.ImGui_InputText(ctx, 'Access token',
+                                                  LLM_SERVER_TOKEN or '', pw_flags)
+    _grey_hint(ctx, 'Auto Sync routes every AI call through your server, which ' ..
+                    'holds the real provider keys — only this token lives on ' ..
+                    'this machine.')
+    _grey_hint(ctx, 'DUBBING CANNOT USE THIS MODE: the dub engine calls the LLM ' ..
+                    'directly, so dub runs will stop with that message. Pick ' ..
+                    'Vertex, Gemini or OpenAI-compatible above to dub.')
   else -- openai
     rv, LLM_OPENAI_URL = reaper.ImGui_InputText(ctx, 'Base URL',
                                                 LLM_OPENAI_URL or '')
     rv, LLM_OPENAI_KEY = reaper.ImGui_InputText(ctx, 'API key',
                                                 LLM_OPENAI_KEY or '', pw_flags)
-    _grey_hint(ctx, 'Any OpenAI-compatible /v1/chat/completions endpoint ' ..
-                    '(LiteLLM, OpenRouter, vLLM, ...) plus its Bearer key.')
+    _grey_hint(ctx, 'API base of an OpenAI-compatible gateway (LiteLLM, ' ..
+                    'OpenRouter, vLLM, ...) plus its Bearer key. Host or ' ..
+                    'host/v1 — e.g. https://llm.example.com/v1 — NOT the ' ..
+                    'chat UI address and without /chat/completions.')
   end
 
-  if reaper.ImGui_Button(ctx, 'Test connection', 150, 26) then
-    start_test_llm()
+  if LLM_PROVIDER ~= 'server' then
+    if reaper.ImGui_Button(ctx, 'Test connection', 150, 26) then
+      start_test_llm()
+    end
+    reaper.ImGui_SameLine(ctx)
+    _grey_hint(ctx, 'one tiny LLM call — result shows in a banner')
   end
-  reaper.ImGui_SameLine(ctx)
-  _grey_hint(ctx, 'one tiny LLM call — result shows in a banner')
 
   reaper.ImGui_Dummy(ctx, 0, 4)
   reaper.ImGui_Separator(ctx)
@@ -3416,9 +3621,14 @@ local function ui_settings_section(ctx, always_open)
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, '💾 Save settings', 150, 24) then
     local ok, path = save_config_files()
-    if ok then
+    if ok and LAST_SYNC_CRED_ERR then
+      ui_set_banner("error", "Saved for dubbing, but could not share the keys " ..
+                             "with Auto Sync:\n" .. LAST_SYNC_CRED_ERR ..
+                             "\nThe Auto Sync tab may still use older keys.")
+    elseif ok then
       ui_set_banner("info", "Settings saved to:\n" .. LLM_SETTINGS_PATH ..
-                            "\n" .. TTS_SETTINGS_PATH)
+                            "\n" .. TTS_SETTINGS_PATH ..
+                            "\n" .. SYNC_SETTINGS_PATH .. "  (Auto Sync keys)")
     else
       ui_set_banner("error", "Could not write settings file:\n" ..
                              tostring(path))
@@ -3433,6 +3643,10 @@ local function ui_settings_section(ctx, always_open)
   elseif LLM_PROVIDER == 'vertex' then
     llm_key_summary = 'vertex json ' ..
       (LLM_VERTEX_JSON ~= '' and basename(LLM_VERTEX_JSON) or '(default)')
+  elseif LLM_PROVIDER == 'server' then
+    llm_key_summary = 'server ' ..
+      (LLM_SERVER_URL ~= '' and LLM_SERVER_URL or '(not set)') .. ', token ' ..
+      (LLM_SERVER_TOKEN ~= '' and _mask_key(LLM_SERVER_TOKEN) or '(not set)')
   else
     llm_key_summary = 'openai key ' ..
       (LLM_OPENAI_KEY ~= '' and _mask_key(LLM_OPENAI_KEY) or '(not set)')

@@ -94,13 +94,26 @@ double-click on `setup_mac.command`. Any one of these fixes it:
 
 Open the panel and expand **⚙ Settings**:
 
-- **LLM** — pick a provider (`vertex` / `gemini` / `openai`), set the model
-  (default `gemini-2.5-pro`) and the provider's credentials. Key fields are
+- **LLM** — pick a provider (`vertex` / `gemini` / `openai` / `server`), set the
+  model (default `gemini-2.5-pro`) and the provider's credentials. Key fields are
   masked (a "Show keys" checkbox reveals them). **Test connection** makes
   one tiny LLM call and shows the reply.
 - **TTS** — your ElevenLabs key, the ElevenLabs model, and the voice.
   **Fetch voices** pulls the voice catalogue for the selected language into
   a combo; a manual voice-id field is always available as a fallback.
+
+**This tab is the only place credentials are entered.** The **Auto Sync** tab
+uses the same keys and has no fields of its own — every save mirrors the shared
+ones (provider, model, keys, gateway URL, ElevenLabs key, server URL + token)
+into `sync_pipeline_settings.json` next to `run_sync.py`, leaving Auto Sync's own
+settings — track names, language, match mode, script text — untouched. Launching
+Auto Sync as its own REAPER action still shows the full fields, since the
+Settings tab isn't there to read from.
+
+`server` is the exception to "one provider for everything": it means *Auto Sync
+routes AI calls through your own server*, which the dubbing engine cannot do.
+Pick it and dub runs stop with a message saying exactly that; Auto Sync keeps
+working. For dubbing, choose `vertex`, `gemini` or `openai`.
 
 Settings are written to `config/llm_settings.json` and
 `config/tts_settings.json`, and re-written automatically before every run.

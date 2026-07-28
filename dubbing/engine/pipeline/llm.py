@@ -33,7 +33,8 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from .config import (CONFIG_DIR, GEMINI_DEFAULT_MODEL, LLM_DEFAULT_BASE_URL,
                      LLM_PROVIDER_GEMINI, LLM_PROVIDER_OPENAI,
-                     LLM_PROVIDER_VERTEX, LLM_PROVIDERS, LLM_SETTINGS_FILE,
+                     LLM_PROVIDER_SERVER, LLM_PROVIDER_VERTEX,
+                     LLM_PROVIDERS, LLM_SETTINGS_FILE,
                      PROMPTS_DIR, STEP4_EMOTION_ENABLED, TTS_DEFAULT_LANGUAGE,
                      TTS_LANGUAGES)
 
@@ -62,8 +63,11 @@ _LLM_SETTINGS_DEFAULTS: Dict[str, str] = {
     "gemini_model":    GEMINI_DEFAULT_MODEL,     # model for vertex + gemini-key providers
     "prompt_caching":  "1",
     "http_user_agent": "",                    # blank → _DEFAULT_HTTP_USER_AGENT
+    # Auto-Sync-only server/proxy credentials. The engine never calls them; they
     # live in this file because the panel's Settings tab is the single place any
     # credential is entered, and listing them here keeps them round-tripping.
+    "server_url":      "",
+    "server_token":    "",
 }
 _LLM_SETTINGS: Dict[str, str] = dict(_LLM_SETTINGS_DEFAULTS)
 
@@ -73,7 +77,20 @@ _PROVIDER_ALIASES: Dict[str, str] = {
     "vertex": LLM_PROVIDER_VERTEX,
     "gemini": LLM_PROVIDER_GEMINI,
     "openai": LLM_PROVIDER_OPENAI,
+    "server": LLM_PROVIDER_SERVER,
+    # The Auto Sync tab's own vocabulary for the same two modes.
+    "studio":  LLM_PROVIDER_GEMINI,
+    "gateway": LLM_PROVIDER_OPENAI,
 }
+
+# Raised (as ValueError) for the Auto-Sync-only server mode: dubbing has no
+# server path, and silently using whichever direct key happens to be filled in
+# would be worse than saying so.
+_SERVER_MODE_ERROR = (
+    "Server proxy mode is Auto-Sync-only — the dubbing engine calls the LLM "
+    "directly and has no server path. In the panel's Settings tab pick Vertex, "
+    "a Gemini API key, or an OpenAI-compatible gateway for dubbing; Auto Sync "
+    "keeps using the server.")
 
 
 def _load_llm_settings() -> None:
@@ -90,7 +107,10 @@ def _load_llm_settings() -> None:
         alias = _LLM_SETTINGS["provider"].strip().lower()
         if alias in _PROVIDER_ALIASES:
             _LLM_SETTINGS["provider"] = _PROVIDER_ALIASES[alias]
-        if _LLM_SETTINGS["provider"] not in LLM_PROVIDERS:
+        # Keep LLM_PROVIDER_SERVER as-is even though it is not a dub-capable
+        # provider: _validate_llm_config() turns it into an actionable error.
+        if _LLM_SETTINGS["provider"] not in LLM_PROVIDERS \
+           and _LLM_SETTINGS["provider"] != LLM_PROVIDER_SERVER:
             _LLM_SETTINGS["provider"] = LLM_PROVIDER_VERTEX
     except FileNotFoundError:
         pass
@@ -125,7 +145,8 @@ def _active_provider_and_model() -> Tuple[str, str]:
     p = s.get("provider", LLM_PROVIDER_VERTEX)
     short = {LLM_PROVIDER_VERTEX: "vertex",
              LLM_PROVIDER_GEMINI: "gemini",
-             LLM_PROVIDER_OPENAI: "openai"}.get(p, p)
+             LLM_PROVIDER_OPENAI: "openai",
+             LLM_PROVIDER_SERVER: "server"}.get(p, p)
     if p == LLM_PROVIDER_OPENAI:
         return short, (s.get("openai_model") or "").strip() or "(model not set)"
     return short, (s.get("gemini_model") or "").strip() or GEMINI_DEFAULT_MODEL
@@ -336,6 +357,8 @@ def _llm_generate(prompt: str, model: str = GEMINI_DEFAULT_MODEL,
     (automatic server-side) prefix caching on OpenAI-compatible endpoints —
     which also relies on the static prefix coming first in the request."""
     s = _get_llm_settings()
+    if s.get("provider") == LLM_PROVIDER_SERVER:
+        raise ValueError(_SERVER_MODE_ERROR)
     if s.get("provider") == LLM_PROVIDER_OPENAI:
         return _openai_chat((static_prefix or "") + prompt,
                             (s.get("openai_model") or "").strip() or model)
@@ -356,6 +379,8 @@ def _validate_llm_config() -> None:
             "section to configure the LLM provider.")
     s = _get_llm_settings()
     p = s.get("provider", LLM_PROVIDER_VERTEX)
+    if p == LLM_PROVIDER_SERVER:
+        raise ValueError(_SERVER_MODE_ERROR)
     if p == LLM_PROVIDER_OPENAI:
         if not (s.get("openai_base_url") or "").strip():
             raise ValueError("OpenAI-compatible base URL is empty — configure "

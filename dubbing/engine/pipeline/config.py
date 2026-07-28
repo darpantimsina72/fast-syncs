@@ -258,6 +258,12 @@ LLM_PROVIDER_VERTEX   = "Vertex AI (JSON file)"
 LLM_PROVIDER_GEMINI   = "Gemini API key"
 LLM_PROVIDER_OPENAI   = "OpenAI-compatible (Base URL)"
 LLM_PROVIDERS         = [LLM_PROVIDER_VERTEX, LLM_PROVIDER_GEMINI, LLM_PROVIDER_OPENAI]
+# Auto-Sync-only mode: every AI call is routed through the user's own server,
+# which holds the real provider keys. The dubbing engine has no server path, so
+# this value is recognised (the panel's Settings tab is the single home for
+# every credential, sync ones included) only to fail with a clear message
+# instead of silently falling back to another provider's key.
+LLM_PROVIDER_SERVER   = "Server proxy (Auto Sync only)"
 # Blank by default — OpenAI-compatible users set their own endpoint in the
 # panel's ⚙ Settings (or config/llm_settings.json). Never ship an internal
 # host here: this file has no secrets and is committed to a public repo.

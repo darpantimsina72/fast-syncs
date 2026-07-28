@@ -156,6 +156,13 @@ stays current) through the same **Update…** button as the sync tool.
 The **Connection** section of the settings window has a single **Mode**
 dropdown. Pick one; only the fields that mode needs are shown.
 
+**Inside the one-window app, keys live in the ⚙ Settings tab only.** The
+**Auto Sync** tab reads them from there and shows a read-only summary — no second
+copy to keep in step. This section describes the standalone Auto Sync action
+(its own REAPER action, where there is no Settings tab) and the values behind
+both. Mode names map 1:1 onto Settings' provider names: *Server* ↔ `server`,
+*AI Studio* ↔ `gemini`, *Vertex* ↔ `vertex`, *LiteLLM gateway* ↔ `openai`.
+
 | Mode | What it does | You provide | Best for |
 |---|---|---|---|
 | **Server — route through my proxy** | Every AI call goes to your server, which holds the real keys. Nothing secret lives on the editor's machine; the install stays tiny (standard library only). | **Server URL** + **Access token** | People you share this with |
