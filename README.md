@@ -185,6 +185,21 @@ Plain `http://` on a local IP is fine (no TLS needed). The field is blank by
 default — a LAN address only works from inside that network, so people you
 share this with should use **Server** mode or their own key instead.
 
+**Gateway URL is an API base, not a web address you'd open in a browser.** Give
+it the host, or the host plus `/v1` — `https://llm.example.com` or
+`https://llm.example.com/v1`. Do **not** paste the chat UI's address (a path like
+`/ui` serves HTML and redirects API calls to a login page) and do not append
+`/chat/completions` — the code adds that itself. A bare host gets
+`/v1/chat/completions`; a base that already carries a path (`/v1`, `/api/v1`,
+`/v1beta/openai`) keeps it and only gets `/chat/completions`, so OpenAI,
+OpenRouter, LiteLLM, vLLM, Open WebUI and Gemini's OpenAI-compatible layer all
+work as-is. Azure OpenAI is not supported (different URL shape and auth header).
+
+Requests go out with a browser `User-Agent`, because Cloudflare-fronted gateways
+reject Python's default `Python-urllib/*` agent with a 403 (`error code: 1010`)
+before the request reaches the model. Set `SYNC_HTTP_USER_AGENT` to send a
+different agent string.
+
 ### Two things to know about matching vs. transcription
 
 The pipeline runs **two** AI steps, and only one of them uses the mode above:

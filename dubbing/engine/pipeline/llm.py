@@ -61,6 +61,9 @@ _LLM_SETTINGS_DEFAULTS: Dict[str, str] = {
     "openai_model":    "",
     "gemini_model":    GEMINI_DEFAULT_MODEL,     # model for vertex + gemini-key providers
     "prompt_caching":  "1",
+    "http_user_agent": "",                    # blank → _DEFAULT_HTTP_USER_AGENT
+    # live in this file because the panel's Settings tab is the single place any
+    # credential is entered, and listing them here keeps them round-tripping.
 }
 _LLM_SETTINGS: Dict[str, str] = dict(_LLM_SETTINGS_DEFAULTS)
 
@@ -157,20 +160,72 @@ def _make_genai_client():
     return genai.Client(vertexai=True, project=project_id, location="us-central1")
 
 
-def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
-    """Single-turn /v1/chat/completions call against the configured base URL."""
-    s = _get_llm_settings()
-    base = (s.get("openai_base_url") or "").strip().rstrip("/")
+# urllib's default agent ("Python-urllib/x.y") is on every bot blocklist, so
+# Cloudflare-fronted gateways deny it with a 403 / "error code: 1010" before the
+# request reaches the model. Override per install with "http_user_agent" in
+# config/llm_settings.json, or the DUB_HTTP_USER_AGENT environment variable.
+_DEFAULT_HTTP_USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/126.0.0.0 Safari/537.36")
+
+
+def _http_user_agent() -> str:
+    return ((_get_llm_settings().get("http_user_agent") or "").strip()
+            or os.environ.get("DUB_HTTP_USER_AGENT", "").strip()
+            or _DEFAULT_HTTP_USER_AGENT)
+
+
+_BASE_URL_HINT = ("This setting is the API base URL — <host> or <host>/v1 — not "
+                  "the browser address of the chat UI, and must not include "
+                  "/chat/completions.")
+
+
+def _openai_api_urls(base: str) -> List[str]:
+    """Chat-completions URLs to try for an OpenAI-compatible base, best first.
+
+    A base that already carries a path is treated as the API root, so only the
+    endpoint is appended: that is the shape OpenAI (…/v1), OpenRouter (…/api/v1),
+    Gemini's OpenAI-compat layer (…/v1beta/openai) and Open WebUI (…/api) all
+    use. A bare host gets the versioned path. When the path carries no version
+    segment it could also be a proxy mounted on a sub-path (…/llm serving
+    /llm/v1/chat/completions), so that shape is kept as a fallback for the
+    caller to retry on a 404.
+
+    Rejects a base that already ends in the endpoint path — the suffix is
+    appended here, so pasting the full endpoint would double it.
+    """
+    base = (base or "").strip().rstrip("/")
     if not base:
         raise ValueError("Base URL is empty — set it in config/llm_settings.json "
                          "(panel Settings).")
-    url = (base + "/chat/completions") if base.endswith("/v1") \
-          else (base + "/v1/chat/completions")
+    if base.lower().endswith("/completions"):
+        raise ValueError(f"Base URL must not include the endpoint path: {base} — "
+                         + _BASE_URL_HINT)
+    m = re.match(r"^(?:[A-Za-z][\w+.-]*://)?[^/]+(/.*)?$", base)
+    path = (m.group(1) or "") if m else ""
+    if not path:
+        return [base + "/v1/chat/completions"]
+    urls = [base + "/chat/completions"]
+    if not re.search(r"/v\d", path):
+        urls.append(base + "/v1/chat/completions")
+    return urls
+
+
+def _openai_api_url(base: str) -> str:
+    """The preferred chat-completions URL for an OpenAI-compatible base."""
+    return _openai_api_urls(base)[0]
+
+
+def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
+    """Single-turn /v1/chat/completions call against the configured base URL."""
+    s = _get_llm_settings()
+    urls = _openai_api_urls(s.get("openai_base_url") or "")
     model = (model or "").strip()
     if not model:
         raise ValueError("Model name is empty — set it in config/llm_settings.json "
                          "(panel Settings).")
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json",
+               "User-Agent": _http_user_agent()}
     api_key = (s.get("openai_api_key") or "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -178,19 +233,49 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
-    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = ""
+    raw = final_url = sent_url = None
+    for i, url in enumerate(urls):
+        req = urllib.request.Request(url, data=payload, headers=headers,
+                                     method="POST")
         try:
-            body = e.read().decode("utf-8", "replace")[:400]
-        except Exception:
-            pass
-        raise RuntimeError(f"LLM endpoint returned HTTP {e.code}: {body}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Cannot reach LLM endpoint {url}: {e.reason}") from e
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw       = resp.read().decode("utf-8", "replace")
+                final_url = resp.geturl()
+            sent_url = url
+            break
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "replace")[:400]
+            except Exception:
+                pass
+            # A base URL with a path is usually the API root, but it can also be
+            # a proxy mounted on a sub-path. Retry the versioned shape once when
+            # the endpoint simply isn't there.
+            if e.code in (404, 405) and i + 1 < len(urls):
+                continue
+            if e.code == 403 and "1010" in body:
+                raise RuntimeError(
+                    f'LLM endpoint {url} returned HTTP 403 with Cloudflare "error '
+                    'code: 1010" — the gateway is refusing this client\'s '
+                    "user-agent. The API key and model are not the problem. Set "
+                    '"http_user_agent" in config/llm_settings.json to override '
+                    "the agent string.") from e
+            raise RuntimeError(f"LLM endpoint {url} returned HTTP {e.code}: "
+                               f"{body}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Cannot reach LLM endpoint {url}: {e.reason}") from e
+    url = sent_url or urls[-1]
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        # A web-UI base URL (…/ui) redirects a POST to the login page, so the
+        # body is HTML instead of JSON. Say that, rather than a parse error.
+        if raw.lstrip()[:1] == "<":
+            raise ValueError(f"{url} returned an HTML page, not JSON (request "
+                             f"ended at {final_url}) — the base URL looks like a "
+                             f"web-UI path. {_BASE_URL_HINT}") from None
+        raise ValueError(f"Unexpected response from {url}: {raw[:400]}") from None
     try:
         return data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError):
@@ -275,6 +360,7 @@ def _validate_llm_config() -> None:
         if not (s.get("openai_base_url") or "").strip():
             raise ValueError("OpenAI-compatible base URL is empty — configure "
                              "it in config/llm_settings.json (panel Settings).")
+        _openai_api_urls(s["openai_base_url"])    # rejects a pasted endpoint path
         if not (s.get("openai_model") or "").strip():
             raise ValueError("Model name is empty — configure it in "
                              "config/llm_settings.json (panel Settings).")

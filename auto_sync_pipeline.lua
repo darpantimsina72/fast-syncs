@@ -1304,7 +1304,7 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
         rv, GEMINI_BASE_URL = reaper.ImGui_InputText(ctx, 'Gateway URL',          GEMINI_BASE_URL or '')
         rv, GEMINI_KEY      = reaper.ImGui_InputText(ctx, 'Gateway key (Bearer)', GEMINI_KEY or '', pw_flags)
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-        reaper.ImGui_TextWrapped(ctx, 'OpenAI-compatible base URL — the same value you would paste into n8n\'s OpenAI node. The client calls {URL}/v1/chat/completions with your Bearer key. Example (LiteLLM on a LAN): http://172.18.1.17:14005')
+        reaper.ImGui_TextWrapped(ctx, 'OpenAI-compatible API base — the same value you would paste into n8n\'s OpenAI node: the host, or the host plus /v1. The client appends /v1/chat/completions itself, so do not include that path, and do not paste the chat UI address. Example (LiteLLM on a LAN): http://172.18.1.17:14005')
         reaper.ImGui_PopStyleColor(ctx)
       end
 

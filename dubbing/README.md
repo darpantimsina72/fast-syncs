@@ -37,6 +37,13 @@ Telugu, Gujarati, Marathi, Assamese, Odia, Nepali.
   - an **ElevenLabs** key (speech-to-text + text-to-speech + voice changer), and
   - one **LLM provider**: a Gemini API key, a Google Vertex AI
     service-account JSON, or any OpenAI-compatible endpoint (base URL + key).
+    That base URL is an **API base** — `https://host` or `https://host/v1`, not
+    the chat UI's browser address and never with `/chat/completions` appended.
+    A bare host gets `/v1/chat/completions`; a base that already has a path
+    (`/v1`, `/api/v1`, `/v1beta/openai`) is used as-is with `/chat/completions`
+    appended, so OpenAI, OpenRouter, LiteLLM, vLLM, Open WebUI and Gemini's
+    OpenAI-compatible layer all work. Azure OpenAI is **not** supported — its
+    URL shape and auth header differ.
   - optional: a Google Cloud TTS service-account JSON.
 
 ## Installation
