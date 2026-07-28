@@ -264,7 +264,9 @@ echo ERROR: requirements.txt not found next to this script.
 goto end_fail
 
 :pip_failed
-echo ERROR: pip install failed. Check your network and re-run.
+echo ERROR: pip install failed - read pip's own error above this line; it names
+echo the package and reason. Common causes: no network / proxy blocking PyPI, or
+echo a Python version with no prebuilt wheels for the audio deps. Then re-run.
 goto end_fail
 
 :no_python
