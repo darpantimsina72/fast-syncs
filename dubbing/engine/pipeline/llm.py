@@ -102,8 +102,23 @@ def _load_llm_settings() -> None:
             data = json.load(f)
         if isinstance(data, dict):
             for k in _LLM_SETTINGS_DEFAULTS:
-                if k in data and isinstance(data[k], str):
-                    _LLM_SETTINGS[k] = data[k]
+                if k not in data:
+                    continue
+                v = data[k]
+                # A hand-edited file can carry 1 where "1" belongs. Coerce the
+                # scalars and SAY SO for anything else: silently falling back to
+                # the default here is how a configured key turns into a 401 with
+                # no explanation ("openai_api_key": null).
+                if isinstance(v, str):
+                    _LLM_SETTINGS[k] = v
+                elif isinstance(v, bool):
+                    _LLM_SETTINGS[k] = "1" if v else "0"
+                elif isinstance(v, (int, float)):
+                    _LLM_SETTINGS[k] = str(v)
+                else:
+                    print(f"[LLM] {LLM_SETTINGS_FILE}: {k!r} is "
+                          f"{'null' if v is None else type(v).__name__}, not a "
+                          "string — treating it as not set.")
         alias = _LLM_SETTINGS["provider"].strip().lower()
         if alias in _PROVIDER_ALIASES:
             _LLM_SETTINGS["provider"] = _PROVIDER_ALIASES[alias]
@@ -129,13 +144,24 @@ def _get_llm_settings() -> Dict[str, str]:
 
 
 def _llm_provider_label() -> str:
-    """Short human-readable description of the active provider."""
+    """Short human-readable description of the active provider.
+
+    The engine's startup banner prints this, so it names the provider that will
+    ACTUALLY be called and whether its credential is present. A log line that
+    said "gemini-2.5-pro" while the run was really going to a keyless gateway is
+    why this is in the banner at all.
+    """
     s = _get_llm_settings()
     p = s.get("provider", LLM_PROVIDER_VERTEX)
     if p == LLM_PROVIDER_OPENAI:
         model = s.get("openai_model") or "(model not set)"
-        return f"{model} via {s.get('openai_base_url') or '(base URL not set)'}"
+        key = "key set" if (s.get("openai_api_key") or "").strip() else "NO KEY"
+        return (f"{model} via gateway "
+                f"{s.get('openai_base_url') or '(base URL not set)'} [{key}]")
     gm = (s.get("gemini_model") or "").strip() or GEMINI_DEFAULT_MODEL
+    if p == LLM_PROVIDER_GEMINI:
+        key = "key set" if (s.get("gemini_api_key") or "").strip() else "NO KEY"
+        return f"{gm} via {p} [{key}]"
     return f"{gm} via {p}"
 
 
@@ -237,6 +263,34 @@ def _openai_api_url(base: str) -> str:
     return _openai_api_urls(base)[0]
 
 
+# A gateway on this machine or the LAN (Ollama, LM Studio, vLLM, a local
+# LiteLLM) legitimately serves with no key at all; a gateway out on the
+# internet never does. Only the local shapes may leave "openai_api_key" blank.
+_LOCAL_HOST_RE = re.compile(
+    r"(?:localhost"
+    r"|127(?:\.\d{1,3}){3}"
+    r"|0\.0\.0\.0"
+    r"|\[?::1\]?"
+    r"|10(?:\.\d{1,3}){3}"
+    r"|192\.168(?:\.\d{1,3}){2}"
+    r"|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}"
+    r"|[^.]+\.local)$", re.IGNORECASE)
+
+
+def _openai_host(base: str) -> str:
+    """Bare host of an OpenAI-compatible base URL — no scheme, port or path."""
+    h = re.sub(r"^[A-Za-z][\w+.-]*://", "", (base or "").strip())
+    h = h.split("/", 1)[0].split("@")[-1]
+    if h.startswith("["):                       # bracketed IPv6 literal
+        return h.split("]", 1)[0] + "]"
+    return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
+
+
+def _gateway_needs_key(base: str) -> bool:
+    """True when this base URL is remote, so a blank API key cannot work."""
+    return not _LOCAL_HOST_RE.match(_openai_host(base))
+
+
 def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
     """Single-turn /v1/chat/completions call against the configured base URL."""
     s = _get_llm_settings()
@@ -282,6 +336,17 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
                     "user-agent. The API key and model are not the problem. Set "
                     '"http_user_agent" in config/llm_settings.json to override '
                     "the agent string.") from e
+            # No key configured → no Authorization header was sent, so the
+            # gateway is rejecting an anonymous request. Its own wording for
+            # that ("No api key passed in.") reads like the key is wrong, which
+            # sends people re-pasting a key that was never stored.
+            if e.code in (401, 403) and not api_key:
+                raise RuntimeError(
+                    f"LLM endpoint {url} returned HTTP {e.code} and this request "
+                    "carried NO API key: \"openai_api_key\" is empty in "
+                    "config/llm_settings.json. Enter the gateway key in the "
+                    "panel's Settings tab — the base URL and model are not the "
+                    f"problem. Gateway said: {body}") from e
             raise RuntimeError(f"LLM endpoint {url} returned HTTP {e.code}: "
                                f"{body}") from e
         except urllib.error.URLError as e:
@@ -389,6 +454,17 @@ def _validate_llm_config() -> None:
         if not (s.get("openai_model") or "").strip():
             raise ValueError("Model name is empty — configure it in "
                              "config/llm_settings.json (panel Settings).")
+        # A blank key means the request goes out with no Authorization header at
+        # all and the gateway answers 401 ("No api key passed in."). Catch it
+        # HERE: the dub run's first LLM call is at S2a, after the paid Scribe
+        # transcription, so a key checked late costs money to discover.
+        if not (s.get("openai_api_key") or "").strip() \
+           and _gateway_needs_key(s["openai_base_url"]):
+            raise ValueError(
+                f"Gateway API key is empty for {_openai_host(s['openai_base_url'])} "
+                "— enter it in the panel's Settings tab (Provider: "
+                "OpenAI-compatible → API key). Only a gateway on this machine or "
+                "the LAN may be left blank.")
         return
     if not GENAI_AVAILABLE:
         raise ImportError("google-genai not installed. Run: pip install google-genai")

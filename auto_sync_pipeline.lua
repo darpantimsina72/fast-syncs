@@ -1762,7 +1762,8 @@ local function on_python_done(success)
       "Model   : %s\n"                            ..
       "Language: %s\n"                            ..
       "Backend : %s\n\n"                          ..
-      "Tip: use Sync_Item.lua to manually fix\n"  ..
+      "Tip: use scripts_optional/Sync_Item.lua\n" ..
+      "to manually fix\n"                         ..
       "any remaining unmatched items.",
       elapsed, s.total_en, s.matched, s.total_dub,
       s.unmatched, TRACK_UNSYNC,

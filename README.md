@@ -14,8 +14,8 @@ Works on **Windows** and **macOS**. The instructions below are Windows-first.
 
 | File | What it does |
 |---|---|
-| `auto_sync_pipeline.lua` | The main ReaScript you load and run in REAPER. |
-| `Sync_Item.lua` | Optional helper ReaScript: align the clip under the mouse to the selected clip. Load it in REAPER the same way if you want it. |
+| `auto_sync_pipeline.lua` | **The only ReaScript you load in REAPER.** One window: sync *and* dubbing. |
+| `scripts_optional/Sync_Item.lua` | Optional helper ReaScript: align the clip under the mouse to the selected clip. Load it the same way if you want it. |
 | `sync_matcher.py` | The Python worker (transcribe + AI match). Started for you — don't run it by hand. |
 | `run_sync.py` | Cross-platform launcher the Lua script calls. |
 | `setup.bat` / `setup.sh` | One-time installer (creates the Python virtualenv). |
@@ -58,16 +58,16 @@ Works on **Windows** and **macOS**. The instructions below are Windows-first.
        `https://github.com/ReaTeam/Extensions/raw/master/index.xml`, then
        *Browse packages* → search **ReaImGui** → right-click → *Install* →
        *Apply* → restart REAPER.
-   - **One window**: running `auto_sync_pipeline.lua` opens the **Dub
-     Pipeline** panel — the merged app. The sync tool lives in its **Auto
-     Sync** tab (collapsible sections, **Start Sync**, live progress with
-     **Progress**/**Logs**), next to the dubbing tabs. Old toolbar buttons
-     and actions that point at `auto_sync_pipeline.lua` keep working — they
-     open the same panel.
+   - **One script, one window**: `auto_sync_pipeline.lua` is the only file you
+     ever load. It opens the **Dub Pipeline** panel — the merged app — with the
+     sync tool as its **Auto Sync** tab (collapsible sections, **Start Sync**,
+     live progress with **Progress**/**Logs**) next to the dubbing tabs. Old
+     toolbar buttons and actions that point at it keep working. Everything
+     under `dubbing/reaper/` is internal: don't load it by hand.
    - If the `venv` is missing, the script offers to run `setup.bat` for you;
      the dubbing engine's own venv is created automatically on first open.
-   - Optional: load `Sync_Item.lua` the same way for the one-clip manual
-     align helper.
+   - Optional: load `scripts_optional/Sync_Item.lua` the same way for the
+     one-clip manual align helper.
 
 ## Install on macOS
 
@@ -126,10 +126,9 @@ recording and get a translated, voice-synthesized, time-synced dub in one of
 11 Indian languages, imported straight onto the timeline. It arrives (and
 stays current) through the same **Update…** button as the sync tool.
 
-- **Open it**: just run `auto_sync_pipeline.lua` — it opens this panel
-  directly (the sync tool is its **Auto Sync** tab). You can also load
-  `dubbing/reaper/Dub_Pipeline_Panel.lua` manually via *Actions → Load
-  ReaScript…* — same window either way.
+- **Open it**: run `auto_sync_pipeline.lua` — the same one script as the sync
+  tool. It opens this panel directly, with the sync tool as its **Auto Sync**
+  tab. There is nothing else to load.
 - **First-time setup is automatic**: `update.bat`/`update.sh` and
   `setup.bat`/`setup.sh` create `dubbing/venv`, install the engine deps and
   install **ffmpeg** when missing — and if the panel opens before that ever

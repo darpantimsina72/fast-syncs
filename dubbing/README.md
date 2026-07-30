@@ -2,9 +2,10 @@
 
 > **Bundled with fast-syncs** (v0.6): this app lives in the `dubbing/`
 > folder of the fast-syncs repo and arrives / stays current through the
-> same **Update…** button as the sync tool. Running `auto_sync_pipeline.lua`
-> opens this panel directly (the sync tool is its **Auto Sync** tab); you
-> can also load `dubbing/reaper/Dub_Pipeline_Panel.lua` as a REAPER action.
+> same **Update…** button as the sync tool. `auto_sync_pipeline.lua` in the
+> repo root is the only script you load in REAPER — it opens this panel
+> directly, with the sync tool as its **Auto Sync** tab. The files under
+> `dubbing/reaper/` are internal and are not meant to be loaded by hand.
 
 Automatic voice dubbing for [REAPER](https://www.reaper.fm/): take an English
 voice recording, and get a translated, voice-synthesized, time-synced dub in
@@ -76,10 +77,14 @@ bash setup_mac.command
 Then, in REAPER (both platforms):
 
 1. Actions → Show action list → New action → **Load ReaScript…**
-2. Pick **both** files from the `reaper/` folder:
-   `Dub_Pipeline_Panel.lua` and `Import_Dub_Results.lua`.
-3. Load them **in place** — do not copy them into REAPER's `Scripts/`
-   folder. The panel finds the engine relative to its own location.
+2. Pick `auto_sync_pipeline.lua` from the fast-syncs root — the one entry
+   point for both tools. Nothing under `reaper/` needs loading.
+3. Load it **in place** — do not copy it into REAPER's `Scripts/` folder.
+   Each script finds the engine relative to its own location.
+
+Fallback: if ReaImGui cannot be installed on this machine, the panel will not
+open. `reaper/Import_Dub_Results.lua` still imports a finished run on its own
+(plain REAPER API, no ReaImGui) — load that one directly in that case only.
 
 ### First run on a new Mac
 
@@ -238,10 +243,12 @@ dubbing/                    (inside the fast-syncs repo)
     status/                 runtime files (gitignored)
   prompts/                  LLM prompt files per language and stage —
                             plain text, edit in any editor
-  reaper/
+  reaper/                   internal — loaded FOR you by
+                            auto_sync_pipeline.lua, not by hand
     Dub_Pipeline_Panel.lua  ReaImGui panel: settings, run, review, import,
                             chunk regeneration
-    Import_Dub_Results.lua  standalone importer (no ReaImGui needed)
+    Import_Dub_Results.lua  standalone importer (no ReaImGui needed) — the
+                            one file here you may load directly
   config/                   your keys and settings (gitignored, created on
                             first save)
   data/                     translation memory database (gitignored)

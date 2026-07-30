@@ -130,6 +130,7 @@ REQUIRED_FUNCTIONS = [
     "sync_audio_with_timestamps",    # cut/overlay TTS audio -> synced WAV
     "_llm_generate",                 # provider-agnostic generation (--test-llm)
     "_active_provider_and_model",    # provider/model names (--test-llm manifest)
+    "_llm_provider_label",           # provider + credential state (startup banner)
 ]
 REQUIRED_ATTRIBUTES = [
     "librosa",                       # used to load TTS audio like the app does
@@ -805,7 +806,10 @@ def _begin_run(args, manifest):
     if not os.path.isfile(audio_path):
         raise RuntimeError(f"Audio file not found: {audio_path}")
     pl, api_key = _load_pipeline_and_keys(args, need_llm=True)
-    _note(f"Pipeline loaded. LLM model: {pl.GEMINI_DEFAULT_MODEL}; "
+    # _llm_provider_label(), not GEMINI_DEFAULT_MODEL: the constant is the
+    # Gemini default and says nothing about the provider this install actually
+    # calls, so a gateway run used to advertise "gemini-2.5-pro" in its log.
+    _note(f"Pipeline loaded. LLM: {pl._llm_provider_label()}; "
           f"TTS model: {args.el_model}.")
     _require_ffmpeg(pl, hard=(args.steps in ("full", "dub")))
     return pl, api_key, {"audio_path": audio_path}

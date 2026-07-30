@@ -583,10 +583,108 @@ end
 -- Save button surfaces it instead of claiming a clean save.
 local LAST_SYNC_CRED_ERR = nil
 
+-- Credential fields cleared on purpose this session (per-field "Clear" button).
+-- New file-scope state goes on V5: the main chunk is at Lua's 200-local limit.
+V5.cred_cleared = {}
+
+-- The value a credential currently has on disk, or "" — used to refuse to
+-- overwrite a stored key with a blank box.
+function V5.stored_secret(path, key)
+  local content = read_all(path)
+  if not content then return "" end
+  local v = json_field(content, key)
+  return (type(v) == "string") and v or ""
+end
+
+-- A save rewrites EVERY field, so an empty key box would erase a key that is
+-- already on disk — and the engine would then post to the gateway with no
+-- Authorization header and read back "No api key passed in.", which looks like
+-- a wrong key rather than a missing one. So: an empty box KEEPS the stored
+-- value, and the per-field "Clear" button is the only way to remove a key.
+-- The recovered value goes back into the UI variable, so the tab shows what is
+-- really stored instead of a blank that lies.
+function V5.keep_stored_credentials()
+  local function keep(field, cur, path, key)
+    if cur ~= "" then return cur end
+    if V5.cred_cleared[field] then return "" end
+    return V5.stored_secret(path, key)
+  end
+  LLM_GEMINI_KEY   = keep("gemini", LLM_GEMINI_KEY,
+                          LLM_SETTINGS_PATH, "gemini_api_key")
+  LLM_OPENAI_KEY   = keep("openai", LLM_OPENAI_KEY,
+                          LLM_SETTINGS_PATH, "openai_api_key")
+  LLM_SERVER_TOKEN = keep("server", LLM_SERVER_TOKEN,
+                          LLM_SETTINGS_PATH, "server_token")
+  EL_KEY           = keep("el",     EL_KEY,
+                          TTS_SETTINGS_PATH, "elevenlabs_api_key")
+  V5.cred_cleared = {}
+end
+
+-- True when this gateway base URL is remote, so a blank API key cannot work.
+-- Mirrors _gateway_needs_key() in pipeline/llm.py: a gateway on this machine or
+-- the LAN (Ollama, LM Studio, vLLM, a local LiteLLM) may serve without a key.
+function V5.gateway_needs_key(url)
+  local host = (url or ""):gsub("^%a[%w+.%-]*://", "")
+  host = host:match("^([^/]*)") or ""
+  host = host:match("([^@]*)$") or host              -- drop any userinfo
+  if host:sub(1, 1) == "[" then                     -- bracketed IPv6 literal
+    host = host:match("^(%[.-%])") or host
+  else
+    host = host:gsub(":%d+$", "")
+  end
+  host = host:lower()
+  if host == "localhost" or host == "0.0.0.0"
+     or host == "::1" or host == "[::1]" then return false end
+  if host:match("^127%.%d+%.%d+%.%d+$")   then return false end
+  if host:match("^10%.%d+%.%d+%.%d+$")    then return false end
+  if host:match("^192%.168%.%d+%.%d+$")   then return false end
+  local second = tonumber(host:match("^172%.(%d+)%.%d+%.%d+$"))
+  if second and second >= 16 and second <= 31 then return false end
+  if host:match("%.local$") then return false end
+  return true
+end
+
+-- nil when the active provider's credentials are complete, else a message
+-- naming what is missing. Mirrors _validate_llm_config() in pipeline/llm.py so
+-- an LLM run is refused HERE, with the Settings tab one click away, instead of
+-- in an engine traceback.
+function V5.llm_creds_error()
+  if LLM_PROVIDER == "server" then
+    return "Provider is 'Server proxy', which dubbing cannot use — the dub " ..
+           "engine calls the LLM directly. Pick Vertex, Gemini or " ..
+           "OpenAI-compatible in Settings (Auto Sync keeps using the server)."
+  end
+  if LLM_MODEL == "" then return "Model is empty in Settings." end
+  if LLM_PROVIDER == "gemini" then
+    if LLM_GEMINI_KEY == "" then
+      return "Gemini API key is empty in Settings."
+    end
+  elseif LLM_PROVIDER == "openai" then
+    if LLM_OPENAI_URL == "" then
+      return "Gateway base URL is empty in Settings."
+    end
+    if LLM_OPENAI_KEY == "" and V5.gateway_needs_key(LLM_OPENAI_URL) then
+      return "Gateway API key is empty in Settings. Without it every request " ..
+             "goes out unauthenticated and the gateway answers 401 " ..
+             "(\"No api key passed in.\"). Only a gateway on this machine or " ..
+             "the LAN may be left blank."
+    end
+  elseif LLM_PROVIDER == "vertex" then
+    local p = (LLM_VERTEX_JSON ~= "") and LLM_VERTEX_JSON
+              or (CONFIG_DIR .. SEP .. "vertex_key.json")
+    if not file_exists(p) then
+      return "Vertex service-account JSON not found:\n" .. p ..
+             "\nSet its path in Settings."
+    end
+  end
+  return nil
+end
+
 -- Write BOTH config files. Creates config/ when missing. Returns true on
 -- success; false with an error banner path string on failure.
 local function save_config_files()
   reaper.RecursiveCreateDirectory(CONFIG_DIR, 0)
+  V5.keep_stored_credentials()
 
   -- llm_settings.json — schema identical to the bulk app's file.
   local f = io.open(LLM_SETTINGS_PATH, "w")
@@ -1961,7 +2059,11 @@ V5.load_sync()
 -- dub resume, chunk regen). Returns the interpreter path on success; nil
 -- after setting an error banner otherwise. Also removes stale status files
 -- so the poller only ever sees markers from the run about to start.
-local function preflight_engine()
+-- *need_llm*: this launch will call the translation LLM (full/translate/dub —
+-- dub still needs the mapping call). Passed only by those sites, so
+-- --test-llm keeps running with broken credentials (reporting on them is its
+-- job) and the LLM-free modes (--regen, --voice-change) are never blocked.
+local function preflight_engine(need_llm)
   -- v0.5: re-resolve the per-project status dir for the ACTIVE project when
   -- starting fresh from setup. Review-continue and other mid-run launches
   -- keep the dir their run started with, even if the user switched REAPER
@@ -1974,6 +2076,21 @@ local function preflight_engine()
   if not okc then
     ui_set_banner("error", "Could not write settings file:\n" .. tostring(cpath))
     return nil
+  end
+
+  -- Checked AFTER the save, so a key recovered from disk by
+  -- V5.keep_stored_credentials() counts. Refusing here costs nothing; the same
+  -- gap found by the engine costs the Scribe transcription first, because a
+  -- dub run's first LLM call is S2a.
+  if need_llm then
+    local why = V5.llm_creds_error()
+    if why then
+      ui_set_banner("error",
+        "This run needs the translation LLM, but its credentials are " ..
+        "incomplete:\n" .. why ..
+        "\n\nFix it in the Settings tab, then press 'Test connection'.")
+      return nil
+    end
   end
 
   if not file_exists(RUN_DUB_PY) then
@@ -2188,7 +2305,7 @@ local function start_dub_run()
     if not provided_path then return false end
   end
 
-  local py = preflight_engine()
+  local py = preflight_engine(true)
   if not py then return false end
 
   -- v0.2 default is the staged run: pause after translation for review.
@@ -2372,7 +2489,7 @@ local function launch_dub_continue(script_path)
     return false
   end
 
-  local py = preflight_engine()
+  local py = preflight_engine(true)
   if not py then return false end
 
   local lang = (m.language ~= "" and m.language) or LANGUAGE
@@ -3515,6 +3632,10 @@ local function ui_settings_section(ctx, always_open)
   if LLM_PROVIDER == 'gemini' then
     rv, LLM_GEMINI_KEY = reaper.ImGui_InputText(ctx, 'Gemini API key',
                                                 LLM_GEMINI_KEY or '', pw_flags)
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Clear##gemk') then
+      LLM_GEMINI_KEY, V5.cred_cleared.gemini = '', true
+    end
     _grey_hint(ctx, 'Google AI Studio key (starts with "AIza") — ' ..
                     'aistudio.google.com/apikey.')
   elseif LLM_PROVIDER == 'vertex' then
@@ -3533,6 +3654,10 @@ local function ui_settings_section(ctx, always_open)
                                                 LLM_SERVER_URL or '')
     rv, LLM_SERVER_TOKEN = reaper.ImGui_InputText(ctx, 'Access token',
                                                   LLM_SERVER_TOKEN or '', pw_flags)
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Clear##srvt') then
+      LLM_SERVER_TOKEN, V5.cred_cleared.server = '', true
+    end
     _grey_hint(ctx, 'Auto Sync routes every AI call through your server, which ' ..
                     'holds the real provider keys — only this token lives on ' ..
                     'this machine.')
@@ -3544,6 +3669,14 @@ local function ui_settings_section(ctx, always_open)
                                                 LLM_OPENAI_URL or '')
     rv, LLM_OPENAI_KEY = reaper.ImGui_InputText(ctx, 'API key',
                                                 LLM_OPENAI_KEY or '', pw_flags)
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Clear##oaik') then
+      LLM_OPENAI_KEY, V5.cred_cleared.openai = '', true
+    end
+    if LLM_OPENAI_KEY == '' and V5.gateway_needs_key(LLM_OPENAI_URL) then
+      _grey_hint(ctx, 'API key is empty — this gateway is remote, so every ' ..
+                      'request would go out unauthenticated and come back 401.')
+    end
     _grey_hint(ctx, 'API base of an OpenAI-compatible gateway (LiteLLM, ' ..
                     'OpenRouter, vLLM, ...) plus its Bearer key. Host or ' ..
                     'host/v1 — e.g. https://llm.example.com/v1 — NOT the ' ..
@@ -3568,6 +3701,10 @@ local function ui_settings_section(ctx, always_open)
 
   rv, EL_KEY = reaper.ImGui_InputText(ctx, 'ElevenLabs key',
                                       EL_KEY or '', pw_flags)
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, 'Clear##elk') then
+    EL_KEY, V5.cred_cleared.el = '', true
+  end
 
   -- Model combo: keep an unknown persisted model visible by prepending it.
   local model_items = {}
@@ -3626,9 +3763,21 @@ local function ui_settings_section(ctx, always_open)
                              "with Auto Sync:\n" .. LAST_SYNC_CRED_ERR ..
                              "\nThe Auto Sync tab may still use older keys.")
     elseif ok then
-      ui_set_banner("info", "Settings saved to:\n" .. LLM_SETTINGS_PATH ..
-                            "\n" .. TTS_SETTINGS_PATH ..
-                            "\n" .. SYNC_SETTINGS_PATH .. "  (Auto Sync keys)")
+      -- Don't let "Settings saved" be the last word when the LLM still can't
+      -- run: say what is missing now, or spend one tiny --test-llm call to
+      -- prove the credentials actually work. A paid dub run should never be
+      -- the first thing that discovers a blank key.
+      local why = V5.llm_creds_error()
+      if why then
+        ui_set_banner("warn", "Settings saved, but the LLM is not usable yet:\n"
+                              .. why)
+      elseif LLM_PROVIDER ~= 'server' then
+        start_test_llm()
+      else
+        ui_set_banner("info", "Settings saved to:\n" .. LLM_SETTINGS_PATH ..
+                              "\n" .. TTS_SETTINGS_PATH ..
+                              "\n" .. SYNC_SETTINGS_PATH .. "  (Auto Sync keys)")
+      end
     else
       ui_set_banner("error", "Could not write settings file:\n" ..
                              tostring(path))
