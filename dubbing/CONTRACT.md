@@ -405,6 +405,11 @@ used by `setup_mac.command`; all real runs go through `run_dub.py`):
   S2a translate, S2b review, S2c punctuation, S2d TTS, S3a EN sync SRT,
   S3b TTS regions/SRT, S3c mapping, S3d sync, S3e render. Panel shows the
   last tag as current stage.
+- Diagnostic lines from the pipeline modules carry a module tag instead of a
+  stage tag — `[stt]`, `[LLM]`, `[config]`, `[engine]`. They are log-only and
+  MUST NOT move the panel's stage: `stt.py` prints `[stt]` progress during
+  both S1a and S3b, so a `[S1a]` tag there would drag the checklist backwards
+  mid-dub.
 
 ## Result manifest — `engine_done.json`
 
