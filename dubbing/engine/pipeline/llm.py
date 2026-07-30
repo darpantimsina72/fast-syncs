@@ -33,7 +33,8 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from .config import (CONFIG_DIR, GEMINI_DEFAULT_MODEL, LLM_DEFAULT_BASE_URL,
                      LLM_PROVIDER_GEMINI, LLM_PROVIDER_OPENAI,
-                     LLM_PROVIDER_VERTEX, LLM_PROVIDERS, LLM_SETTINGS_FILE,
+                     LLM_PROVIDER_SERVER, LLM_PROVIDER_VERTEX,
+                     LLM_PROVIDERS, LLM_SETTINGS_FILE,
                      PROMPTS_DIR, STEP4_EMOTION_ENABLED, TTS_DEFAULT_LANGUAGE,
                      TTS_LANGUAGES)
 
@@ -61,6 +62,12 @@ _LLM_SETTINGS_DEFAULTS: Dict[str, str] = {
     "openai_model":    "",
     "gemini_model":    GEMINI_DEFAULT_MODEL,     # model for vertex + gemini-key providers
     "prompt_caching":  "1",
+    "http_user_agent": "",                    # blank → _DEFAULT_HTTP_USER_AGENT
+    # Auto-Sync-only server/proxy credentials. The engine never calls them; they
+    # live in this file because the panel's Settings tab is the single place any
+    # credential is entered, and listing them here keeps them round-tripping.
+    "server_url":      "",
+    "server_token":    "",
 }
 _LLM_SETTINGS: Dict[str, str] = dict(_LLM_SETTINGS_DEFAULTS)
 
@@ -70,7 +77,20 @@ _PROVIDER_ALIASES: Dict[str, str] = {
     "vertex": LLM_PROVIDER_VERTEX,
     "gemini": LLM_PROVIDER_GEMINI,
     "openai": LLM_PROVIDER_OPENAI,
+    "server": LLM_PROVIDER_SERVER,
+    # The Auto Sync tab's own vocabulary for the same two modes.
+    "studio":  LLM_PROVIDER_GEMINI,
+    "gateway": LLM_PROVIDER_OPENAI,
 }
+
+# Raised (as ValueError) for the Auto-Sync-only server mode: dubbing has no
+# server path, and silently using whichever direct key happens to be filled in
+# would be worse than saying so.
+_SERVER_MODE_ERROR = (
+    "Server proxy mode is Auto-Sync-only — the dubbing engine calls the LLM "
+    "directly and has no server path. In the panel's Settings tab pick Vertex, "
+    "a Gemini API key, or an OpenAI-compatible gateway for dubbing; Auto Sync "
+    "keeps using the server.")
 
 
 def _load_llm_settings() -> None:
@@ -82,12 +102,30 @@ def _load_llm_settings() -> None:
             data = json.load(f)
         if isinstance(data, dict):
             for k in _LLM_SETTINGS_DEFAULTS:
-                if k in data and isinstance(data[k], str):
-                    _LLM_SETTINGS[k] = data[k]
+                if k not in data:
+                    continue
+                v = data[k]
+                # A hand-edited file can carry 1 where "1" belongs. Coerce the
+                # scalars and SAY SO for anything else: silently falling back to
+                # the default here is how a configured key turns into a 401 with
+                # no explanation ("openai_api_key": null).
+                if isinstance(v, str):
+                    _LLM_SETTINGS[k] = v
+                elif isinstance(v, bool):
+                    _LLM_SETTINGS[k] = "1" if v else "0"
+                elif isinstance(v, (int, float)):
+                    _LLM_SETTINGS[k] = str(v)
+                else:
+                    print(f"[LLM] {LLM_SETTINGS_FILE}: {k!r} is "
+                          f"{'null' if v is None else type(v).__name__}, not a "
+                          "string — treating it as not set.")
         alias = _LLM_SETTINGS["provider"].strip().lower()
         if alias in _PROVIDER_ALIASES:
             _LLM_SETTINGS["provider"] = _PROVIDER_ALIASES[alias]
-        if _LLM_SETTINGS["provider"] not in LLM_PROVIDERS:
+        # Keep LLM_PROVIDER_SERVER as-is even though it is not a dub-capable
+        # provider: _validate_llm_config() turns it into an actionable error.
+        if _LLM_SETTINGS["provider"] not in LLM_PROVIDERS \
+           and _LLM_SETTINGS["provider"] != LLM_PROVIDER_SERVER:
             _LLM_SETTINGS["provider"] = LLM_PROVIDER_VERTEX
     except FileNotFoundError:
         pass
@@ -106,13 +144,24 @@ def _get_llm_settings() -> Dict[str, str]:
 
 
 def _llm_provider_label() -> str:
-    """Short human-readable description of the active provider."""
+    """Short human-readable description of the active provider.
+
+    The engine's startup banner prints this, so it names the provider that will
+    ACTUALLY be called and whether its credential is present. A log line that
+    said "gemini-2.5-pro" while the run was really going to a keyless gateway is
+    why this is in the banner at all.
+    """
     s = _get_llm_settings()
     p = s.get("provider", LLM_PROVIDER_VERTEX)
     if p == LLM_PROVIDER_OPENAI:
         model = s.get("openai_model") or "(model not set)"
-        return f"{model} via {s.get('openai_base_url') or '(base URL not set)'}"
+        key = "key set" if (s.get("openai_api_key") or "").strip() else "NO KEY"
+        return (f"{model} via gateway "
+                f"{s.get('openai_base_url') or '(base URL not set)'} [{key}]")
     gm = (s.get("gemini_model") or "").strip() or GEMINI_DEFAULT_MODEL
+    if p == LLM_PROVIDER_GEMINI:
+        key = "key set" if (s.get("gemini_api_key") or "").strip() else "NO KEY"
+        return f"{gm} via {p} [{key}]"
     return f"{gm} via {p}"
 
 
@@ -122,7 +171,8 @@ def _active_provider_and_model() -> Tuple[str, str]:
     p = s.get("provider", LLM_PROVIDER_VERTEX)
     short = {LLM_PROVIDER_VERTEX: "vertex",
              LLM_PROVIDER_GEMINI: "gemini",
-             LLM_PROVIDER_OPENAI: "openai"}.get(p, p)
+             LLM_PROVIDER_OPENAI: "openai",
+             LLM_PROVIDER_SERVER: "server"}.get(p, p)
     if p == LLM_PROVIDER_OPENAI:
         return short, (s.get("openai_model") or "").strip() or "(model not set)"
     return short, (s.get("gemini_model") or "").strip() or GEMINI_DEFAULT_MODEL
@@ -157,20 +207,100 @@ def _make_genai_client():
     return genai.Client(vertexai=True, project=project_id, location="us-central1")
 
 
-def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
-    """Single-turn /v1/chat/completions call against the configured base URL."""
-    s = _get_llm_settings()
-    base = (s.get("openai_base_url") or "").strip().rstrip("/")
+# urllib's default agent ("Python-urllib/x.y") is on every bot blocklist, so
+# Cloudflare-fronted gateways deny it with a 403 / "error code: 1010" before the
+# request reaches the model. Override per install with "http_user_agent" in
+# config/llm_settings.json, or the DUB_HTTP_USER_AGENT environment variable.
+_DEFAULT_HTTP_USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/126.0.0.0 Safari/537.36")
+
+
+def _http_user_agent() -> str:
+    return ((_get_llm_settings().get("http_user_agent") or "").strip()
+            or os.environ.get("DUB_HTTP_USER_AGENT", "").strip()
+            or _DEFAULT_HTTP_USER_AGENT)
+
+
+_BASE_URL_HINT = ("This setting is the API base URL — <host> or <host>/v1 — not "
+                  "the browser address of the chat UI, and must not include "
+                  "/chat/completions.")
+
+
+def _openai_api_urls(base: str) -> List[str]:
+    """Chat-completions URLs to try for an OpenAI-compatible base, best first.
+
+    A base that already carries a path is treated as the API root, so only the
+    endpoint is appended: that is the shape OpenAI (…/v1), OpenRouter (…/api/v1),
+    Gemini's OpenAI-compat layer (…/v1beta/openai) and Open WebUI (…/api) all
+    use. A bare host gets the versioned path. When the path carries no version
+    segment it could also be a proxy mounted on a sub-path (…/llm serving
+    /llm/v1/chat/completions), so that shape is kept as a fallback for the
+    caller to retry on a 404.
+
+    Rejects a base that already ends in the endpoint path — the suffix is
+    appended here, so pasting the full endpoint would double it.
+    """
+    base = (base or "").strip().rstrip("/")
     if not base:
         raise ValueError("Base URL is empty — set it in config/llm_settings.json "
                          "(panel Settings).")
-    url = (base + "/chat/completions") if base.endswith("/v1") \
-          else (base + "/v1/chat/completions")
+    if base.lower().endswith("/completions"):
+        raise ValueError(f"Base URL must not include the endpoint path: {base} — "
+                         + _BASE_URL_HINT)
+    m = re.match(r"^(?:[A-Za-z][\w+.-]*://)?[^/]+(/.*)?$", base)
+    path = (m.group(1) or "") if m else ""
+    if not path:
+        return [base + "/v1/chat/completions"]
+    urls = [base + "/chat/completions"]
+    if not re.search(r"/v\d", path):
+        urls.append(base + "/v1/chat/completions")
+    return urls
+
+
+def _openai_api_url(base: str) -> str:
+    """The preferred chat-completions URL for an OpenAI-compatible base."""
+    return _openai_api_urls(base)[0]
+
+
+# A gateway on this machine or the LAN (Ollama, LM Studio, vLLM, a local
+# LiteLLM) legitimately serves with no key at all; a gateway out on the
+# internet never does. Only the local shapes may leave "openai_api_key" blank.
+_LOCAL_HOST_RE = re.compile(
+    r"(?:localhost"
+    r"|127(?:\.\d{1,3}){3}"
+    r"|0\.0\.0\.0"
+    r"|\[?::1\]?"
+    r"|10(?:\.\d{1,3}){3}"
+    r"|192\.168(?:\.\d{1,3}){2}"
+    r"|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}"
+    r"|[^.]+\.local)$", re.IGNORECASE)
+
+
+def _openai_host(base: str) -> str:
+    """Bare host of an OpenAI-compatible base URL — no scheme, port or path."""
+    h = re.sub(r"^[A-Za-z][\w+.-]*://", "", (base or "").strip())
+    h = h.split("/", 1)[0].split("@")[-1]
+    if h.startswith("["):                       # bracketed IPv6 literal
+        return h.split("]", 1)[0] + "]"
+    return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
+
+
+def _gateway_needs_key(base: str) -> bool:
+    """True when this base URL is remote, so a blank API key cannot work."""
+    return not _LOCAL_HOST_RE.match(_openai_host(base))
+
+
+def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
+    """Single-turn /v1/chat/completions call against the configured base URL."""
+    s = _get_llm_settings()
+    urls = _openai_api_urls(s.get("openai_base_url") or "")
     model = (model or "").strip()
     if not model:
         raise ValueError("Model name is empty — set it in config/llm_settings.json "
                          "(panel Settings).")
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json",
+               "User-Agent": _http_user_agent()}
     api_key = (s.get("openai_api_key") or "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -178,19 +308,60 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
-    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = ""
+    raw = final_url = sent_url = None
+    for i, url in enumerate(urls):
+        req = urllib.request.Request(url, data=payload, headers=headers,
+                                     method="POST")
         try:
-            body = e.read().decode("utf-8", "replace")[:400]
-        except Exception:
-            pass
-        raise RuntimeError(f"LLM endpoint returned HTTP {e.code}: {body}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Cannot reach LLM endpoint {url}: {e.reason}") from e
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw       = resp.read().decode("utf-8", "replace")
+                final_url = resp.geturl()
+            sent_url = url
+            break
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "replace")[:400]
+            except Exception:
+                pass
+            # A base URL with a path is usually the API root, but it can also be
+            # a proxy mounted on a sub-path. Retry the versioned shape once when
+            # the endpoint simply isn't there.
+            if e.code in (404, 405) and i + 1 < len(urls):
+                continue
+            if e.code == 403 and "1010" in body:
+                raise RuntimeError(
+                    f'LLM endpoint {url} returned HTTP 403 with Cloudflare "error '
+                    'code: 1010" — the gateway is refusing this client\'s '
+                    "user-agent. The API key and model are not the problem. Set "
+                    '"http_user_agent" in config/llm_settings.json to override '
+                    "the agent string.") from e
+            # No key configured → no Authorization header was sent, so the
+            # gateway is rejecting an anonymous request. Its own wording for
+            # that ("No api key passed in.") reads like the key is wrong, which
+            # sends people re-pasting a key that was never stored.
+            if e.code in (401, 403) and not api_key:
+                raise RuntimeError(
+                    f"LLM endpoint {url} returned HTTP {e.code} and this request "
+                    "carried NO API key: \"openai_api_key\" is empty in "
+                    "config/llm_settings.json. Enter the gateway key in the "
+                    "panel's Settings tab — the base URL and model are not the "
+                    f"problem. Gateway said: {body}") from e
+            raise RuntimeError(f"LLM endpoint {url} returned HTTP {e.code}: "
+                               f"{body}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Cannot reach LLM endpoint {url}: {e.reason}") from e
+    url = sent_url or urls[-1]
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        # A web-UI base URL (…/ui) redirects a POST to the login page, so the
+        # body is HTML instead of JSON. Say that, rather than a parse error.
+        if raw.lstrip()[:1] == "<":
+            raise ValueError(f"{url} returned an HTML page, not JSON (request "
+                             f"ended at {final_url}) — the base URL looks like a "
+                             f"web-UI path. {_BASE_URL_HINT}") from None
+        raise ValueError(f"Unexpected response from {url}: {raw[:400]}") from None
     try:
         return data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError):
@@ -251,6 +422,8 @@ def _llm_generate(prompt: str, model: str = GEMINI_DEFAULT_MODEL,
     (automatic server-side) prefix caching on OpenAI-compatible endpoints —
     which also relies on the static prefix coming first in the request."""
     s = _get_llm_settings()
+    if s.get("provider") == LLM_PROVIDER_SERVER:
+        raise ValueError(_SERVER_MODE_ERROR)
     if s.get("provider") == LLM_PROVIDER_OPENAI:
         return _openai_chat((static_prefix or "") + prompt,
                             (s.get("openai_model") or "").strip() or model)
@@ -271,13 +444,27 @@ def _validate_llm_config() -> None:
             "section to configure the LLM provider.")
     s = _get_llm_settings()
     p = s.get("provider", LLM_PROVIDER_VERTEX)
+    if p == LLM_PROVIDER_SERVER:
+        raise ValueError(_SERVER_MODE_ERROR)
     if p == LLM_PROVIDER_OPENAI:
         if not (s.get("openai_base_url") or "").strip():
             raise ValueError("OpenAI-compatible base URL is empty — configure "
                              "it in config/llm_settings.json (panel Settings).")
+        _openai_api_urls(s["openai_base_url"])    # rejects a pasted endpoint path
         if not (s.get("openai_model") or "").strip():
             raise ValueError("Model name is empty — configure it in "
                              "config/llm_settings.json (panel Settings).")
+        # A blank key means the request goes out with no Authorization header at
+        # all and the gateway answers 401 ("No api key passed in."). Catch it
+        # HERE: the dub run's first LLM call is at S2a, after the paid Scribe
+        # transcription, so a key checked late costs money to discover.
+        if not (s.get("openai_api_key") or "").strip() \
+           and _gateway_needs_key(s["openai_base_url"]):
+            raise ValueError(
+                f"Gateway API key is empty for {_openai_host(s['openai_base_url'])} "
+                "— enter it in the panel's Settings tab (Provider: "
+                "OpenAI-compatible → API key). Only a gateway on this machine or "
+                "the LAN may be left blank.")
         return
     if not GENAI_AVAILABLE:
         raise ImportError("google-genai not installed. Run: pip install google-genai")

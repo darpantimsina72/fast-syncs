@@ -54,6 +54,50 @@ def _load_settings(script_dir: Path) -> dict:
         return {}
 
 
+def _dub_credentials(script_dir: Path) -> dict:
+    """Credentials from the dubbing panel's config files, in THIS file's schema.
+
+    The panel's Settings tab is the single place credentials are typed; it writes
+    them into sync_pipeline_settings.json on every save. This reads the panel's
+    own config as a fallback so a sync file that predates that (or was never
+    re-saved) still runs instead of failing with an empty key.
+    """
+    out: dict = {}
+    cfg = script_dir / "dubbing" / "config"
+
+    def load(name: str) -> dict:
+        try:
+            with open(cfg / name, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except Exception as e:
+            _EARLY_WARNINGS.append(f"[run_sync] WARNING: could not parse {name}: {e}")
+            return {}
+
+    llm, tts = load("llm_settings.json"), load("tts_settings.json")
+    if not (llm or tts):
+        return out
+
+    # The panel writes full display strings; "server" is Auto-Sync-only.
+    provider = (llm.get("provider") or "").strip().lower()
+    if "openai-compatible" in provider:
+        out["gemini_backend"], out["gemini_key"] = "gateway", llm.get("openai_api_key")
+    elif "gemini api key" in provider:
+        out["gemini_backend"], out["gemini_key"] = "rest", llm.get("gemini_api_key")
+    elif provider.startswith("server proxy"):
+        out["api_base"] = llm.get("server_url")
+        out["api_token"] = llm.get("server_token")
+    else:
+        out["gemini_backend"] = "vertex"
+    out["gemini_base_url"] = llm.get("openai_base_url")
+    out["gemini_model"] = llm.get("gemini_model") or llm.get("openai_model")
+    out["vertex_key_path"] = llm.get("vertex_json")
+    out["elevenlabs_key"] = tts.get("elevenlabs_api_key")
+    return {k: v for k, v in out.items() if str(v or "").strip()}
+
+
 def _build_env(settings: dict) -> dict:
     """Start from the inherited environment, then let non-empty settings win."""
     env = os.environ.copy()
@@ -109,6 +153,13 @@ def main() -> int:
     pid_path   = script_dir / "sync_python_pid.txt"
 
     settings = _load_settings(script_dir)
+
+    # Credentials are typed once, in the dub panel's Settings tab, which mirrors
+    # them into sync_pipeline_settings.json. Fill any that are missing here from
+    # the panel's own config so the two can never disagree into a failed run.
+    for key, value in _dub_credentials(script_dir).items():
+        if str(settings.get(key) or "").strip() == "":
+            settings[key] = value
 
     # Resolve selections: CLI flag > settings.json > built-in default.
     language = args.language or settings.get("language")   or "ne"

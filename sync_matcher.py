@@ -258,6 +258,36 @@ _GEMINI_AUDIO_MODEL   = os.environ.get("SYNC_GEMINI_AUDIO_MODEL", "gemini-2.5-fl
 # this mode is a Bearer token (often "sk-..."), NOT a Google "AIza..." key.
 _GEMINI_BASE_URL = os.environ.get("SYNC_GEMINI_BASE_URL", "").rstrip("/")
 
+# Browser agent string for the gateway path. Cloudflare-fronted gateways deny
+# the default "Python-urllib/x.y" agent with a 403 / "error code: 1010" before
+# the request ever reaches the model. Override with SYNC_HTTP_USER_AGENT.
+_DEFAULT_HTTP_USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/126.0.0.0 Safari/537.36")
+_HTTP_USER_AGENT = (os.environ.get("SYNC_HTTP_USER_AGENT", "").strip()
+                    or _DEFAULT_HTTP_USER_AGENT)
+
+
+def _gateway_urls(base_url):
+    """Chat-completions URLs to try for an OpenAI-compatible base, best first.
+
+    A base that already carries a path is its API root, so only the endpoint is
+    appended — the shape OpenAI (…/v1), OpenRouter (…/api/v1), Gemini's
+    OpenAI-compat layer (…/v1beta/openai) and Open WebUI (…/api) all use. A bare
+    host gets the versioned path. An unversioned path may instead be a proxy
+    mounted on a sub-path (…/llm serving /llm/v1/chat/completions), so that shape
+    stays as a 404 fallback.
+    """
+    base = (base_url or "").strip().rstrip("/")
+    m = re.match(r"^(?:[A-Za-z][\w+.-]*://)?[^/]+(/.*)?$", base)
+    path = (m.group(1) or "") if m else ""
+    if not path:
+        return [base + "/v1/chat/completions"]
+    urls = [base + "/chat/completions"]
+    if not re.search(r"/v\d", path):
+        urls.append(base + "/v1/chat/completions")
+    return urls
+
 def _get_vertex_client():
     """Lazy-init Vertex AI client from vertex_key.json beside this script.
     Returns None if unavailable so caller can fall back to REST path."""
@@ -988,40 +1018,55 @@ def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1)
               "(your gateway/Gemini key) — aborting")
         return None
 
-    url = f"{base_url}/v1/chat/completions"
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt_text}],
         "temperature": temperature,
     }
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-    )
-    try:
-        t0 = time.time()
-        print(f"    [GATEWAY] Sending {len(prompt_text)} chars to {model} "
-              f"via {base_url}…")
-        with _urlopen(req, timeout=180) as resp:
-            result = json.loads(resp.read())
-        text = (result["choices"][0]["message"]["content"] or "").strip()
-        print(f"    [GATEWAY] Got {len(text)} chars in {time.time()-t0:.1f}s")
-        return text or None
-    except urllib.error.HTTPError as e:
-        err = ""
+    urls = _gateway_urls(base_url)
+    for i, url in enumerate(urls):
+        req = urllib.request.Request(
+            url, data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                # Gateways behind Cloudflare reject the default
+                # "Python-urllib/x.y" agent outright (403, "error code: 1010"),
+                # so send a browser one. Override: SYNC_HTTP_USER_AGENT.
+                "User-Agent": _HTTP_USER_AGENT,
+            },
+        )
         try:
-            err = e.read().decode(errors="replace")[:200]
-        except Exception:
-            pass
-        print(f"    [GATEWAY] HTTP {e.code}: {e.reason} — {err}")
-        return None
-    except Exception as e:
-        print(f"    [GATEWAY] Error: {e}")
-        return None
+            t0 = time.time()
+            print(f"    [GATEWAY] Sending {len(prompt_text)} chars to {model} "
+                  f"via {url}…")
+            with _urlopen(req, timeout=180) as resp:
+                result = json.loads(resp.read())
+            text = (result["choices"][0]["message"]["content"] or "").strip()
+            print(f"    [GATEWAY] Got {len(text)} chars in {time.time()-t0:.1f}s")
+            return text or None
+        except urllib.error.HTTPError as e:
+            err = ""
+            try:
+                err = e.read().decode(errors="replace")[:200]
+            except Exception:
+                pass
+            # An unversioned base can be a proxy mounted on a sub-path; retry
+            # the versioned shape once when the endpoint simply isn't there.
+            if e.code in (404, 405) and i + 1 < len(urls):
+                print(f"    [GATEWAY] HTTP {e.code} at {url} — retrying "
+                      f"{urls[i + 1]}")
+                continue
+            hint = ""
+            if e.code == 403 and "1010" in err:
+                hint = (" — Cloudflare is blocking this client's user-agent, not "
+                        "your key; set SYNC_HTTP_USER_AGENT to override it")
+            print(f"    [GATEWAY] HTTP {e.code}: {e.reason} — {err}{hint}")
+            return None
+        except Exception as e:
+            print(f"    [GATEWAY] Error: {e}")
+            return None
 
 
 def _call_gemini(prompt_text, api_key, model="gemini-2.5-pro",

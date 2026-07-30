@@ -3,8 +3,12 @@
 # Every comment must be on its own line, or the pattern silently breaks.
 
 # Local settings file — contains all API keys.
+# The .bak is the one-time copy the dub panel's Settings tab takes before it
+# first mirrors credentials in here; it holds keys too.
 sync_pipeline_settings.json
 **/sync_pipeline_settings.json
+sync_pipeline_settings.json.bak
+**/sync_pipeline_settings.json.bak
 
 # Google Cloud service-account private keys.
 vertex_key.json

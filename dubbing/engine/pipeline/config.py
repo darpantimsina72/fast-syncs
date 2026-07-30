@@ -40,20 +40,6 @@ DATA_DIR     = os.path.join(REPO_DIR, "data")
 LLM_SETTINGS_FILE = os.path.join(CONFIG_DIR, "llm_settings.json")
 TTS_SETTINGS_FILE = os.path.join(CONFIG_DIR, "tts_settings.json")
 
-# ─── Optional pydub (shared by srt_tools / tts / sync) ───────────────────────
-try:
-    from pydub import AudioSegment as _AudioSegment
-    PYDUB_AVAILABLE = True
-except ImportError:
-    _AudioSegment = None
-    PYDUB_AVAILABLE = False
-
-# Unverified SSL context, matching the app (some installs sit behind
-# TLS-intercepting proxies that break certificate verification).
-_SSL_CTX = ssl.create_default_context()
-_SSL_CTX.check_hostname = False
-_SSL_CTX.verify_mode    = ssl.CERT_NONE
-
 # ─── Cross-platform setup ────────────────────────────────────────────────────
 IS_WINDOWS = sys.platform.startswith("win")
 IS_MAC     = sys.platform == "darwin"
@@ -85,10 +71,28 @@ def _find_ffmpeg() -> Optional[str]:
 
 FFMPEG_PATH = _find_ffmpeg()
 if FFMPEG_PATH and not shutil.which("ffmpeg"):
-    # Make ffmpeg visible to pydub/librosa even when it isn't on PATH.
+    # Make ffmpeg visible to pydub/librosa even when it isn't on PATH. This has
+    # to run BEFORE pydub is imported below: pydub probes for ffmpeg at import
+    # time and prints a RuntimeWarning when PATH lacks it, which it does for a
+    # Homebrew install (/opt/homebrew/bin) under a GUI-launched process.
     os.environ["PATH"] = os.path.dirname(FFMPEG_PATH) + os.pathsep + os.environ.get("PATH", "")
-    if PYDUB_AVAILABLE:
-        _AudioSegment.converter = FFMPEG_PATH
+
+# ─── Optional pydub (shared by srt_tools / tts / sync) ───────────────────────
+try:
+    from pydub import AudioSegment as _AudioSegment
+    PYDUB_AVAILABLE = True
+except ImportError:
+    _AudioSegment = None
+    PYDUB_AVAILABLE = False
+
+if FFMPEG_PATH and PYDUB_AVAILABLE:
+    _AudioSegment.converter = FFMPEG_PATH
+
+# Unverified SSL context, matching the app (some installs sit behind
+# TLS-intercepting proxies that break certificate verification).
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode    = ssl.CERT_NONE
 
 
 # ─── TTS Language / Voice catalogue ─────────────────────────────────────────
@@ -258,6 +262,12 @@ LLM_PROVIDER_VERTEX   = "Vertex AI (JSON file)"
 LLM_PROVIDER_GEMINI   = "Gemini API key"
 LLM_PROVIDER_OPENAI   = "OpenAI-compatible (Base URL)"
 LLM_PROVIDERS         = [LLM_PROVIDER_VERTEX, LLM_PROVIDER_GEMINI, LLM_PROVIDER_OPENAI]
+# Auto-Sync-only mode: every AI call is routed through the user's own server,
+# which holds the real provider keys. The dubbing engine has no server path, so
+# this value is recognised (the panel's Settings tab is the single home for
+# every credential, sync ones included) only to fail with a clear message
+# instead of silently falling back to another provider's key.
+LLM_PROVIDER_SERVER   = "Server proxy (Auto Sync only)"
 # Blank by default — OpenAI-compatible users set their own endpoint in the
 # panel's ⚙ Settings (or config/llm_settings.json). Never ship an internal
 # host here: this file has no secrets and is committed to a public repo.

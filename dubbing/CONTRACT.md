@@ -6,6 +6,48 @@ The original app is READ-ONLY — never modify or write anything inside
 is only a one-time extraction source and optional key-migration source, never
 a runtime dependency.
 
+## v0.6 — One entry point, credentials that cannot be half-configured
+
+### One documented ReaScript
+
+- `auto_sync_pipeline.lua` (fast-syncs root) is the ONLY script a user loads.
+  It already redirects to the dub panel (see the v0.5 embed section); v0.6
+  makes the docs and both setup scripts say only that. `Sync_Item.lua` moved
+  to `scripts_optional/` so the repo root lists exactly one `.lua`.
+- `dubbing/reaper/*.lua` are INTERNAL: loaded for the user, never advertised.
+  They stay where they are — `Dub_Pipeline_Panel.lua` derives `BASE_DIR` from
+  its own parent directory and keeps `dub_panel_settings.json` beside itself,
+  so moving or renaming it would break every engine/venv/config path and
+  orphan existing panel settings.
+- `Import_Dub_Results.lua` is the ONE exception a user may load directly, and
+  only when ReaImGui is unavailable.
+
+### Credentials (a blank key must never reach a paid run)
+
+- `_validate_llm_config()` also requires `openai_api_key` for the OpenAI
+  provider, UNLESS the base URL host is loopback / RFC-1918 / `*.local` (a
+  keyless local Ollama, vLLM or LiteLLM is legitimate). Shared rule:
+  `_gateway_needs_key()` in `pipeline/llm.py`, mirrored by
+  `V5.gateway_needs_key()` in the panel — keep the two in step.
+- A blank key means NO `Authorization` header, and gateways answer that with
+  wording about the key being wrong ("No api key passed in."). So a 401/403
+  raised while no key was sent must say the key is MISSING, quoting the
+  gateway's own text only as trailing detail.
+- The engine banner prints `_llm_provider_label()` — active provider, model,
+  base URL and whether the credential is set. Never the
+  `GEMINI_DEFAULT_MODEL` constant: a gateway run used to log "gemini-2.5-pro".
+- `_load_llm_settings()` coerces non-string scalars and PRINTS a line for any
+  other type. A silent drop to `""` turns a configured key into a 401.
+- Panel saves are blank-preserving: an empty credential box keeps the value
+  already on disk (`V5.keep_stored_credentials()`), because the save rewrites
+  every field. A per-field `Clear` button is the only way to remove a key.
+- `preflight_engine(need_llm)` refuses LLM runs (`full`/`translate`/`dub`)
+  when `V5.llm_creds_error()` reports a gap. `--test-llm` and the LLM-free
+  modes (`--regen`, `--voice-change`) are never gated.
+- Saving Settings with complete credentials auto-runs `--test-llm`; with an
+  incomplete set it shows a warn banner naming the gap. "Settings saved" is
+  never the last word on a config that cannot run.
+
 ## v0.5 — Merged into fast-syncs: 7-tab panel, embedded Auto Sync, per-project status dirs, robust updater
 
 ### Repo
@@ -228,6 +270,26 @@ file + line ranges it was extracted from.
   (accepted for backward compat, warning logged).
 - Keys/settings resolution: `config/llm_settings.json` + `config/tts_settings.json`
   ONLY. Clear actionable error when missing ("run setup / open panel Settings").
+  `openai_base_url` is an API base (host, or host + path such as `/v1`), never
+  the chat-UI address and never with `/chat/completions` appended; the panel
+  strips those on save. Optional `http_user_agent` overrides the engine's HTTP
+  agent string for gateway calls (blank → browser default, needed because
+  Cloudflare-fronted gateways reject `Python-urllib/*` with 403 / code 1010);
+  `DUB_HTTP_USER_AGENT` in the environment does the same. The panel round-trips
+  the key so a Settings save cannot drop it.
+- Credentials are entered in ONE place: the panel's Settings tab. Every save also
+  mirrors the shared keys into `<fast-syncs>/sync_pipeline_settings.json`
+  (Auto Sync's own file, read by `run_sync.py`), touching only those keys —
+  tracks, language, match mode, script text and `python_cmd` stay as Auto Sync
+  left them. Vocabulary differs by design: `provider` here vs `conn_mode` there
+  (`gemini`→`studio`, `openai`→`gateway`), and Auto Sync keeps both the Gemini
+  key and the gateway Bearer token in one `gemini_key` field, so the mirror hands
+  over whichever matches the selected provider. `run_sync.py` back-fills any
+  credential missing from the sync file from `config/llm_settings.json`.
+- `provider` may also be `"Server proxy (Auto Sync only)"` (alias `server`) with
+  `server_url` + `server_token`: Auto Sync routes all AI calls through the user's
+  own server. The engine has no server path, so every LLM entry point raises an
+  actionable error instead of falling back to another provider's key.
 - New modes (all through run_dub.py, same status/log/pid/done plumbing):
   - `--test-llm` → manifest `{"status":"ok","provider":"…","model":"…","reply":"…"}`
     (one tiny LLM call) or status error.
@@ -298,7 +360,7 @@ plain files — edit in any editor), updater/feedback systems.
         engine_pid.txt    # worker PID (for cancel)
         engine_done.txt   # written LAST: single line = exit code
         engine_done.json  # copy of result manifest (also written to out_dir)
-    reaper/
+    reaper/                    # internal: loaded by auto_sync_pipeline.lua
       Dub_Pipeline_Panel.lua   # ReaImGui panel (run + poll + import)
       Import_Dub_Results.lua   # standalone importer (no ReaImGui needed)
   ```

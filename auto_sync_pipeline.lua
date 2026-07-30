@@ -230,7 +230,39 @@ local function load_settings()
   _apply_conn_mode()
 end
 
+-- Re-read ONLY the credentials from disk. When embedded, the dub panel's
+-- Settings tab owns them and writes them here on every save; this tab must
+-- never write back a stale in-memory copy over a newer one. The tab's own
+-- fields (tracks, language, match mode, script text) are left untouched, so
+-- calling this right before a save cannot lose an edit the user just made.
+local function _reload_shared_credentials()
+  local f = io.open(get_settings_path(), "r")
+  if not f then return end
+  local content = f:read("*a")
+  f:close()
+  local function jval(key)
+    local val = content:match('"' .. key .. '"%s*:%s*"([^"]*)"')
+    if val then val = val:gsub('\\(["\\])', '%1') end
+    return val
+  end
+  local v
+  v = jval("elevenlabs_key")   if v then ELEVENLABS_KEY  = v end
+  v = jval("gemini_key")       if v then GEMINI_KEY      = v end
+  v = jval("vertex_key_path")  if v then VERTEX_KEY_PATH = v end
+  v = jval("gemini_base_url")  if v then GEMINI_BASE_URL = v end
+  v = jval("gemini_model")     if v and v ~= "" then GEMINI_MODEL = v end
+  v = jval("api_token")        if v then API_TOKEN       = v end
+  v = jval("server_url")       if v and v ~= "" then SERVER_URL = v end
+  local cm = _norm_conn_mode(jval("conn_mode"))
+  if cm then CONN_MODE = cm end
+  _apply_conn_mode()
+end
+
 local function save_settings()
+  -- Credentials belong to the Settings tab when embedded — take the on-disk
+  -- values, not ours, so saving this tab's own fields cannot revert a key.
+  if EMBED then _reload_shared_credentials() end
+
   local path = get_settings_path()
   local f = io.open(path, "w")
   if not f then return end
@@ -253,6 +285,15 @@ local function save_settings()
     s = s:gsub('\t', '\\t')
     return s
   end
+
+  -- The matcher appends "/v1/chat/completions" itself, so strip a pasted
+  -- endpoint path, a chat-UI "/ui" path (it serves HTML and bounces API calls
+  -- to a login page) and any trailing slash before this value is saved.
+  GEMINI_BASE_URL = (GEMINI_BASE_URL or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    :gsub("/+$", "")
+    :gsub("/[Cc][Hh][Aa][Tt]/[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Ii][Oo][Nn][Ss]$", "")
+    :gsub("/[Uu][Ii]$", "")
+    :gsub("/+$", "")
 
   f:write('{\n')
   f:write(string.format('  "track_vo": "%s",\n',         je(TRACK_VO_NAME)))
@@ -1265,6 +1306,39 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
   if conn_open then
     reaper.ImGui_Indent(ctx, 12)
     local rv
+
+    -- Embedded in the dub panel, the Settings tab owns every credential: it
+    -- writes them into this script's settings file on save, and there is no
+    -- second copy to keep in step. Show what arrived, read-only, and point at
+    -- the one place to change it. Standalone (own action) keeps the fields.
+    if EMBED then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+      reaper.ImGui_TextWrapped(ctx, 'Mode : ' .. CONN_LABELS[_conn_idx(CONN_MODE)])
+      local detail
+      if CONN_MODE == 'server' then
+        detail = 'server ' .. ((SERVER_URL ~= '') and SERVER_URL or '(not set)') ..
+                 '  ·  token ' .. ((API_TOKEN ~= '') and _mask_key(API_TOKEN) or '(not set)')
+      elseif CONN_MODE == 'studio' then
+        detail = 'gemini key ' .. ((GEMINI_KEY ~= '') and _mask_key(GEMINI_KEY) or '(not set)')
+      elseif CONN_MODE == 'vertex' then
+        detail = 'vertex json ' ..
+                 ((VERTEX_KEY_PATH ~= '') and VERTEX_KEY_PATH or
+                  (has_vertex_file and '(found next to the script)' or '(not set)'))
+      else
+        detail = 'gateway ' .. ((GEMINI_BASE_URL ~= '') and GEMINI_BASE_URL or '(not set)') ..
+                 '  ·  key ' .. ((GEMINI_KEY ~= '') and _mask_key(GEMINI_KEY) or '(not set)')
+      end
+      if CONN_MODE ~= 'server' then
+        detail = detail .. '\nmodel ' .. ((GEMINI_MODEL ~= '') and GEMINI_MODEL or '(not set)') ..
+                 '  ·  ElevenLabs key ' ..
+                 ((ELEVENLABS_KEY ~= '') and _mask_key(ELEVENLABS_KEY) or '(not set)')
+      end
+      reaper.ImGui_TextWrapped(ctx, detail)
+      reaper.ImGui_TextWrapped(ctx, 'Keys come from the Settings tab — change ' ..
+                                    'them there and they apply here too.')
+      reaper.ImGui_PopStyleColor(ctx)
+
+    else
     local cur_label = CONN_LABELS[_conn_idx(CONN_MODE)]
     local changed, new_label = _ui_combo(ctx, 'Mode', cur_label, CONN_LABELS)
     if changed then
@@ -1304,7 +1378,7 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
         rv, GEMINI_BASE_URL = reaper.ImGui_InputText(ctx, 'Gateway URL',          GEMINI_BASE_URL or '')
         rv, GEMINI_KEY      = reaper.ImGui_InputText(ctx, 'Gateway key (Bearer)', GEMINI_KEY or '', pw_flags)
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-        reaper.ImGui_TextWrapped(ctx, 'OpenAI-compatible base URL — the same value you would paste into n8n\'s OpenAI node. The client calls {URL}/v1/chat/completions with your Bearer key. Example (LiteLLM on a LAN): http://172.18.1.17:14005')
+        reaper.ImGui_TextWrapped(ctx, 'OpenAI-compatible API base — the same value you would paste into n8n\'s OpenAI node: the host, or the host plus /v1. The client appends /v1/chat/completions itself, so do not include that path, and do not paste the chat UI address. Example (LiteLLM on a LAN): http://172.18.1.17:14005')
         reaper.ImGui_PopStyleColor(ctx)
       end
 
@@ -1317,6 +1391,8 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
     end
 
     rv, _ui_show_keys = reaper.ImGui_Checkbox(ctx, 'Show keys', _ui_show_keys)
+    end   -- EMBED / standalone credential UI
+
     reaper.ImGui_Unindent(ctx, 12)
     reaper.ImGui_Dummy(ctx, 0, 4)
   end
@@ -1686,7 +1762,8 @@ local function on_python_done(success)
       "Model   : %s\n"                            ..
       "Language: %s\n"                            ..
       "Backend : %s\n\n"                          ..
-      "Tip: use Sync_Item.lua to manually fix\n"  ..
+      "Tip: use scripts_optional/Sync_Item.lua\n" ..
+      "to manually fix\n"                         ..
       "any remaining unmatched items.",
       elapsed, s.total_en, s.matched, s.total_dub,
       s.unmatched, TRACK_UNSYNC,

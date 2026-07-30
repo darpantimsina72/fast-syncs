@@ -2,9 +2,10 @@
 
 > **Bundled with fast-syncs** (v0.6): this app lives in the `dubbing/`
 > folder of the fast-syncs repo and arrives / stays current through the
-> same **Update…** button as the sync tool. Running `auto_sync_pipeline.lua`
-> opens this panel directly (the sync tool is its **Auto Sync** tab); you
-> can also load `dubbing/reaper/Dub_Pipeline_Panel.lua` as a REAPER action.
+> same **Update…** button as the sync tool. `auto_sync_pipeline.lua` in the
+> repo root is the only script you load in REAPER — it opens this panel
+> directly, with the sync tool as its **Auto Sync** tab. The files under
+> `dubbing/reaper/` are internal and are not meant to be loaded by hand.
 
 Automatic voice dubbing for [REAPER](https://www.reaper.fm/): take an English
 voice recording, and get a translated, voice-synthesized, time-synced dub in
@@ -37,6 +38,13 @@ Telugu, Gujarati, Marathi, Assamese, Odia, Nepali.
   - an **ElevenLabs** key (speech-to-text + text-to-speech + voice changer), and
   - one **LLM provider**: a Gemini API key, a Google Vertex AI
     service-account JSON, or any OpenAI-compatible endpoint (base URL + key).
+    That base URL is an **API base** — `https://host` or `https://host/v1`, not
+    the chat UI's browser address and never with `/chat/completions` appended.
+    A bare host gets `/v1/chat/completions`; a base that already has a path
+    (`/v1`, `/api/v1`, `/v1beta/openai`) is used as-is with `/chat/completions`
+    appended, so OpenAI, OpenRouter, LiteLLM, vLLM, Open WebUI and Gemini's
+    OpenAI-compatible layer all work. Azure OpenAI is **not** supported — its
+    URL shape and auth header differ.
   - optional: a Google Cloud TTS service-account JSON.
 
 ## Installation
@@ -69,10 +77,14 @@ bash setup_mac.command
 Then, in REAPER (both platforms):
 
 1. Actions → Show action list → New action → **Load ReaScript…**
-2. Pick **both** files from the `reaper/` folder:
-   `Dub_Pipeline_Panel.lua` and `Import_Dub_Results.lua`.
-3. Load them **in place** — do not copy them into REAPER's `Scripts/`
-   folder. The panel finds the engine relative to its own location.
+2. Pick `auto_sync_pipeline.lua` from the fast-syncs root — the one entry
+   point for both tools. Nothing under `reaper/` needs loading.
+3. Load it **in place** — do not copy it into REAPER's `Scripts/` folder.
+   Each script finds the engine relative to its own location.
+
+Fallback: if ReaImGui cannot be installed on this machine, the panel will not
+open. `reaper/Import_Dub_Results.lua` still imports a finished run on its own
+(plain REAPER API, no ReaImGui) — load that one directly in that case only.
 
 ### First run on a new Mac
 
@@ -87,13 +99,26 @@ double-click on `setup_mac.command`. Any one of these fixes it:
 
 Open the panel and expand **⚙ Settings**:
 
-- **LLM** — pick a provider (`vertex` / `gemini` / `openai`), set the model
-  (default `gemini-2.5-pro`) and the provider's credentials. Key fields are
+- **LLM** — pick a provider (`vertex` / `gemini` / `openai` / `server`), set the
+  model (default `gemini-2.5-pro`) and the provider's credentials. Key fields are
   masked (a "Show keys" checkbox reveals them). **Test connection** makes
   one tiny LLM call and shows the reply.
 - **TTS** — your ElevenLabs key, the ElevenLabs model, and the voice.
   **Fetch voices** pulls the voice catalogue for the selected language into
   a combo; a manual voice-id field is always available as a fallback.
+
+**This tab is the only place credentials are entered.** The **Auto Sync** tab
+uses the same keys and has no fields of its own — every save mirrors the shared
+ones (provider, model, keys, gateway URL, ElevenLabs key, server URL + token)
+into `sync_pipeline_settings.json` next to `run_sync.py`, leaving Auto Sync's own
+settings — track names, language, match mode, script text — untouched. Launching
+Auto Sync as its own REAPER action still shows the full fields, since the
+Settings tab isn't there to read from.
+
+`server` is the exception to "one provider for everything": it means *Auto Sync
+routes AI calls through your own server*, which the dubbing engine cannot do.
+Pick it and dub runs stop with a message saying exactly that; Auto Sync keeps
+working. For dubbing, choose `vertex`, `gemini` or `openai`.
 
 Settings are written to `config/llm_settings.json` and
 `config/tts_settings.json`, and re-written automatically before every run.
@@ -218,10 +243,12 @@ dubbing/                    (inside the fast-syncs repo)
     status/                 runtime files (gitignored)
   prompts/                  LLM prompt files per language and stage —
                             plain text, edit in any editor
-  reaper/
+  reaper/                   internal — loaded FOR you by
+                            auto_sync_pipeline.lua, not by hand
     Dub_Pipeline_Panel.lua  ReaImGui panel: settings, run, review, import,
                             chunk regeneration
-    Import_Dub_Results.lua  standalone importer (no ReaImGui needed)
+    Import_Dub_Results.lua  standalone importer (no ReaImGui needed) — the
+                            one file here you may load directly
   config/                   your keys and settings (gitignored, created on
                             first save)
   data/                     translation memory database (gitignored)

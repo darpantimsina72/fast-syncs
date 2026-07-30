@@ -198,17 +198,21 @@ echo.
 echo == Setup complete ==
 if defined AUTO exit /b 0
 echo.
-echo Install the REAPER scripts (load them IN PLACE - do not copy them):
+for %%I in ("%HERE%\..") do set "FSROOT=%%~fI"
+echo Install the REAPER script (load it IN PLACE - do not copy it):
 echo   1. In REAPER: Actions -^> Show action list -^> New action -^> Load ReaScript...
-echo   2. Pick both files from:  %HERE%\reaper\
-echo      (Dub_Pipeline_Panel.lua and Import_Dub_Results.lua).
-echo   NOTE: do NOT copy the .lua files into REAPER's Scripts\ folder.
-echo   The panel finds the engine relative to its own location, so it only
-echo   works from  %HERE%\reaper\  (next to the engine\ folder).
+echo   2. Pick this ONE file:  %FSROOT%\auto_sync_pipeline.lua
+echo      It opens the dub panel; the sync tool is its Auto Sync tab.
+echo   NOTE: do NOT copy the .lua files into REAPER's Scripts\ folder, and do
+echo   not load anything from  %HERE%\reaper\  by hand - those are internal and
+echo   are loaded for you. They find the engine relative to their own location,
+echo   so they only work where they are (next to the engine\ folder).
 echo.
 echo Recommended: install ReaImGui via ReaPack (Extensions -^> ReaPack -^>
 echo Browse packages -^> search 'ReaImGui') for the panel UI - the panel
-echo also offers to install it for you on first run.
+echo also offers to install it for you on first run. If ReaImGui cannot be
+echo installed here, reaper\Import_Dub_Results.lua still imports a finished run
+echo on its own - the only file in reaper\ you would ever load directly.
 echo.
 pause
 exit /b 0
@@ -264,7 +268,9 @@ echo ERROR: requirements.txt not found next to this script.
 goto end_fail
 
 :pip_failed
-echo ERROR: pip install failed. Check your network and re-run.
+echo ERROR: pip install failed - read pip's own error above this line; it names
+echo the package and reason. Common causes: no network / proxy blocking PyPI, or
+echo a Python version with no prebuilt wheels for the audio deps. Then re-run.
 goto end_fail
 
 :no_python
