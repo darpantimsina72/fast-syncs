@@ -250,6 +250,15 @@ def _openai_api_urls(base: str) -> List[str]:
                          + _BASE_URL_HINT)
     m = re.match(r"^(?:[A-Za-z][\w+.-]*://)?[^/]+(/.*)?$", base)
     path = (m.group(1) or "") if m else ""
+    # LiteLLM and Open WebUI serve their admin console at /ui, so a base ending
+    # there is the console's browser address pasted in place of the API root.
+    # Left alone it becomes …/ui/v1/chat/completions, and LiteLLM answers 405
+    # "Method Not Allowed" — a reply that says nothing about the real mistake.
+    # Caught here so --test-llm and the pre-run check name it before any spend.
+    if re.search(r"/ui$", path, re.IGNORECASE):
+        raise ValueError(
+            f"Base URL {base} is the gateway's admin console, not its API — "
+            f"use {base[:-len('/ui')].rstrip('/')}/v1 instead. " + _BASE_URL_HINT)
     if not path:
         return [base + "/v1/chat/completions"]
     urls = [base + "/chat/completions"]

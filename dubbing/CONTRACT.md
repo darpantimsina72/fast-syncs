@@ -33,6 +33,11 @@ a runtime dependency.
   wording about the key being wrong ("No api key passed in."). So a 401/403
   raised while no key was sent must say the key is MISSING, quoting the
   gateway's own text only as trailing detail.
+- `_openai_api_urls()` rejects a base URL ending in `/ui`: that is the gateway's
+  admin console pasted in place of the API root. LiteLLM answers the resulting
+  `/ui/v1/chat/completions` with `405 Method Not Allowed`, which names nothing,
+  and the existing HTML-body guard cannot help because the 405 body is JSON.
+  Seen in the wild — a panel configured from the browser address bar.
 - The engine banner prints `_llm_provider_label()` — active provider, model,
   base URL and whether the credential is set. Never the
   `GEMINI_DEFAULT_MODEL` constant: a gateway run used to log "gemini-2.5-pro".
