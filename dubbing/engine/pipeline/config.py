@@ -39,6 +39,7 @@ DATA_DIR     = os.path.join(REPO_DIR, "data")
 
 LLM_SETTINGS_FILE = os.path.join(CONFIG_DIR, "llm_settings.json")
 TTS_SETTINGS_FILE = os.path.join(CONFIG_DIR, "tts_settings.json")
+ENGINE_SETTINGS_FILE = os.path.join(ENGINE_DIR, "engine_settings.json")
 
 # ─── Cross-platform setup ────────────────────────────────────────────────────
 IS_WINDOWS = sys.platform.startswith("win")
@@ -327,10 +328,37 @@ def load_tts_settings() -> Dict[str, str]:
             for k in _TTS_SETTINGS_DEFAULTS:
                 if k in data and isinstance(data[k], str):
                     settings[k] = data[k]
+    except Exception as e:
+        print(f"[config] Could not read {TTS_SETTINGS_FILE}: {e} — using defaults.")
+    return settings
+
+
+_ENGINE_SETTINGS_DEFAULTS: Dict[str, object] = {
+    "stt_timeout_min":   600.0,
+    "stt_timeout_scale": 2.0,
+    "stt_timeout_max":   7200.0,
+    "tts_timeout_min":   180.0,
+    "tts_timeout_scale": 0.1,
+    "llm_timeout":       900.0,
+    "retry_attempts":    4,
+    "retry_backoff":     [5.0, 15.0, 45.0],
+}
+
+
+def load_engine_settings() -> Dict[str, object]:
+    """Load engine/engine_settings.json over defaults."""
+    settings = dict(_ENGINE_SETTINGS_DEFAULTS)
+    try:
+        with open(ENGINE_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            for k in _ENGINE_SETTINGS_DEFAULTS:
+                if k in data:
+                    settings[k] = data[k]
     except FileNotFoundError:
         pass
     except Exception as e:
-        print(f"[config] Could not read {TTS_SETTINGS_FILE}: {e} — using defaults.")
+        print(f"[config] Could not read {ENGINE_SETTINGS_FILE}: {e} — using defaults.")
     return settings
 
 

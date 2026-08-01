@@ -131,6 +131,8 @@ REQUIRED_FUNCTIONS = [
     "_llm_generate",                 # provider-agnostic generation (--test-llm)
     "_active_provider_and_model",    # provider/model names (--test-llm manifest)
     "_llm_provider_label",           # provider + credential state (startup banner)
+    "request_with_retry",            # network retry with backoff and heartbeat
+    "get_audio_duration",            # ffprobe duration probe
 ]
 REQUIRED_ATTRIBUTES = [
     "librosa",                       # used to load TTS audio like the app does
@@ -332,9 +334,9 @@ def _import_pipeline():
     """
     if ENGINE_DIR not in sys.path:
         sys.path.insert(0, ENGINE_DIR)
-    from pipeline import config, stt, srt_tools, llm, tts, sync, tm  # noqa: F401
+    from pipeline import config, net, stt, srt_tools, llm, tts, sync, tm  # noqa: F401
     ns = types.SimpleNamespace()
-    for mod in (config, stt, srt_tools, llm, tts, sync):
+    for mod in (config, net, stt, srt_tools, llm, tts, sync):
         for name, value in vars(mod).items():
             if name.startswith("__"):
                 continue
@@ -477,8 +479,16 @@ def _load_pipeline_and_keys(args, need_llm=True):
                            "in the pipeline's TTS_LANGUAGES table.")
     try:
         api_key = pl._get_api_key()
+        val_info = pl._validate_api_key(api_key)
+        _note(f"ElevenLabs API key verified (tier: {val_info.get('tier', 'active')})")
     except Exception as e:
-        raise RuntimeError(f"ElevenLabs API key unavailable: {e}")
+        raise RuntimeError(f"ElevenLabs API key unavailable or invalid: {e}")
+
+    # Preflight network/proxy check log
+    proxies = [f"{k}={v}" for k, v in os.environ.items() if k.lower().endswith("_proxy")]
+    if proxies:
+        _note(f"Active proxy configuration: {', '.join(proxies)}")
+
     if need_llm:
         try:
             pl._validate_llm_config()
@@ -539,7 +549,7 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
 
     # ── [S1a] Transcribe the English audio ─────────────────────────────────
     _say("S1a", "Transcribing English audio (ElevenLabs Scribe)…")
-    result = pl._transcribe_audio(audio_path, api_key)
+    result = pl._transcribe_audio(audio_path, api_key, label="S1a", status_cb=lambda m: _say("S1a", m))
     words = result.get("words", [])
     raw_eng = (result.get("text", "") or "").strip()
     if not raw_eng and words:
@@ -717,7 +727,7 @@ def _stage_dub(pl, args, api_key, manifest, ctx, voice_id):
     if not te_regions:
         raise RuntimeError("No regions detected in the TTS audio.")
     _say("S3b", f"Transcribing TTS audio ({len(te_regions)} regions)…")
-    te_result = pl._transcribe_audio(tts_path, api_key)
+    te_result = pl._transcribe_audio(tts_path, api_key, label="S3b", status_cb=lambda m: _say("S3b", m))
     te_words = te_result.get("words", [])
     if not te_words:
         raise RuntimeError("No word data from ElevenLabs for the TTS audio.")
