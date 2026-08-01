@@ -36,7 +36,8 @@ from .config import (CONFIG_DIR, GEMINI_DEFAULT_MODEL, LLM_DEFAULT_BASE_URL,
                      LLM_PROVIDER_SERVER, LLM_PROVIDER_VERTEX,
                      LLM_PROVIDERS, LLM_SETTINGS_FILE,
                      PROMPTS_DIR, STEP4_EMOTION_ENABLED, TTS_DEFAULT_LANGUAGE,
-                     TTS_LANGUAGES)
+                     TTS_LANGUAGES, load_engine_settings)
+from .net import request_with_retry
 
 try:
     from google import genai
@@ -197,14 +198,18 @@ def _make_genai_client():
     if not GENAI_AVAILABLE:
         raise ImportError("google-genai not installed. Run: pip install google-genai")
     s = _get_llm_settings()
+    cfg = load_engine_settings()
+    timeout_ms = int(float(cfg.get("llm_timeout", 900.0)) * 1000)
+    opts = genai_types.HttpOptions(timeout=timeout_ms) if hasattr(genai_types, "HttpOptions") else None
+
     if s.get("provider") == LLM_PROVIDER_GEMINI:
         api_key = (s.get("gemini_api_key") or "").strip()
         if not api_key:
             raise ValueError("Gemini API key is empty — set it in "
                              "config/llm_settings.json (panel Settings).")
-        return genai.Client(api_key=api_key)
+        return genai.Client(api_key=api_key, http_options=opts) if opts else genai.Client(api_key=api_key)
     project_id = _get_vertex_context()
-    return genai.Client(vertexai=True, project=project_id, location="us-central1")
+    return genai.Client(vertexai=True, project=project_id, location="us-central1", http_options=opts) if opts else genai.Client(vertexai=True, project=project_id, location="us-central1")
 
 
 # urllib's default agent ("Python-urllib/x.y") is on every bot blocklist, so
@@ -322,9 +327,17 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
         req = urllib.request.Request(url, data=payload, headers=headers,
                                      method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw       = resp.read().decode("utf-8", "replace")
-                final_url = resp.geturl()
+            cfg = load_engine_settings()
+            attempts = int(cfg.get("retry_attempts", 4))
+            raw_backoff = cfg.get("retry_backoff", [5.0, 15.0, 45.0])
+            backoff = tuple(float(x) for x in raw_backoff) if isinstance(raw_backoff, (list, tuple)) else (5.0, 15.0, 45.0)
+
+            resp_bytes = request_with_retry(
+                req, timeout=timeout, attempts=attempts, backoff=backoff,
+                label="[LLM]", log=print
+            )
+            raw = resp_bytes.decode("utf-8", "replace")
+            final_url = url
             sent_url = url
             break
         except urllib.error.HTTPError as e:

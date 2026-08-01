@@ -21,7 +21,8 @@ import urllib.request
 from typing import Dict, List, Optional
 
 from .config import (_SSL_CTX, TTS_DEFAULT_LANGUAGE, TTS_SETTINGS_FILE,
-                     _lang_tokens, load_tts_settings)
+                     _lang_tokens, load_tts_settings, load_engine_settings)
+from .net import get_audio_duration, request_with_retry
 
 # ElevenLabs voice cache keyed by (api-key fingerprint, language name) so we
 # don't re-fetch the voice list on every TTS run.
@@ -305,7 +306,39 @@ def _multipart_body(fields, files):
     return body, boundary
 
 
-def _transcribe_audio(audio_path, api_key):
+def _transcribe_audio(audio_path, api_key, label="", status_cb=None):
+    """
+    Transcribe audio with ElevenLabs Scribe (model_id=scribe_v2).
+
+    Includes Scribe transcript checkpointing: saves/loads JSON from {base}_scribe_en.json
+    (or _scribe_te.json) when audio (file_size, mtime) fingerprint matches.
+    Employs adaptive timeout scaling based on audio duration and retry with exponential backoff.
+    """
+    def _log(msg):
+        if status_cb:
+            status_cb(msg)
+        else:
+            tag = f"[{label}] " if label else "[STT] "
+            print(f"{tag}{msg}", flush=True)
+
+    # 1. Checkpoint lookup
+    stem = os.path.splitext(audio_path)[0]
+    ckpt_suffix = "_scribe_te.json" if ("S3b" in label or "_tts" in os.path.basename(audio_path)) else "_scribe_en.json"
+    ckpt_path = stem + ckpt_suffix
+
+    try:
+        st = os.stat(audio_path)
+        cur_fp = {"size": st.st_size, "mtime": st.st_mtime}
+        if os.path.isfile(ckpt_path):
+            with open(ckpt_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data.get("fingerprint") == cur_fp and "result" in data:
+                _log(f"Reusing cached Scribe transcript from {os.path.basename(ckpt_path)}")
+                return data["result"]
+    except Exception:
+        pass
+
+    # 2. Prepare multipart request
     with open(audio_path, "rb") as f:
         audio_data = f.read()
     mime, _ = mimetypes.guess_type(audio_path)
@@ -320,5 +353,39 @@ def _transcribe_audio(audio_path, api_key):
         headers={"xi-api-key": api_key,
                  "Content-Type": f"multipart/form-data; boundary={boundary}"},
     )
-    with urllib.request.urlopen(req, timeout=180, context=_SSL_CTX) as resp:
-        return json.loads(resp.read().decode())
+
+    # 3. Adaptive timeout & retry
+    cfg = load_engine_settings()
+    stt_min = float(cfg.get("stt_timeout_min", 600.0))
+    stt_scale = float(cfg.get("stt_timeout_scale", 2.0))
+    stt_max = float(cfg.get("stt_timeout_max", 7200.0))
+    attempts = int(cfg.get("retry_attempts", 4))
+    raw_backoff = cfg.get("retry_backoff", [5.0, 15.0, 45.0])
+    backoff = tuple(float(x) for x in raw_backoff) if isinstance(raw_backoff, (list, tuple)) else (5.0, 15.0, 45.0)
+
+    dur_s = get_audio_duration(audio_path)
+    calc_timeout = max(stt_min, dur_s * stt_scale)
+    timeout = min(stt_max, calc_timeout)
+
+    tag = f"[{label}]" if label else "[Scribe STT]"
+    _log(f"Sending {len(audio_data)/(1024*1024):.1f} MB audio ({int(dur_s)}s duration) to Scribe (timeout {int(timeout)}s)…")
+
+    resp_bytes = request_with_retry(
+        req, timeout=timeout, attempts=attempts, backoff=backoff,
+        label=tag, context=_SSL_CTX, log=_log
+    )
+    result = json.loads(resp_bytes.decode("utf-8"))
+
+    # 4. Save checkpoint
+    try:
+        st = os.stat(audio_path)
+        ckpt_data = {
+            "fingerprint": {"size": st.st_size, "mtime": st.st_mtime},
+            "result": result
+        }
+        with open(ckpt_path, "w", encoding="utf-8") as f:
+            json.dump(ckpt_data, f, indent=2)
+    except Exception as e:
+        _log(f"Warning: could not write Scribe transcript checkpoint {os.path.basename(ckpt_path)}: {e}")
+
+    return result

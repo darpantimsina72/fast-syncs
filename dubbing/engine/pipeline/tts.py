@@ -20,6 +20,7 @@ Adaptations (everything else is verbatim):
     back to config/TTS_Key.json.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -33,7 +34,8 @@ from .config import (_SSL_CTX, ELEVENLABS_CHUNK_CHARS, ELEVENLABS_TTS_MODEL,
                      ELEVENLABS_TTS_VOICE_ID, CONFIG_DIR, PYDUB_AVAILABLE,
                      TTS_DEFAULT_LANGUAGE, TTS_DEFAULT_VOICE, TTS_LANGUAGES,
                      TTS_MAX_BYTES, _AudioSegment, _strip_emotion_tags,
-                     load_tts_settings)
+                     load_tts_settings, load_engine_settings)
+from .net import get_audio_duration, request_with_retry
 from .stt import _sanitize_voice_id
 
 try:
@@ -399,7 +401,8 @@ def _split_script_into_sentences(text: str) -> List[str]:
 
 
 def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
-                         previous_text: str = None, next_text: str = None) -> bytes:
+                         previous_text: str = None, next_text: str = None,
+                         status_cb=None, label: str = "") -> bytes:
     """
     Single ElevenLabs text-to-speech request → raw MP3 bytes.
 
@@ -418,8 +421,6 @@ def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
             "use_speaker_boost": True,
         },
     }
-    # ElevenLabs caps stitching context; trailing/leading 600 chars is plenty
-    # for prosody continuity without bloating the request.
     if previous_text:
         body["previous_text"] = previous_text[-600:]
     if next_text:
@@ -435,9 +436,28 @@ def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
             "Accept": "audio/mpeg",
         },
     )
+
+    cfg = load_engine_settings()
+    tts_min = float(cfg.get("tts_timeout_min", 180.0))
+    tts_scale = float(cfg.get("tts_timeout_scale", 0.1))
+    attempts = int(cfg.get("retry_attempts", 4))
+    raw_backoff = cfg.get("retry_backoff", [5.0, 15.0, 45.0])
+    backoff = tuple(float(x) for x in raw_backoff) if isinstance(raw_backoff, (list, tuple)) else (5.0, 15.0, 45.0)
+
+    timeout = max(tts_min, len(chunk) * tts_scale)
+    tag = label if label else "[TTS]"
+
+    def _log(msg):
+        if status_cb:
+            status_cb(msg)
+        else:
+            print(f"{tag} {msg}", flush=True)
+
     try:
-        with urllib.request.urlopen(req, timeout=180, context=_SSL_CTX) as resp:
-            return resp.read()
+        return request_with_retry(
+            req, timeout=timeout, attempts=attempts, backoff=backoff,
+            label=tag, context=_SSL_CTX, log=_log
+        )
     except urllib.error.HTTPError as e:
         err_body = ""
         try:
@@ -445,7 +465,8 @@ def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
         except Exception:
             pass
         if e.code in (400, 422) and (previous_text or next_text):
-            return _elevenlabs_tts_post(chunk, api_key, voice_id, model_id)
+            return _elevenlabs_tts_post(chunk, api_key, voice_id, model_id,
+                                        status_cb=status_cb, label=label)
         if e.code == 401:
             raise ValueError("ElevenLabs rejected the API key (401). Re-paste a valid key.") from None
         if e.code == 404:
@@ -577,6 +598,19 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
 
     out_base        = os.path.splitext(output_path)[0]
     chunk_log_path  = out_base + "_chunks.txt"
+    chunks_meta_path = out_base + "_chunks_meta.json"
+
+    # Read existing chunks metadata for fingerprint comparison
+    old_meta = {}
+    try:
+        if os.path.isfile(chunks_meta_path):
+            with open(chunks_meta_path, "r", encoding="utf-8") as mf:
+                old_meta = json.load(mf)
+    except Exception:
+        old_meta = {}
+    old_chunks = old_meta.get("chunks", {}) if isinstance(old_meta, dict) else {}
+    new_chunks = {}
+
     chunk_log_lines = [
         f"TTS Chunk Log — {os.path.basename(output_path)}",
         f"Platform : ElevenLabs",
@@ -589,30 +623,45 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
     chunk_bytes_list = []
 
     for i, chunk in enumerate(chunks, 1):
-        if status_cb:
-            if total > 1:
-                status_cb(f"TTS: ElevenLabs generating audio… chunk {i} of {total}")
-            else:
-                status_cb("TTS: ElevenLabs generating audio…")
+        chunk_key = f"{i:02d}"
+        chunk_audio_path = f"{out_base}_chunk_{chunk_key}.mp3"
 
-        # Indic-tuned voice settings: slightly higher stability + style 0
-        # produce cleaner pronunciation of conjunct consonants and matras
-        # across Devanagari / Bengali / Tamil / Telugu / Kannada / Malayalam /
-        # Gujarati / Odia / Assamese scripts.
-        # NOTE: do NOT send `language_code` — eleven_v3 auto-detects the
-        # target language from the input text. Passing language_code triggers
-        # HTTP 400 `unsupported_language` on multilingual models.
-        # Lower stability + raised style give eleven_v3 room to act on the
-        # inline emotion / accent tags injected by Step4 (e.g. [bengali accent],
-        # [calm], [slow], [pause]) so delivery feels human and reflective —
-        # closer to a wise teacher (Sadhguru-style cadence) than a flat read.
-        audio_bytes = _elevenlabs_tts_post(chunk, api_key, voice_id, model_id)
+        # Compute SHA1 content hash (Trap 1 Guard: voice_id + model_id + chunk_text)
+        chunk_hash = hashlib.sha1(f"{voice_id}|{model_id}|{chunk}".encode("utf-8")).hexdigest()
+
+        audio_bytes = None
+        cached_entry = old_chunks.get(chunk_key) if isinstance(old_chunks, dict) else None
+
+        if os.path.isfile(chunk_audio_path) and cached_entry and isinstance(cached_entry, dict) and cached_entry.get("hash") == chunk_hash:
+            try:
+                with open(chunk_audio_path, "rb") as cf:
+                    audio_bytes = cf.read()
+                if audio_bytes:
+                    if status_cb:
+                        status_cb(f"TTS: Reusing cached audio for chunk {i} of {total}")
+            except Exception:
+                audio_bytes = None
+
+        if not audio_bytes:
+            if status_cb:
+                if total > 1:
+                    status_cb(f"TTS: ElevenLabs generating audio… chunk {i} of {total}")
+                else:
+                    status_cb("TTS: ElevenLabs generating audio…")
+
+            audio_bytes = _elevenlabs_tts_post(
+                chunk, api_key, voice_id, model_id,
+                status_cb=status_cb, label="[S2d]"
+            )
+            with open(chunk_audio_path, "wb") as cf:
+                cf.write(audio_bytes)
+
         chunk_bytes_list.append(audio_bytes)
-
-        # Save individual chunk as MP3 (ElevenLabs returns MP3 bytes)
-        chunk_audio_path = f"{out_base}_chunk_{i:02d}.mp3"
-        with open(chunk_audio_path, "wb") as cf:
-            cf.write(audio_bytes)
+        new_chunks[chunk_key] = {
+            "hash": chunk_hash,
+            "file": os.path.basename(chunk_audio_path),
+            "chars": len(chunk),
+        }
 
         # Add entry to chunk log
         chunk_log_lines += [
@@ -624,6 +673,14 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
             chunk,
             "",
         ]
+
+    # Save chunks metadata sidecar
+    try:
+        with open(chunks_meta_path, "w", encoding="utf-8") as mf:
+            json.dump({"chunks": new_chunks}, mf, indent=2)
+    except Exception as e:
+        if status_cb:
+            status_cb(f"TTS: Warning — could not write chunks metadata: {e}")
 
     # Write chunk manifest
     with open(chunk_log_path, "w", encoding="utf-8") as lf:
@@ -747,9 +804,16 @@ def _elevenlabs_sts_post(audio_bytes: bytes, api_key: str, voice_id: str,
             "Accept": "audio/mpeg",
         },
     )
+    cfg = load_engine_settings()
+    attempts = int(cfg.get("retry_attempts", 4))
+    raw_backoff = cfg.get("retry_backoff", [5.0, 15.0, 45.0])
+    backoff = tuple(float(x) for x in raw_backoff) if isinstance(raw_backoff, (list, tuple)) else (5.0, 15.0, 45.0)
+
     try:
-        with urllib.request.urlopen(req, timeout=600, context=_SSL_CTX) as resp:
-            return resp.read()
+        return request_with_retry(
+            req, timeout=600.0, attempts=attempts, backoff=backoff,
+            label="[STS]", context=_SSL_CTX, log=print
+        )
     except urllib.error.HTTPError as e:
         err_body = ""
         try:

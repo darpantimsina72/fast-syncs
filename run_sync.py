@@ -155,10 +155,10 @@ def main() -> int:
     settings = _load_settings(script_dir)
 
     # Credentials are typed once, in the dub panel's Settings tab, which mirrors
-    # them into sync_pipeline_settings.json. Fill any that are missing here from
+    # them into sync_pipeline_settings.json. Update them here from
     # the panel's own config so the two can never disagree into a failed run.
     for key, value in _dub_credentials(script_dir).items():
-        if str(settings.get(key) or "").strip() == "":
+        if str(value or "").strip() != "":
             settings[key] = value
 
     # Resolve selections: CLI flag > settings.json > built-in default.

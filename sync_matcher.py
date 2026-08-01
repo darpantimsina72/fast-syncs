@@ -39,6 +39,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # system folder so relative paths like "sync_cache.json" fail.
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
+try:
+    sys.path.insert(0, str(SCRIPT_DIR / "dubbing" / "engine"))
+    from pipeline.net import request_with_retry, get_audio_duration
+except Exception:
+    request_with_retry = None
+    get_audio_duration = None
+
 # ── Force UTF-8 console output (Windows safety) ──────────────────────
 # This script prints box-drawing/check-mark glyphs (✓ → ── …). When stdout
 # is redirected to a file on Windows it defaults to the legacy ANSI code page
@@ -581,8 +588,17 @@ def transcribe_elevenlabs(audio_path, language, api_key):
         )
 
         try:
-            with _urlopen(req, timeout=120) as resp:
-                result = json.loads(resp.read())
+            if callable(request_with_retry):
+                dur_s = get_audio_duration(audio_path) if callable(get_audio_duration) else 60.0
+                timeout = max(300.0, dur_s * 2.0)
+                resp_bytes = request_with_retry(
+                    req, timeout=timeout, attempts=4, backoff=(5.0, 15.0, 45.0),
+                    label="[11LABS]", log=lambda m: print(f"    {m}", flush=True)
+                )
+                result = json.loads(resp_bytes.decode("utf-8"))
+            else:
+                with _urlopen(req, timeout=120) as resp:
+                    result = json.loads(resp.read())
         except urllib.error.HTTPError as e:
             err_body = ""
             try:
