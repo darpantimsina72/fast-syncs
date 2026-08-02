@@ -51,9 +51,9 @@ a runtime dependency.
   reader treats a missing status as synced — old runs import unchanged.
   `_parse_timestamps_text` returns it as `sync_status`.
 - New sidecar `<base>_sync_texts.txt`: blank-line-separated blocks, block N
-  = chunk text for timestamps index N (item notes for BOTH tracks; the
-  synced SRT covers only synced chunks, so notes need their own channel).
-- `_sync_synced.srt` = synced chunks only (regions must not point at the
+  = chunk text for timestamps index N (per-item text for BOTH tracks; the
+  synced SRT covers only synced chunks, so the text needs its own channel).
+- `_sync_synced.srt` = synced chunks only (it must not describe the
   Un sync chain). `_synced.wav` renders synced chunks only, via
   `sync_audio_with_timestamps(..., extend_last=False)` (spans are exact;
   extending the last segment would drag trailing unsync audio in).
@@ -68,8 +68,8 @@ a runtime dependency.
   entries → the **`Un sync`** track — find-by-exact-name or append, the
   SAME name + reuse rule as `auto_sync_pipeline.lua`, so Auto Sync and dub
   runs park leftovers on one track. Item take names: `unsync NN`.
-- Item notes prefer the `sync_texts` sidecar (block by entry index) and
-  fall back to the old synced-SRT cue matching. Summary line reports
+- Per-item chunk text prefers the `sync_texts` sidecar (block by entry
+  index) and falls back to the synced-SRT cue matching. Summary line reports
   "Synced chunks placed / Un sync chunks" when any unsync exist; the
   panel success phase shows `Chunks: N synced, M unsynced` from the
   manifest counts.
@@ -155,8 +155,8 @@ a runtime dependency.
 ### Text to Speech tab (panel)
 
 - Paste text → synthesize → item on a `TTS` track at the EDIT CURSOR
-  (find-or-create track, same rule as `Un sync`). Item note = the spoken
-  text; take name = the wav name.
+  (find-or-create track, same rule as `Un sync`). Hidden item text = the
+  spoken text; take name = the wav name.
 - Runs the EXISTING `--regen-chunk` engine mode (text file in, wav out, no
   emotion, no other stages) — no new engine mode, no contract change on the
   Python side. Only the finish handling differs from Regen Audio: the wav
@@ -633,10 +633,14 @@ POSITION=synced_start (all seconds in Reaper, file is ms).
 Tracks appended at end of project, in order:
 1. `EN Original` — one item, `en_audio`, position 0.
 2. `Dub Chunks` — one item per timestamps line (source `tts_wav`, offsets per
-   above). Item note = matching cue text from `synced_srt` (match by order;
-   if counts differ, match by nearest start ≤0.5s; else leave note empty).
+   above). Chunk text = matching cue text from `synced_srt` (match by order;
+   if counts differ, match by nearest start ≤0.5s; else leave it empty).
 3. `Dub Rendered (ref)` — one item, `synced_wav`, position 0, track MUTED.
-Regions: one per `synced_srt` cue (start/end/text). Wrap in one undo block.
+v0.8: the chunk text is stored in the hidden item ext state
+`P_EXT:fastsyncs_chunk_text`, NOT in `P_NOTES`, and NO project regions are
+created — both painted over the arrange view and hid the waveforms. Writers
+also clear `P_NOTES` so pre-v0.8 items stop drawing text; readers fall back
+to `P_NOTES` when the ext state is empty. Wrap in one undo block.
 All in Lua; SRT parser must handle CRLF, multi-line cue text (join with " "),
 and UTF-8 Indic text (byte-safe string handling only).
 
@@ -723,14 +727,15 @@ Engine mode:
 
 Panel regen UI (post-import, success phase — and available any time via a
 "Regen selected item" section): read the selected media item on a
-"Dub Chunks*" track, load its item NOTE into an editable text box, user edits,
+"Dub Chunks*" track, load its stored chunk text into an editable text box
+(hidden ext state, `P_NOTES` fallback for pre-v0.8 projects), user edits,
 "⟳ Regenerate" → write text to `<out_dir>/regen/chunk_<n>.txt`, out-wav
 `<out_dir>/regen/chunk_<n>_v<K>.wav` (K increments, never overwrite), launch
 engine, poll as usual; on ok: in one undo block set the item's take source to
 the new wav (PCM_Source_CreateFromFile + SetMediaItemTake_Source),
 D_STARTOFFS=0, D_LENGTH=new source length (BR_GetMediaSourceProperties not
-required — use reaper.GetMediaSourceLength), update the item note to the
-edited text, UpdateArrange. Original synced wav and app files untouched.
+required — use reaper.GetMediaSourceLength), store the edited text back in
+the item's hidden ext state, UpdateArrange. Original synced wav and app files untouched.
 
 ## Hard rules
 

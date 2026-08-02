@@ -46,7 +46,7 @@
 --     (EN transcript read-only left, translation editable right).
 --     "Continue to Dubbing" resumes with "--steps dub --script <file>".
 --     A "Full run (no review)" checkbox restores the v0.1 one-shot run.
---   - Chunk regeneration: select a "Dub Chunks" item, edit its note
+--   - Chunk regeneration: select a "Dub Chunks" item, edit its stored
 --     text, hit Regenerate — the engine synthesizes just that text
 --     ("--regen-chunk") and the panel swaps the item's take source to
 --     the new wav. Non-destructive: new files go to <out_dir>/regen/.
@@ -59,9 +59,11 @@
 --   2. "Dub Chunks"         — one item per timestamps line, cut from
 --                             tts_wav (STARTOFFS = orig start,
 --                             LEN = orig dur, POSITION = synced start;
---                             note = matching synced-SRT cue text)
+--                             chunk text = matching synced-SRT cue text,
+--                             kept in a hidden item ext state)
 --   3. "Dub Rendered (ref)" — final synced wav, position 0, MUTED
---   + one project region per synced-SRT cue. One undo block.
+--   One undo block. v0.8: no project regions, no visible item notes —
+--   both drew over the arrange view and hid the waveforms.
 --
 -- Requirements:
 --   - ReaImGui extension (free, via ReaPack). If missing, the script
@@ -1453,7 +1455,7 @@ local MANIFEST_KEYS = {
   "provider", "model", "reply",
   -- v0.4: --voice-change manifest field.
   "vc_wav",
-  -- v0.7: match sync mode (texts sidecar for item notes + chunk counts).
+  -- v0.7: match sync mode (texts sidecar for the item text + chunk counts).
   "sync_texts", "synced_count", "unsynced_count",
 }
 
@@ -1591,7 +1593,7 @@ local function parse_timestamps_file(path)
 end
 
 -- v0.7 texts sidecar (<base>_sync_texts.txt): blank-line-separated blocks,
--- block N = chunk text for timestamps index N (item notes on both tracks).
+-- block N = chunk text for timestamps index N (hidden item text, both tracks).
 -- V5 field, not a local — the main chunk sits at Lua's 200-local limit.
 function V5.parse_texts_file(path)
   local blocks = {}
@@ -1744,6 +1746,28 @@ local function add_file_item(track, path, position, length, startoffs, take_name
   return item
 end
 
+-- v0.8: the chunk text lives in a hidden per-item ext state instead of the
+-- item notes field. REAPER paints notes across the top of the item, which
+-- covered the waveform people are actually editing against; the text is only
+-- ever read back by the Regenerate tab, so it never needs to be on screen.
+V5.ITEM_TEXT_KEY = "P_EXT:fastsyncs_chunk_text"
+
+function V5.set_item_text(item, text)
+  reaper.GetSetMediaItemInfo_String(item, V5.ITEM_TEXT_KEY, text or "", true)
+  -- Pre-v0.8 imports put the same text in the visible notes field; clear it
+  -- so re-imported / regenerated items stop drawing over the waveform.
+  reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", true)
+end
+
+function V5.get_item_text(item)
+  local ok, t = reaper.GetSetMediaItemInfo_String(item, V5.ITEM_TEXT_KEY,
+                                                  "", false)
+  if ok and t and t ~= "" then return t end
+  -- Fallback: projects imported before v0.8 still carry the text in notes.
+  local _, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+  return note or ""
+end
+
 -- Contract note-matching rule: by order when counts are equal; otherwise
 -- nearest cue start within 0.5 s; else empty.
 local function note_for_chunk(cues, n_entries, i, synced_start)
@@ -1800,10 +1824,10 @@ local function import_to_timeline(m)
   if synced_srt ~= "" and file_exists(synced_srt) then
     cues = parse_srt_file(synced_srt)
     if #cues == 0 then
-      skip("synced_srt: no parsable cues -- no regions / item notes")
+      skip("synced_srt: no parsable cues -- no chunk text fallback")
     end
   elseif synced_srt == "" then
-    skip("synced_srt: empty in manifest -- no regions / item notes")
+    skip("synced_srt: empty in manifest -- no chunk text fallback")
   else
     skip('synced_srt: file not found ("' .. synced_srt .. '")')
   end
@@ -1826,7 +1850,7 @@ local function import_to_timeline(m)
   reaper.PreventUIRefresh(1)
 
   local suffix = fresh_name_suffix()
-  local chunks_added, regions_added, notes_matched = 0, 0, 0
+  local chunks_added, notes_matched = 0, 0
 
   -- 1. EN Original
   if en_audio ~= "" then
@@ -1863,7 +1887,7 @@ local function import_to_timeline(m)
           chunks_added = chunks_added + 1
           local note = note_for(e, #synced_entries, i)
           if note ~= "" then
-            reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
+            V5.set_item_text(it, note)
             notes_matched = notes_matched + 1
           end
         end
@@ -1883,7 +1907,7 @@ local function import_to_timeline(m)
           unsync_added = unsync_added + 1
           local note = note_for(e, #unsync_entries, i)
           if note ~= "" then
-            reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
+            V5.set_item_text(it, note)
           end
         end
       end
@@ -1898,11 +1922,9 @@ local function import_to_timeline(m)
     if not it then skip("synced_wav: REAPER could not open the media file") end
   end
 
-  -- Regions: one per synced-SRT cue.
-  for _, c in ipairs(cues) do
-    reaper.AddProjectMarker2(0, true, c.start, c.stop, c.text or "", -1, 0)
-    regions_added = regions_added + 1
-  end
+  -- v0.8: no regions. One region per cue drew a vertical line through every
+  -- track at every cue boundary, which is what made the arrange view
+  -- unreadable at normal zoom. The cue text still reaches the items above.
 
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
@@ -1912,7 +1934,6 @@ local function import_to_timeline(m)
     "Import finished" .. (suffix ~= "" and " (track set" .. suffix .. ")" or "") .. ".",
     "",
     "Dub chunks placed: " .. chunks_added,
-    "Regions created:   " .. regions_added,
   }
   if unsync_added > 0 then
     lines[3] = "Synced chunks placed: " .. chunks_added
@@ -1920,8 +1941,9 @@ local function import_to_timeline(m)
                         .. '  (on the "' .. V5.TRACK_UNSYNC .. '" track)'
   end
   if chunks_added > 0 then
-    lines[#lines + 1] = "Item notes matched: " .. notes_matched
+    lines[#lines + 1] = "Chunk text stored:  " .. notes_matched
                         .. " of " .. chunks_added
+                        .. "  (hidden -- shown in the Regenerate tab)"
   end
   if #skipped > 0 then
     lines[#lines + 1] = ""
@@ -2932,7 +2954,7 @@ local function apply_regen_result(wav)
     reaper.SetMediaItemInfo_Value(item, "D_LENGTH", len)
   end
   reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", basename(wav), true)
-  reaper.GetSetMediaItemInfo_String(item, "P_NOTES", p.note or "", true)
+  V5.set_item_text(item, p.note or "")
   reaper.Undo_EndBlock("Regenerate dub chunk", -1)
   reaper.UpdateArrange()
   return true
@@ -3631,9 +3653,7 @@ local function ui_regen_section(ctx, default_open)
     local guid = _item_guid(item)
     if guid ~= _regen_sel_guid then
       _regen_sel_guid = guid
-      local _, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES",
-                                                        "", false)
-      _regen_text = note or ""
+      _regen_text = V5.get_item_text(item)
     end
 
     local tr = reaper.GetMediaItem_Track(item)
@@ -4094,8 +4114,7 @@ function V5.tts_import(wav)
     reaper.SetMediaItemInfo_Value(item, "D_LENGTH", len)
   end
   reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", basename(wav), true)
-  reaper.GetSetMediaItemInfo_String(
-    item, "P_NOTES", (V5.tts_pending and V5.tts_pending.text) or "", true)
+  V5.set_item_text(item, (V5.tts_pending and V5.tts_pending.text) or "")
   reaper.Undo_EndBlock("Import TTS audio", -1)
   reaper.UpdateArrange()
   return true

@@ -840,7 +840,8 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     manifest["unsynced_count"] = str(unsynced_n)
 
     # Synced SRT: cues for the synced chunks at their timeline positions
-    # (drives the REAPER regions; Un sync chunks get no region).
+    # (importer fallback for the per-item chunk text; the Un sync chunks
+    # are not in here, they come from the texts sidecar).
     srt_lines = []
     for n, e in enumerate(
             sorted(synced_entries, key=lambda x: x["synced_start_ms"]), 1):
