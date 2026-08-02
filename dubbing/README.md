@@ -148,13 +148,21 @@ from those files only — they are never placed on a command line.
    at its English line's timestamp. Chunks with no English home (or no
    room) go to the **Un sync** track — the same behaviour as Auto Sync.
 
-   The panel has seven tabs (v0.5): **Full Pipeline** (the LLM translates —
+   The panel has eight tabs: **Full Pipeline** (the LLM translates —
    pauses for your review), **Paste Translation** (your script),
    **Auto Sync** (the fast-syncs clip-matching pipeline, embedded right in
-   this window — its own settings live inside the tab), **Regen Audio**
-   (re-synthesize one selected chunk), **Track Voice** (re-voice a whole
-   track), **Logs** (full live log) and **Settings** (keys, python
-   override, updater).
+   this window — its own settings live inside the tab), **Text to Speech**
+   (paste any text, get it spoken on a `TTS` track — see below),
+   **Regen Audio** (re-synthesize one selected chunk), **Track Voice**
+   (re-voice a whole track), **Logs** (full live log) and **Settings**
+   (keys, python override, updater).
+
+   **Voice bookmarks.** Anywhere you pick a voice — ⚙ Settings, Track
+   Voice, Text to Speech — there is a search box and a **☆ Bookmark this
+   voice** button. Starred voices sit at the top of the list with a ★ and
+   stay there across projects, languages and restarts, so you never scroll
+   the whole account catalogue again. Bookmarks are saved in
+   `reaper/voice_bookmarks.json` on your machine only.
 4. Click **▶ Run dubbing pipeline**. By default this is a **staged run**:
    the engine transcribes and translates (stages S1a–S2c), then pauses.
    Progress and the stage checklist stay on the **Full Pipeline** tab; the
@@ -215,7 +223,14 @@ from those files only — they are never placed on a command line.
    dub stays synced), and imported as a new track directly below the
    original. The original track is muted but never modified. Files land in
    `<project path>/VoiceChange/`.
-9. **Sync dubbed clips to the English timeline** — the **Auto Sync** tab is
+9. **Just speak some text** — go to the **Text to Speech** tab, paste (or
+   type) any text, pick a voice, click **🔊 Generate + import**. The audio
+   is synthesized and dropped straight onto a `TTS` track at the edit
+   cursor, with the spoken text kept in the item's note. No transcription,
+   no translation, no syncing — the plain "say this in that voice" tool.
+   Files land in `<project path>/TTS/`, so save the project first.
+   **Import again** re-places the last clip at the current cursor.
+10. **Sync dubbed clips to the English timeline** — the **Auto Sync** tab is
    the full fast-syncs pipeline embedded in this window: it reads your
    Dialogue VO + Dub tracks, AI-matches every clip, and snaps each dubbed
    clip to its English line. Its settings (tracks, connection mode, keys)

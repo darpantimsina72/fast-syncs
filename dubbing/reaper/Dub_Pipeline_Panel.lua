@@ -1076,12 +1076,13 @@ local _imported        = false
 -- v0.2/v0.3 run mode: which engine invocation the current/last poll belongs
 -- to. Drives the stage checklist and the finish handling.
 local _run_mode        = "full"    -- full | translate | dub | regen |
-                                   -- test_llm | list_voices | voice_change
+                                   -- test_llm | list_voices | voice_change |
+                                   -- tts (v0.7 Text to Speech tab)
 
 -- Utility modes never own the phase state: they report back into the phase
 -- they were launched from and leave the last run's manifest untouched.
 local UTIL_MODES = { regen = true, test_llm = true, list_voices = true,
-                     voice_change = true }
+                     voice_change = true, tts = true }
 local _util_return_phase = "setup" -- phase to return to when test/fetch ends
 
 -- v0.3 Settings section state.
@@ -3255,6 +3256,34 @@ local function _finish_run(exit_code)
     return
   end
 
+  -- v0.7 Text to Speech: same --regen-chunk manifest, different landing —
+  -- the wav goes onto the TTS track at the edit cursor.
+  if _run_mode == "tts" then
+    local back = V5.tts_return_phase or "setup"
+    if cancelled then
+      ui_set_banner("warn", "Speech generation cancelled.")
+    elseif m and m.status == "ok" and exit_code == 0
+           and (m.regen_wav or "") ~= "" then
+      V5.tts_last_wav = m.regen_wav
+      local ok, why = V5.tts_import(m.regen_wav)
+      if ok then
+        ui_set_banner("info",
+          "Speech generated and imported on the TTS track:\n" .. m.regen_wav)
+      else
+        ui_set_banner("error",
+          "The audio was generated, but the import failed:\n" ..
+          (why or "(unknown)") .. "\n\nThe wav is at:\n" .. m.regen_wav)
+      end
+    else
+      ui_set_banner("error", "Speech generation failed:\n" ..
+                             _error_detail(600) ..
+                             "\n\nFull log: " .. LOG_PATH)
+    end
+    V5.tts_pending = nil
+    _ui_phase = back
+    return
+  end
+
   -- Chunk regeneration never owns the phase state: it reports back into the
   -- phase it was started from and leaves the last run's manifest untouched.
   if _run_mode == "regen" then
@@ -3407,6 +3436,7 @@ local function _stage_line()
   if _run_mode == "regen"        then return "Regenerating chunk audio (TTS)…" end
   if _run_mode == "test_llm"     then return "Testing LLM connection…" end
   if _run_mode == "list_voices"  then return "Fetching ElevenLabs voices…" end
+  if _run_mode == "tts"          then return "Generating speech (ElevenLabs)…" end
   if _run_mode == "voice_change" then
     return "Changing track voice (ElevenLabs speech-to-speech)…"
   end
@@ -3618,6 +3648,145 @@ end
 -- rendered to a wav, converted with the ElevenLabs voice changer
 -- (speech-to-speech keeps timing/pacing — a synced dub stays synced) and
 -- imported as a new track below the original. The original is muted only.
+-- ---------------------------------------------------------------------------
+-- v0.7 voice bookmarks + shared voice picker.
+--
+-- Scrolling the whole ElevenLabs catalogue to find the same few voices got
+-- old fast, so voices can be starred. Bookmarks live in their own file next
+-- to the panel settings (same {"voices":[{id,name}]} shape the --list-voices
+-- manifest uses, so parse_voices_json reads them as-is) and are GLOBAL: they
+-- follow the user across projects and languages, unlike the fetched
+-- catalogue, which is per-language and lost when the panel closes.
+--
+-- V5 fields, not locals — the main chunk is at Lua's 200-local limit.
+-- ---------------------------------------------------------------------------
+
+V5.BOOKMARKS_PATH = SCRIPT_DIR .. SEP .. "voice_bookmarks.json"
+V5.bookmarks      = {}      -- { {id=, name=}, … }
+V5.voice_filter   = {}      -- per-picker search text, keyed by widget id
+
+function V5.bookmarks_load()
+  V5.bookmarks = parse_voices_json(read_all(V5.BOOKMARKS_PATH) or "")
+end
+
+function V5.bookmarks_save()
+  local f = io.open(V5.BOOKMARKS_PATH, "wb")
+  if not f then return false end
+  f:write('{\n  "voices": [\n')
+  for i, v in ipairs(V5.bookmarks) do
+    f:write(string.format('    {"id": "%s", "name": "%s"}%s\n',
+      _json_escape(v.id or ""), _json_escape(v.name or ""),
+      i < #V5.bookmarks and "," or ""))
+  end
+  f:write('  ]\n}\n')
+  f:close()
+  return true
+end
+
+function V5.bookmark_index(id)
+  for i, v in ipairs(V5.bookmarks) do
+    if v.id == id then return i end
+  end
+  return nil
+end
+
+-- Best display name for a voice id: the bookmark's own name, else the
+-- fetched catalogue, else empty (a manually typed id nobody has named).
+function V5.voice_name(id)
+  local i = V5.bookmark_index(id)
+  if i then return V5.bookmarks[i].name or "" end
+  for _, vc in ipairs(_voices) do
+    if vc.id == id then return vc.name or "" end
+  end
+  return ""
+end
+
+function V5.bookmark_toggle(id)
+  if not (id or ""):match("%S") then return end
+  local i = V5.bookmark_index(id)
+  if i then
+    table.remove(V5.bookmarks, i)
+  else
+    V5.bookmarks[#V5.bookmarks + 1] = { id = id, name = V5.voice_name(id) }
+  end
+  V5.bookmarks_save()
+end
+
+function V5.voice_label(vc, starred)
+  return (starred and '★ ' or '')
+         .. ((vc.name or "") ~= "" and vc.name or "(unnamed)")
+         .. '  —  ' .. (vc.id or "")
+end
+
+-- Case-insensitive substring match on name or id. plain=true: a voice name
+-- with a "-" or "(" must not be read as a Lua pattern.
+function V5.voice_matches(vc, needle)
+  if needle == "" then return true end
+  needle = needle:lower()
+  return ((vc.name or ""):lower():find(needle, 1, true) ~= nil)
+         or ((vc.id or ""):lower():find(needle, 1, true) ~= nil)
+end
+
+-- Shared picker: search box + one combo listing bookmarks (★) first, then
+-- the fetched catalogue, + a star toggle for the current voice. *key* makes
+-- the widget ids unique per host (settings / vc / tts). Returns the chosen
+-- voice id (unchanged when the user picked nothing this frame).
+function V5.ui_voice_picker(ctx, key, cur, label)
+  cur = cur or ""
+  local filter = V5.voice_filter[key] or ""
+  local rvf, ftxt = reaper.ImGui_InputText(ctx, 'Search voices##' .. key,
+                                           filter)
+  if rvf then
+    V5.voice_filter[key] = ftxt
+    filter = ftxt
+  end
+
+  local NO_PICK = '(pick a voice)'
+  local items, cur_label = { NO_PICK }, NO_PICK
+  local by_label = {}
+  local function add(vc, starred)
+    if not V5.voice_matches(vc, filter) then return end
+    local lbl = V5.voice_label(vc, starred)
+    items[#items + 1] = lbl
+    by_label[lbl] = vc.id
+    if vc.id == cur then cur_label = lbl end
+  end
+  for _, vc in ipairs(V5.bookmarks) do add(vc, true) end
+  for _, vc in ipairs(_voices) do
+    if not V5.bookmark_index(vc.id) then add(vc, false) end
+  end
+
+  local changed, picked = _ui_combo(ctx, (label or 'Voice') .. '##pick' .. key,
+                                    cur_label, items)
+  if changed and picked ~= NO_PICK and by_label[picked] then
+    cur = by_label[picked]
+  end
+
+  local starred = V5.bookmark_index(cur) ~= nil
+  _ui_begin_disabled(ctx, not (cur or ""):match("%S"))
+  if reaper.ImGui_SmallButton(ctx,
+      (starred and '★ Remove bookmark##bm' or '☆ Bookmark this voice##bm')
+      .. key) then
+    V5.bookmark_toggle(cur)
+  end
+  _ui_end_disabled(ctx)
+  reaper.ImGui_SameLine(ctx)
+  if #V5.bookmarks == 0 then
+    _grey_hint(ctx, 'No bookmarks yet — star a voice to keep it at the top.')
+  else
+    local nm = V5.voice_name(cur)
+    _grey_hint(ctx, string.format('%d bookmarked%s', #V5.bookmarks,
+      nm ~= "" and ('  ·  current: ' .. nm) or ''))
+  end
+  if #_voices == 0 and #V5.bookmarks == 0 then
+    _grey_hint(ctx,
+      'Tip: "Fetch voices" in ⚙ Settings fills this list from your account.')
+  end
+  return cur
+end
+
+V5.bookmarks_load()
+
 local function ui_voice_change_section(ctx, default_open)
   local flags = 0
   if default_open and reaper.ImGui_TreeNodeFlags_DefaultOpen then
@@ -3660,28 +3829,9 @@ local function ui_voice_change_section(ctx, default_open)
     end
   end
 
-  -- Target voice: pick from the fetched catalogue and/or paste an id.
-  if #_voices > 0 then
-    local NO_PICK = '(pick a fetched voice)'
-    local vitems, vcur = { NO_PICK }, NO_PICK
-    for _, vc in ipairs(_voices) do
-      local label = (vc.name ~= "" and vc.name or "(unnamed)")
-                    .. '  —  ' .. vc.id
-      vitems[#vitems + 1] = label
-      if vc.id == VC_VOICE_ID then vcur = label end
-    end
-    local changed, picked = _ui_combo(ctx, 'New voice##vc', vcur, vitems)
-    if changed and picked ~= NO_PICK then
-      for _, vc in ipairs(_voices) do
-        local label = (vc.name ~= "" and vc.name or "(unnamed)")
-                      .. '  —  ' .. vc.id
-        if label == picked then VC_VOICE_ID = vc.id break end
-      end
-    end
-  else
-    _grey_hint(ctx,
-      'Tip: "Fetch voices" in ⚙ Settings fills a pickable voice list here.')
-  end
+  -- Target voice: bookmarks first, then the fetched catalogue (v0.7 picker),
+  -- with the manual id field still the final say.
+  VC_VOICE_ID = V5.ui_voice_picker(ctx, 'vc', VC_VOICE_ID, 'New voice')
   local rv
   rv, VC_VOICE_ID = reaper.ImGui_InputText(ctx, 'Voice id##vc',
                                            VC_VOICE_ID or '')
@@ -3708,6 +3858,214 @@ local function ui_voice_change_section(ctx, default_open)
   end
 
   reaper.ImGui_Unindent(ctx, 12)
+end
+
+-- ---------------------------------------------------------------------------
+-- v0.7 Text to Speech tab — paste text, synthesize it, drop it on the
+-- timeline. No transcription, no translation, no sync: this is the plain
+-- "say this in that voice" utility.
+--
+-- It runs the engine's EXISTING --regen-chunk mode (text file in, wav out,
+-- no emotion pass, no other stages) rather than adding an engine mode: the
+-- flags, manifest and status plumbing are identical to what the panel
+-- already polls. Only the finish handling differs — the wav goes onto a
+-- "TTS" track instead of replacing an item's take.
+-- ---------------------------------------------------------------------------
+
+V5.tts_text         = ""
+V5.tts_voice        = ""      -- blank = fall back to the Settings voice
+V5.tts_pending      = nil     -- { out_wav, text } while a run is in flight
+V5.tts_return_phase = "setup"
+V5.tts_last_wav     = ""
+
+function V5.tts_import(wav)
+  if not file_exists(wav) then
+    return false, "The generated wav is missing:\n" .. wav
+  end
+  local src = reaper.PCM_Source_CreateFromFile(wav)
+  if not src then
+    return false, "REAPER could not open the media file:\n" .. wav
+  end
+  local tr = V5.find_or_append_track("TTS")
+  local pos = reaper.GetCursorPosition()
+  reaper.Undo_BeginBlock()
+  local item = reaper.AddMediaItemToTrack(tr)
+  local take = reaper.AddTakeToMediaItem(item)
+  reaper.SetMediaItemTake_Source(take, src)
+  reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+  local len, is_qn = reaper.GetMediaSourceLength(src)
+  if len and len > 0 and not is_qn then
+    reaper.SetMediaItemInfo_Value(item, "D_LENGTH", len)
+  end
+  reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", basename(wav), true)
+  reaper.GetSetMediaItemInfo_String(
+    item, "P_NOTES", (V5.tts_pending and V5.tts_pending.text) or "", true)
+  reaper.Undo_EndBlock("Import TTS audio", -1)
+  reaper.UpdateArrange()
+  return true
+end
+
+function V5.start_tts()
+  ui_clear_banner()
+  local text = V5.tts_text or ""
+  if not text:match("%S") then
+    ui_set_banner("error", "Nothing to speak — type or paste some text first.")
+    return false
+  end
+  local voice = ((V5.tts_voice or "") ~= "" and V5.tts_voice) or VOICE_ID
+  if not (voice or ""):match("%S") then
+    ui_set_banner("error",
+      "No voice selected. Bookmark one here, or fetch the catalogue in the " ..
+      "⚙ Settings tab.")
+    return false
+  end
+  -- Audio lands next to the project, like DubSource/ and VoiceChange/ do.
+  local proj = reaper.GetProjectPath("")
+  if (proj or "") == "" then
+    ui_set_banner("error",
+      "Save the REAPER project first — the generated audio is written to " ..
+      "its media folder.")
+    return false
+  end
+  local dir = proj .. SEP .. "TTS"
+  reaper.RecursiveCreateDirectory(dir, 0)
+
+  -- Indic text never travels on argv: it goes through this UTF-8 file.
+  local stamp = os.date("%Y%m%d_%H%M%S")
+  local txt_path = string.format("%s%sTTS_%s.txt", dir, SEP, stamp)
+  local f = io.open(txt_path, "wb")
+  if not f then
+    ui_set_banner("error", "Could not write:\n" .. txt_path)
+    return false
+  end
+  local body = text:gsub("\r\n", "\n")
+  if body:sub(-1) ~= "\n" then body = body .. "\n" end
+  f:write(body)
+  f:close()
+
+  local k, wav_path = 1, string.format("%s%sTTS_%s.wav", dir, SEP, stamp)
+  while file_exists(wav_path) do
+    k = k + 1
+    wav_path = string.format("%s%sTTS_%s_v%d.wav", dir, SEP, stamp, k)
+  end
+
+  local py = preflight_engine()
+  if not py then return false end
+
+  local cmd = build_engine_cmd(py, {
+    regen = true, language = LANGUAGE, text_file = txt_path,
+    out_wav = wav_path, voice_id = voice,
+  })
+  V5.tts_pending      = { out_wav = wav_path, text = text }
+  V5.tts_return_phase = _ui_phase
+  return launch_engine(cmd, "tts", {
+    "[panel] TTS text: " .. txt_path,
+    "[panel] Out wav : " .. wav_path,
+    "[panel] Voice   : " .. voice,
+    "[panel] Python  : " .. py,
+  })
+end
+
+function V5.ui_tts_tab(ctx)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(),  10.0, 10.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(),  8.0, 6.0)
+
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFFFFFFF)
+  local pushed = _push_font(ctx, 22)
+  reaper.ImGui_Text(ctx, 'Text to Speech')
+  if pushed then _pop_font(ctx) end
+  reaper.ImGui_PopStyleColor(ctx)
+
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  reaper.ImGui_Text(ctx,
+    'Paste text  →  speak it  →  it lands on a "TTS" track at the edit cursor')
+  reaper.ImGui_PopStyleColor(ctx)
+
+  reaper.ImGui_Dummy(ctx, 0, 6)
+  _ui_render_banner(ctx)
+
+  local running = (_ui_phase == "running")
+  _ui_begin_disabled(ctx, running)
+
+  reaper.ImGui_Text(ctx, 'Text')
+  local pushedf = _push_font(ctx, 17)
+  local rv, txt = reaper.ImGui_InputTextMultiline(
+    ctx, '##ttstext', V5.tts_text or '', -1, 200)
+  if pushedf then _pop_font(ctx) end
+  if rv then V5.tts_text = txt end
+
+  if reaper.ImGui_SmallButton(ctx, '📥 Paste from clipboard##tts') then
+    local t = reaper.ImGui_GetClipboardText and
+              reaper.ImGui_GetClipboardText(ctx)
+    if t and t:match("%S") then
+      V5.tts_text = t
+      ui_set_banner("info", "Pasted " .. #t .. " characters.")
+    else
+      ui_set_banner("warn", "The clipboard has no text.")
+    end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, 'Clear##tts') then V5.tts_text = "" end
+  reaper.ImGui_SameLine(ctx)
+  _grey_hint(ctx, string.format('%d characters', #(V5.tts_text or "")))
+
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 4)
+
+  -- Same bookmarks + search as Settings and Track Voice.
+  V5.tts_voice = V5.ui_voice_picker(ctx, 'tts', V5.tts_voice, 'Voice')
+  local rv2
+  rv2, V5.tts_voice = reaper.ImGui_InputText(ctx, 'Voice id##ttsid',
+                                             V5.tts_voice or '')
+  _grey_hint(ctx, 'Leave empty to use the ⚙ Settings voice'
+                  .. ((VOICE_ID or "") ~= "" and (' (' .. VOICE_ID .. ')')
+                      or ' (none set yet)') .. '.')
+  _grey_hint(ctx, 'Model ' .. (EL_MODEL or '?') ..
+                  '  ·  eleven_v3 detects the language from the text itself.')
+
+  reaper.ImGui_Dummy(ctx, 0, 6)
+  local voice = ((V5.tts_voice or "") ~= "" and V5.tts_voice) or VOICE_ID
+  local can = (V5.tts_text or ""):match("%S") ~= nil
+              and (voice or ""):match("%S") ~= nil
+  _ui_begin_disabled(ctx, not can)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x2A9945FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x44CC55FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x119911FF)
+  if reaper.ImGui_Button(ctx, '🔊  Generate + import', 220, 36) and can then
+    V5.start_tts()
+  end
+  reaper.ImGui_PopStyleColor(ctx, 3)
+  _ui_end_disabled(ctx)
+  if not can then
+    reaper.ImGui_SameLine(ctx)
+    _grey_hint(ctx, (V5.tts_text or ""):match("%S") and 'pick a voice first'
+                    or 'paste some text first')
+  end
+
+  _ui_end_disabled(ctx)
+
+  if running then
+    reaper.ImGui_Dummy(ctx, 0, 4)
+    _grey_hint(ctx, 'A run is in progress — the Logs tab shows its output.')
+  end
+  if (V5.tts_last_wav or "") ~= "" then
+    reaper.ImGui_Dummy(ctx, 0, 4)
+    _grey_hint(ctx, 'Last generated: ' .. V5.tts_last_wav)
+    if reaper.ImGui_SmallButton(ctx, 'Import again##tts') then
+      local ok, why = V5.tts_import(V5.tts_last_wav)
+      ui_set_banner(ok and "info" or "error",
+        ok and ("Imported again at the edit cursor:\n" .. V5.tts_last_wav)
+        or (why or "Import failed."))
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Open folder##tts') then
+      open_path(dirname(V5.tts_last_wav))
+    end
+  end
+
+  reaper.ImGui_PopStyleVar(ctx, 3)
 end
 
 -- ─── Review phase (staged run paused after translation) ─────
@@ -4015,27 +4373,13 @@ local function ui_settings_section(ctx, always_open)
   reaper.ImGui_SameLine(ctx)
   _grey_hint(ctx, 'ElevenLabs voice catalogue for: ' .. (LANGUAGE or '?'))
 
-  if #_voices > 0 then
-    local NO_PICK = '(pick a fetched voice)'
-    local items, cur = { NO_PICK }, NO_PICK
-    for _, vc in ipairs(_voices) do
-      local label = (vc.name ~= "" and vc.name or "(unnamed)")
-                    .. '  —  ' .. vc.id
-      items[#items + 1] = label
-      if vc.id == VOICE_ID then cur = label end
-    end
-    local changed, picked = _ui_combo(ctx, 'Voice##fetched', cur, items)
-    if changed and picked ~= NO_PICK then
-      for _, vc in ipairs(_voices) do
-        local label = (vc.name ~= "" and vc.name or "(unnamed)")
-                      .. '  —  ' .. vc.id
-        if label == picked then VOICE_ID = vc.id break end
-      end
-    end
-    if _voices_language ~= "" and _voices_language ~= LANGUAGE then
-      _grey_hint(ctx, 'List was fetched for ' .. _voices_language ..
-                      ' — fetch again for ' .. LANGUAGE .. '.')
-    end
+  -- v0.7: bookmarks + search, shared with the Track Voice and Text to
+  -- Speech tabs. The manual id field below still wins — it IS the value.
+  VOICE_ID = V5.ui_voice_picker(ctx, 'settings', VOICE_ID, 'Voice')
+  if #_voices > 0 and _voices_language ~= "" and _voices_language ~= LANGUAGE then
+    _grey_hint(ctx, 'Fetched list is for ' .. _voices_language ..
+                    ' — fetch again for ' .. LANGUAGE ..
+                    ' (bookmarks are not affected).')
   end
   rv, VOICE_ID = reaper.ImGui_InputText(ctx, 'Voice id (manual)', VOICE_ID or '')
 
@@ -4866,6 +5210,11 @@ local function main()
               V5.sync_err or 'Auto Sync module is not loaded.')
             reaper.ImGui_PopStyleColor(_ui_ctx)
           end
+          reaper.ImGui_EndTabItem(_ui_ctx)
+        end
+        if reaper.ImGui_BeginTabItem(_ui_ctx, ' Text to Speech ') then
+          reaper.ImGui_Dummy(_ui_ctx, 0, 6)
+          V5.ui_tts_tab(_ui_ctx)
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
         if reaper.ImGui_BeginTabItem(_ui_ctx, ' Regen Audio ') then

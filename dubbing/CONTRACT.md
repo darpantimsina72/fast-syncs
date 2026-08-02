@@ -85,6 +85,41 @@ a runtime dependency.
   the saved window position again (the one rename to add the suffix does,
   once).
 
+### Voice bookmarks + search (panel)
+
+- `reaper/voice_bookmarks.json` (gitignored, GLOBAL — not per project, not
+  per language): `{"voices":[{"id","name"},…]}`, the SAME shape the
+  `--list-voices` manifest uses, so `parse_voices_json` reads it unchanged.
+- `V5.ui_voice_picker(ctx, key, cur, label)` is the one voice widget, used
+  by ⚙ Settings, Track Voice and Text to Speech (`key` keeps the ImGui ids
+  unique). It renders a search box (case-insensitive substring on name or
+  id, `find(…, 1, true)` so a name with `(`/`-` is not read as a pattern),
+  one combo listing bookmarks (★) before the fetched catalogue, and a
+  star/unstar button for the current voice. Returns the chosen id; every
+  host keeps its manual "Voice id" field, which still wins.
+- Bookmarks survive panel restarts and language switches; the fetched
+  catalogue (`_voices`) does not, which is the whole point.
+
+### Text to Speech tab (panel)
+
+- Paste text → synthesize → item on a `TTS` track at the EDIT CURSOR
+  (find-or-create track, same rule as `Un sync`). Item note = the spoken
+  text; take name = the wav name.
+- Runs the EXISTING `--regen-chunk` engine mode (text file in, wav out, no
+  emotion, no other stages) — no new engine mode, no contract change on the
+  Python side. Only the finish handling differs from Regen Audio: the wav
+  is imported instead of replacing an item's take.
+- `tts` is a UTIL_MODE: it never owns the phase state, never clears the
+  last run's manifest or a pending review, and returns to the phase it was
+  started from. It has no entry in `MODE_STAGES`, so no stage checklist is
+  drawn (same as regen).
+- Files land in `<project media path>/TTS/` as `TTS_<stamp>.txt` (UTF-8 —
+  Indic text never travels on argv) and `TTS_<stamp>[_vN].wav`. An unsaved
+  project is refused with a message, since there is no media path yet.
+- Voice resolution: the tab's own voice → ⚙ Settings voice → engine
+  auto-resolve. `--language` is still passed (it only matters for
+  auto-resolution; eleven_v3 detects the language from the text).
+
 ### Per-project run history (panel)
 
 - `engine/history/<project-slug>.json` (same slug as the status dirs;
