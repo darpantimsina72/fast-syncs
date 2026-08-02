@@ -201,6 +201,63 @@ TTS_LANGUAGES = {
         "Standard": [], "WaveNet": [], "Chirp3": [],
     },
 }
+
+# ─── User-added languages (v0.7) ────────────────────────────────────────────
+# config/custom_languages.json, written by the panel's Settings tab:
+#     {"languages": [{"name": "Punjabi", "code": "pa-IN", "tag": "PA",
+#                     "display_name": "Punjabi", "el_tokens": ["pa", "punjabi"]}]}
+# Entries are merged into TTS_LANGUAGES on import, so every downstream lookup
+# (voice matching, output naming, prompt loading) treats them like a built-in.
+# A name that collides with a built-in is IGNORED rather than overwriting it:
+# the shipped table carries Google voice lists a hand-written entry cannot.
+# Google Cloud TTS is marked unavailable — this engine dubs with ElevenLabs,
+# which auto-detects the script from the text.
+CUSTOM_LANGUAGES_FILE = os.path.join(CONFIG_DIR, "custom_languages.json")
+
+
+def _load_custom_languages() -> list:
+    """Names of the user-added languages, after merging them into the table."""
+    added = []
+    try:
+        with open(CUSTOM_LANGUAGES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return added
+    except Exception as e:
+        print(f"[config] Could not read {CUSTOM_LANGUAGES_FILE}: {e} — "
+              "user-added languages ignored.")
+        return added
+    entries = data.get("languages") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return added
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        name = str(e.get("name") or "").strip()
+        if not name:
+            continue
+        if name in TTS_LANGUAGES:
+            print(f"[config] Custom language {name!r} shadows a built-in — "
+                  "keeping the built-in entry.")
+            continue
+        code = str(e.get("code") or "").strip() or "en-IN"
+        tokens = e.get("el_tokens")
+        if not isinstance(tokens, (list, tuple)) or not tokens:
+            tokens = [name.lower(), code.split("-")[0].lower()]
+        TTS_LANGUAGES[name] = {
+            "code": code,
+            "autonym": str(e.get("autonym") or name),
+            "tag": (str(e.get("tag") or name[:2]).upper())[:4],
+            "display_name": str(e.get("display_name") or name),
+            "el_tokens": tuple(str(t).lower() for t in tokens),
+            "google_unavailable": True,
+            "Standard": [], "WaveNet": [], "Chirp3": [],
+        }
+        added.append(name)
+    return added
+
+
+CUSTOM_LANGUAGE_NAMES = _load_custom_languages()
 TTS_LANGUAGE_NAMES   = list(TTS_LANGUAGES.keys())
 TTS_DEFAULT_LANGUAGE = "Bengali"
 

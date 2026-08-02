@@ -131,6 +131,21 @@ function V5.set_status_paths()
 end
 V5.set_status_paths()
 
+-- v0.7 per-stage models. Every place the pipeline calls an LLM can point at
+-- its own model; blank means "use the one Model field". {key, label, hint}
+-- — the key matches the engine's model_<key> setting and its role name in
+-- llm.py::_model_for(). sync_match is the odd one out: Auto Sync reads its
+-- model from sync_pipeline_settings.json, so the panel mirrors it there.
+V5.MODEL_ROLES = {
+  { "translate",  "Translate",        "Full Pipeline steps 1-3" },
+  { "emotion",    "Emotion tags",     "step 4, before TTS" },
+  { "match",      "Dub matching",     "script to English lines" },
+  { "mapping",    "Legacy sync map",  "only in legacy sync mode" },
+  { "sync_match", "Auto Sync match",  "the Auto Sync tab" },
+}
+V5.model_roles = { translate = "", emotion = "", match = "", mapping = "",
+                   sync_match = "" }
+
 -- v0.7: app version, read from the fast-syncs root VERSION file (kept
 -- current by the updater). Shown above the tab bar and in Settings.
 V5.APP_VERSION = (function()
@@ -467,6 +482,12 @@ local function load_llm_config()
   v = jval("http_user_agent")  if v then LLM_USER_AGENT = v end
   v = jval("server_url")       if v then LLM_SERVER_URL   = v end
   v = jval("server_token")     if v then LLM_SERVER_TOKEN = v end
+  -- v0.7 per-stage model overrides. Blank = "use the Model field above",
+  -- which is what every existing config has, so nothing changes on upgrade.
+  for _, role in ipairs(V5.MODEL_ROLES) do
+    v = jval("model_" .. role[1])
+    if v then V5.model_roles[role[1]] = v end
+  end
 end
 
 -- Load config/tts_settings.json (if present). Its voice_id / el_model win
@@ -548,7 +569,10 @@ local function save_sync_credentials()
   local pairs_out = {
     { "conn_mode",       conn },
     { "gemini_backend",  backend },
-    { "gemini_model",    LLM_MODEL },
+    -- v0.7: Auto Sync's matching gets its own model when one is set here;
+    -- gemini_model is the only model key run_sync.py reads.
+    { "gemini_model",    (V5.model_roles.sync_match or "") ~= ""
+                         and V5.model_roles.sync_match or LLM_MODEL },
     { "gemini_key",      shared_key },
     { "gemini_base_url", LLM_OPENAI_URL },
     { "vertex_key_path", LLM_VERTEX_JSON },
@@ -714,6 +738,13 @@ local function save_config_files()
   -- vertex / gemini-key paths).
   f:write(string.format('  "openai_model": "%s",\n',    _json_escape(LLM_MODEL)))
   f:write(string.format('  "gemini_model": "%s",\n',    _json_escape(LLM_MODEL)))
+  -- v0.7: one optional model per stage. Blank means "use the Model above";
+  -- the engine's _model_for() resolves it that way, so writing them always
+  -- (even empty) keeps the file's shape stable.
+  for _, role in ipairs(V5.MODEL_ROLES) do
+    f:write(string.format('  "model_%s": "%s",\n', role[1],
+      _json_escape(V5.model_roles[role[1]] or "")))
+  end
   f:write(string.format('  "http_user_agent": "%s",\n', _json_escape(LLM_USER_AGENT)))
   f:write(string.format('  "server_url": "%s",\n',      _json_escape(LLM_SERVER_URL)))
   f:write(string.format('  "server_token": "%s",\n',    _json_escape(LLM_SERVER_TOKEN)))
@@ -3661,6 +3692,171 @@ end
 -- V5 fields, not locals — the main chunk is at Lua's 200-local limit.
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- v0.7 user-added languages + prompt editing.
+--
+-- A language is just a name plus five prompt files. config/custom_languages.json
+-- carries the name/code/tag; pipeline/config.py merges each entry into
+-- TTS_LANGUAGES, and dub_engine.py / run_dub.py extend their --language choices
+-- from the same file. Adding one here therefore needs no code change anywhere:
+-- write the JSON, seed the five prompts from a language that already works.
+-- ---------------------------------------------------------------------------
+
+V5.CUSTOM_LANGS_PATH = CONFIG_DIR .. SEP .. "custom_languages.json"
+V5.PROMPTS_DIR       = BASE_DIR .. SEP .. "prompts"
+V5.PROMPT_STAGES = { "Step1_Translation_Prompt", "Step2_Review_Prompt",
+                     "Step3_Punctuation_Prompt", "Step4_Emotion_Prompt",
+                     "SyncingPrompt" }
+V5.custom_langs = {}     -- { {name=, code=, tag=}, … }
+
+-- Generic reader for `"<key>": [ {flat string fields}, … ]`, using the real
+-- JSON string decoder so quotes/escapes inside values can never derail it.
+function V5.json_object_array(text, key)
+  local out = {}
+  if not text then return out end
+  local a, b = text:find('"' .. key .. '"', 1, true)
+  if not a then return out end
+  local i = skip_ws(text, b + 1)
+  if text:sub(i, i) ~= ":" then return out end
+  i = skip_ws(text, i + 1)
+  if text:sub(i, i) ~= "[" then return out end
+  i = i + 1
+  while i <= #text do
+    i = skip_ws(text, i)
+    local c = text:sub(i, i)
+    if c == "]" or c == "" then break end
+    if c == "{" then
+      local obj = {}
+      i = i + 1
+      while i <= #text do
+        i = skip_ws(text, i)
+        local cc = text:sub(i, i)
+        if cc == "}" then i = i + 1 break end
+        if cc == '"' then
+          local k; k, i = decode_json_string(text, i)
+          i = skip_ws(text, i)
+          if text:sub(i, i) == ":" then
+            i = skip_ws(text, i + 1)
+            if text:sub(i, i) == '"' then
+              local val; val, i = decode_json_string(text, i)
+              obj[k] = val
+            else
+              -- Non-string value (a number, or the el_tokens array): skip it.
+              local depth, j = 0, i
+              while j <= #text do
+                local ch = text:sub(j, j)
+                if ch == "[" or ch == "{" then depth = depth + 1
+                elseif ch == "]" or ch == "}" then
+                  if depth == 0 then break end
+                  depth = depth - 1
+                elseif ch == "," and depth == 0 then break end
+                j = j + 1
+              end
+              i = j
+            end
+          end
+        else
+          i = i + 1
+        end
+      end
+      if next(obj) then out[#out + 1] = obj end
+    else
+      i = i + 1
+    end
+  end
+  return out
+end
+
+function V5.custom_langs_load()
+  V5.custom_langs = {}
+  for _, e in ipairs(V5.json_object_array(read_all(V5.CUSTOM_LANGS_PATH),
+                                          "languages")) do
+    local name = (e.name or ""):match("^%s*(.-)%s*$")
+    if name ~= "" then
+      V5.custom_langs[#V5.custom_langs + 1] =
+        { name = name, code = e.code or "", tag = e.tag or "" }
+      local known = false
+      for _, l in ipairs(LANGUAGES) do
+        if l == name then known = true break end
+      end
+      if not known then LANGUAGES[#LANGUAGES + 1] = name end
+    end
+  end
+end
+
+function V5.custom_langs_save()
+  reaper.RecursiveCreateDirectory(CONFIG_DIR, 0)
+  local f = io.open(V5.CUSTOM_LANGS_PATH, "wb")
+  if not f then return false end
+  f:write('{\n  "languages": [\n')
+  for i, l in ipairs(V5.custom_langs) do
+    f:write(string.format(
+      '    {"name": "%s", "code": "%s", "tag": "%s"}%s\n',
+      _json_escape(l.name), _json_escape(l.code or ""),
+      _json_escape(l.tag or ""), i < #V5.custom_langs and "," or ""))
+  end
+  f:write('  ]\n}\n')
+  f:close()
+  return true
+end
+
+function V5.prompt_path(lang, stage)
+  return V5.PROMPTS_DIR .. SEP .. stage .. "_" .. lang .. ".txt"
+end
+
+-- Copy the five prompts of *from_lang* to *to_lang*, never overwriting an
+-- existing file. Returns copied, skipped, missing.
+function V5.prompts_seed(from_lang, to_lang)
+  local copied, skipped, missing = 0, 0, {}
+  for _, stage in ipairs(V5.PROMPT_STAGES) do
+    local src = V5.prompt_path(from_lang, stage)
+    local dst = V5.prompt_path(to_lang, stage)
+    if file_exists(dst) then
+      skipped = skipped + 1
+    else
+      local body = read_all(src)
+      if not body then
+        missing[#missing + 1] = stage
+      else
+        local f = io.open(dst, "wb")
+        if f then f:write(body); f:close(); copied = copied + 1
+        else missing[#missing + 1] = stage end
+      end
+    end
+  end
+  return copied, skipped, missing
+end
+
+-- Prompt editor state.
+V5.prompt_lang  = nil
+V5.prompt_stage = 1
+V5.prompt_text  = ""
+V5.prompt_dirty = false
+V5.prompt_open  = ""      -- path currently loaded ("" = nothing yet)
+
+function V5.prompt_editor_load(lang, stage_idx)
+  local stage = V5.PROMPT_STAGES[stage_idx] or V5.PROMPT_STAGES[1]
+  local path = V5.prompt_path(lang, stage)
+  V5.prompt_lang, V5.prompt_stage = lang, stage_idx
+  V5.prompt_text = read_all(path) or ""
+  V5.prompt_open = path
+  V5.prompt_dirty = false
+  return file_exists(path)
+end
+
+function V5.prompt_editor_save()
+  if V5.prompt_open == "" then return false, "No prompt loaded." end
+  reaper.RecursiveCreateDirectory(V5.PROMPTS_DIR, 0)
+  local f = io.open(V5.prompt_open, "wb")
+  if not f then return false, "Could not write:\n" .. V5.prompt_open end
+  f:write(V5.prompt_text or "")
+  f:close()
+  V5.prompt_dirty = false
+  return true
+end
+
+V5.custom_langs_load()
+
 V5.BOOKMARKS_PATH = SCRIPT_DIR .. SEP .. "voice_bookmarks.json"
 V5.bookmarks      = {}      -- { {id=, name=}, … }
 V5.voice_filter   = {}      -- per-picker search text, keyed by widget id
@@ -4711,6 +4907,177 @@ end
 -- LLM + TTS keys (the old ⚙ collapsible), the Advanced python override,
 -- and the shared fast-syncs updater. Locked while a run is active — the
 -- engine reads config/*.json at launch time.
+-- v0.7: one model per pipeline stage. Blank = the single Model field above.
+function V5.ui_models_section(ctx)
+  if not reaper.ImGui_CollapsingHeader(ctx, 'Model per stage') then return end
+  reaper.ImGui_Indent(ctx, 12)
+  _grey_hint(ctx, 'Leave a box empty to use the Model set above (' ..
+                  ((LLM_MODEL or '') ~= '' and LLM_MODEL or 'not set') ..
+                  '). Use this to give the cheap mechanical stages a faster ' ..
+                  'model and keep the good one for translation.')
+  reaper.ImGui_Dummy(ctx, 0, 2)
+  for _, role in ipairs(V5.MODEL_ROLES) do
+    local key, label, hint = role[1], role[2], role[3]
+    local rv, val = reaper.ImGui_InputText(ctx, label .. '##model_' .. key,
+                                           V5.model_roles[key] or '')
+    if rv then V5.model_roles[key] = val end
+    reaper.ImGui_SameLine(ctx)
+    _grey_hint(ctx, hint)
+  end
+  reaper.ImGui_Dummy(ctx, 0, 2)
+  _grey_hint(ctx, 'Auto Sync match is handed to the Auto Sync tab when you ' ..
+                  'save; the others are read by the dubbing engine.')
+  reaper.ImGui_Unindent(ctx, 12)
+end
+
+-- v0.7: add a target language. The engine picks it up from
+-- config/custom_languages.json — no code change, but it needs prompt files,
+-- so adding one seeds them from a language that already works.
+function V5.ui_languages_section(ctx)
+  if not reaper.ImGui_CollapsingHeader(ctx, 'Languages') then return end
+  reaper.ImGui_Indent(ctx, 12)
+  _grey_hint(ctx, #V5.custom_langs .. ' added by you, ' ..
+                  (#LANGUAGES - #V5.custom_langs) .. ' built in.')
+
+  for i, l in ipairs(V5.custom_langs) do
+    reaper.ImGui_Text(ctx, string.format('%s   (%s)', l.name,
+                                         (l.code or '') ~= '' and l.code or '—'))
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Remove##lang' .. i) then
+      table.remove(V5.custom_langs, i)
+      V5.custom_langs_save()
+      for j = #LANGUAGES, 1, -1 do
+        if LANGUAGES[j] == l.name then table.remove(LANGUAGES, j) end
+      end
+      if LANGUAGE == l.name then LANGUAGE = LANGUAGES[1] or 'Bengali' end
+      ui_set_banner("info", 'Removed "' .. l.name ..
+        '". Its prompt files were left in place.')
+      break
+    end
+  end
+
+  reaper.ImGui_Dummy(ctx, 0, 2)
+  local rv
+  rv, V5.newlang_name = reaper.ImGui_InputText(ctx, 'New language',
+                                               V5.newlang_name or '')
+  rv, V5.newlang_code = reaper.ImGui_InputText(ctx, 'Locale code',
+                                               V5.newlang_code or '')
+  reaper.ImGui_SameLine(ctx)
+  _grey_hint(ctx, 'e.g. pa-IN — labelling only')
+
+  V5.newlang_src = V5.newlang_src or LANGUAGES[1] or 'Bengali'
+  local _, picked = _ui_combo(ctx, 'Copy prompts from', V5.newlang_src,
+                              LANGUAGES)
+  V5.newlang_src = picked
+
+  local name = (V5.newlang_name or ''):match('^%s*(.-)%s*$')
+  local dup = false
+  for _, l in ipairs(LANGUAGES) do if l == name then dup = true end end
+  local can = name ~= '' and not dup and name:match('^[%w%-_ ]+$') ~= nil
+  _ui_begin_disabled(ctx, not can)
+  if reaper.ImGui_Button(ctx, 'Add language', 150, 26) and can then
+    V5.custom_langs[#V5.custom_langs + 1] = {
+      name = name,
+      code = (V5.newlang_code or ''):match('^%s*(.-)%s*$'),
+      tag  = name:sub(1, 2):upper(),
+    }
+    LANGUAGES[#LANGUAGES + 1] = name
+    local okw = V5.custom_langs_save()
+    local copied, skipped, missing = V5.prompts_seed(V5.newlang_src, name)
+    if not okw then
+      ui_set_banner("error", 'Could not write ' .. V5.CUSTOM_LANGS_PATH)
+    elseif #missing > 0 then
+      ui_set_banner("warn", string.format(
+        '"%s" added, but %d prompt file(s) could not be copied from %s (%s). ' ..
+        'Write them in the Prompts section before dubbing into it.',
+        name, #missing, V5.newlang_src, table.concat(missing, ', ')))
+    else
+      ui_set_banner("info", string.format(
+        '"%s" added. %d prompt(s) copied from %s%s — edit them in the ' ..
+        'Prompts section so they name the right language.',
+        name, copied, V5.newlang_src,
+        skipped > 0 and (', ' .. skipped .. ' already existed') or ''))
+    end
+    V5.newlang_name = ''
+  end
+  _ui_end_disabled(ctx)
+  if not can and name ~= '' then
+    reaper.ImGui_SameLine(ctx)
+    _grey_hint(ctx, dup and 'that language already exists'
+                    or 'letters, digits, spaces, - and _ only')
+  end
+  reaper.ImGui_Unindent(ctx, 12)
+end
+
+-- v0.7: edit the per-language prompt files from inside the panel.
+function V5.ui_prompts_section(ctx)
+  if not reaper.ImGui_CollapsingHeader(ctx, 'Prompts') then return end
+  reaper.ImGui_Indent(ctx, 12)
+  _grey_hint(ctx, 'These are the instructions sent to the AI at each stage. ' ..
+                  'One file per language per stage, in dubbing/prompts/.')
+
+  V5.prompt_lang = V5.prompt_lang or LANGUAGE
+  local changed, picked = _ui_combo(ctx, 'Language##pr', V5.prompt_lang,
+                                    LANGUAGES)
+  local reload = false
+  if changed then V5.prompt_lang = picked; reload = true end
+
+  local stage_names = {}
+  for i, s in ipairs(V5.PROMPT_STAGES) do
+    stage_names[i] = s:gsub("_", " ")
+  end
+  local cur_stage = stage_names[V5.prompt_stage] or stage_names[1]
+  local ch2, picked2 = _ui_combo(ctx, 'Stage##pr', cur_stage, stage_names)
+  if ch2 then
+    for i, s in ipairs(stage_names) do
+      if s == picked2 then V5.prompt_stage = i break end
+    end
+    reload = true
+  end
+
+  if reload or V5.prompt_open == "" then
+    if V5.prompt_dirty and not reload then
+      -- keep unsaved edits on the very first open
+    else
+      local existed = V5.prompt_editor_load(V5.prompt_lang, V5.prompt_stage)
+      if not existed then
+        ui_set_banner("warn", 'No prompt file yet for this language and ' ..
+          'stage. Type one (or copy from another language in the Languages ' ..
+          'section) and press Save.')
+      end
+    end
+  end
+
+  local pushed = _push_font(ctx, 15)
+  local rv, txt = reaper.ImGui_InputTextMultiline(
+    ctx, '##prompt_edit', V5.prompt_text or '', -1, 260)
+  if pushed then _pop_font(ctx) end
+  if rv then V5.prompt_text = txt; V5.prompt_dirty = true end
+
+  _ui_begin_disabled(ctx, not V5.prompt_dirty)
+  if reaper.ImGui_Button(ctx, '💾 Save prompt', 140, 26) then
+    local ok, why = V5.prompt_editor_save()
+    ui_set_banner(ok and "info" or "error",
+      ok and ('Saved ' .. basename(V5.prompt_open)) or why)
+  end
+  _ui_end_disabled(ctx)
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, '⟲ Reload', 100, 26) then
+    V5.prompt_editor_load(V5.prompt_lang, V5.prompt_stage)
+    ui_set_banner("info", 'Reloaded from disk — unsaved edits discarded.')
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, 'Open in editor', 130, 26) then
+    if V5.prompt_dirty then V5.prompt_editor_save() end
+    open_path(V5.prompt_open)
+  end
+  reaper.ImGui_SameLine(ctx)
+  _grey_hint(ctx, (V5.prompt_dirty and 'unsaved · ' or '') ..
+                  string.format('%d chars', #(V5.prompt_text or '')))
+  _grey_hint(ctx, V5.prompt_open)
+  reaper.ImGui_Unindent(ctx, 12)
+end
+
 function V5.ui_settings_tab(ctx)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(),  10.0, 10.0)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
@@ -4737,6 +5104,13 @@ function V5.ui_settings_tab(ctx)
 
   _ui_begin_disabled(ctx, locked)
   ui_settings_section(ctx, true)
+
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  V5.ui_models_section(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  V5.ui_languages_section(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  V5.ui_prompts_section(ctx)
 
   reaper.ImGui_Dummy(ctx, 0, 4)
   if reaper.ImGui_CollapsingHeader(ctx, 'Advanced') then

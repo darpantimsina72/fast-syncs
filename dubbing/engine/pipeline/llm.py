@@ -61,6 +61,16 @@ _LLM_SETTINGS_DEFAULTS: Dict[str, str] = {
     "openai_api_key":  "",
     "openai_model":    "",
     "gemini_model":    GEMINI_DEFAULT_MODEL,     # model for vertex + gemini-key providers
+    # v0.7 per-role model overrides. Blank (the default) means "use the
+    # provider model above", so an install that never touches these behaves
+    # exactly as before. A role is named at each call site, so a cheap/fast
+    # model can do the mechanical work (matching) while the expensive one
+    # keeps the writing (translation).
+    "model_translate":  "",   # Step1-3 translation chain
+    "model_emotion":    "",   # Step4 emotion enrichment
+    "model_match":      "",   # v0.7 script <-> English section matching
+    "model_mapping":    "",   # legacy EN <-> target subtitle mapping (S3c)
+    "model_sync_match": "",   # Auto Sync clip matching (mirrored to sync settings)
     "prompt_caching":  "1",
     "http_user_agent": "",                    # blank → _DEFAULT_HTTP_USER_AGENT
     # Auto-Sync-only server/proxy credentials. The engine never calls them; they
@@ -163,6 +173,21 @@ def _llm_provider_label() -> str:
         key = "key set" if (s.get("gemini_api_key") or "").strip() else "NO KEY"
         return f"{gm} via {p} [{key}]"
     return f"{gm} via {p}"
+
+
+_MODEL_ROLES = ("translate", "emotion", "match", "mapping")
+
+
+def _llm_role_overrides_label() -> str:
+    """"translate=X, emotion=Y" for the roles that override the main model.
+
+    Printed in the startup banner for the same reason the provider label is:
+    a run that quietly used a different model than the Settings field shows
+    must say so in its own log. Empty string when nothing is overridden."""
+    s = _get_llm_settings()
+    parts = [f"{r}={v.strip()}" for r in _MODEL_ROLES
+             if (v := (s.get("model_" + r) or ""))and v.strip()]
+    return ", ".join(parts)
 
 
 def _active_provider_and_model() -> Tuple[str, str]:
@@ -421,24 +446,43 @@ def _genai_cached_generate(client, model: str, static_prefix: Optional[str],
         return client.models.generate_content(model=model, contents=inline).text
 
 
+def _model_for(role: Optional[str], fallback: str) -> str:
+    """Model id for a pipeline *role* (v0.7).
+
+    Resolution: the role's own setting (model_<role>) → *fallback* (the
+    provider-wide model, itself falling back to the caller's default). Blank
+    role settings are the shipped default, so an install that never opens the
+    per-role fields behaves exactly as it did before roles existed."""
+    if role:
+        v = (_get_llm_settings().get("model_" + role) or "").strip()
+        if v:
+            return v
+    return fallback
+
+
 def _llm_generate(prompt: str, model: str = GEMINI_DEFAULT_MODEL,
-                  static_prefix: Optional[str] = None) -> str:
+                  static_prefix: Optional[str] = None,
+                  role: Optional[str] = None) -> str:
     """Provider-agnostic text generation. All pipeline LLM calls go through here.
 
     *static_prefix* is the reusable part (the per-language prompt file); *prompt*
     is the per-request part. Splitting them enables prompt caching: explicit
     Gemini context caching on the Vertex / Gemini-key providers, and implicit
     (automatic server-side) prefix caching on OpenAI-compatible endpoints —
-    which also relies on the static prefix coming first in the request."""
+    which also relies on the static prefix coming first in the request.
+
+    *role* (v0.7) names what this call is for — "translate", "emotion",
+    "match", "mapping" — so the panel can point that stage at its own model."""
     s = _get_llm_settings()
     if s.get("provider") == LLM_PROVIDER_SERVER:
         raise ValueError(_SERVER_MODE_ERROR)
     if s.get("provider") == LLM_PROVIDER_OPENAI:
-        return _openai_chat((static_prefix or "") + prompt,
-                            (s.get("openai_model") or "").strip() or model)
+        return _openai_chat(
+            (static_prefix or "") + prompt,
+            _model_for(role, (s.get("openai_model") or "").strip() or model))
     # Vertex / Gemini-key providers: the configured gemini_model overrides the
     # caller's default so the panel's Model field controls these providers too.
-    gm = (s.get("gemini_model") or "").strip() or model
+    gm = _model_for(role, (s.get("gemini_model") or "").strip() or model)
     client = _make_genai_client()
     use_cache = s.get("prompt_caching", "1") == "1"
     return _genai_cached_generate(client, gm, static_prefix, prompt, use_cache)
@@ -534,7 +578,7 @@ def _run_gemini_pipeline(formatted_srt: str, model: str = GEMINI_DEFAULT_MODEL,
     if tm_glossary:
         tr_dyn += tm_glossary
     tr_input   = p1 + tr_dyn
-    tr_result  = _llm_generate(tr_dyn, model, static_prefix=p1)
+    tr_result  = _llm_generate(tr_dyn, model, static_prefix=p1, role="translate")
 
     rev_result, rev_input = tr_result, ""
     if steps >= 2:
@@ -542,14 +586,16 @@ def _run_gemini_pipeline(formatted_srt: str, model: str = GEMINI_DEFAULT_MODEL,
         rev_dyn    = (f"\n\nEnglish text\n{formatted_srt}\n\n"
                       f"{language} Script for Tuning\n{tr_result}")
         rev_input  = p2 + rev_dyn
-        rev_result = _llm_generate(rev_dyn, model, static_prefix=p2)
+        rev_result = _llm_generate(rev_dyn, model, static_prefix=p2,
+                                   role="translate")
 
     punc_result, punc_input = rev_result, ""
     if steps >= 3:
         p3 = _load_lang_prompt("Step3_Punctuation_Prompt", language)
         punc_dyn    = f"\n\n{rev_result}"
         punc_input  = p3 + punc_dyn
-        punc_result = _llm_generate(punc_dyn, model, static_prefix=p3)
+        punc_result = _llm_generate(punc_dyn, model, static_prefix=p3,
+                                    role="translate")
 
     return tr_result, rev_result, punc_result, tr_input, rev_input, punc_input
 
@@ -741,7 +787,8 @@ def _run_emotion_enrichment(text: str,
         if status_cb:
             status_cb(f"Step4: Emotion enrichment ({language})…")
         prompt = _load_lang_prompt("Step4_Emotion_Prompt", language)
-        enriched = _llm_generate(f"\n\n{text}", model, static_prefix=prompt) or ""
+        enriched = _llm_generate(f"\n\n{text}", model, static_prefix=prompt,
+                                 role="emotion") or ""
         enriched = _strip_code_fence(enriched).strip()
         if not enriched:
             if status_cb:
@@ -771,7 +818,8 @@ def _call_gemini_mapping(en_srt: str, te_srt: str, script_text: str,
         f"=== {language} SRT Content ===\n{te_srt}\n\n"
         f"=== Video Script ===\n{script_text}"
     )
-    raw = _llm_generate(dynamic, model, static_prefix=base_prompt)
+    raw = _llm_generate(dynamic, model, static_prefix=base_prompt,
+                        role="mapping")
 
     json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
     if json_match:

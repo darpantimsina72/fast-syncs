@@ -117,7 +117,8 @@ def call_match_sections(en_entries: Sequence[Tuple[float, float, str]],
 
     last_err = "empty reply"
     for attempt in (1, 2):
-        raw = _llm_generate(dynamic, model, static_prefix=_MATCH_RULES_PREFIX)
+        raw = _llm_generate(dynamic, model, static_prefix=_MATCH_RULES_PREFIX,
+                            role="match")
         parsed = _parse_match_json(raw)
         if parsed is None:
             last_err = f"unparsable reply ({(raw or '')[:120]!r}…)"

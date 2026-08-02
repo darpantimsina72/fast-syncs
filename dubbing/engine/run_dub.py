@@ -58,6 +58,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -67,9 +68,23 @@ import traceback
 ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATUS_DIR = os.path.join(ENGINE_DIR, "status")
 
-# The 11 target languages supported by the pipeline (display names).
+# The 11 target languages supported by the pipeline (display names), plus
+# any the user added in the panel (v0.7). This launcher validates --language
+# before spawning the worker, so the two lists must agree — dub_engine.py
+# extends its own copy from the same file, with the same stdlib-only read.
 LANGUAGES = ["Bengali", "Hindi", "Kannada", "Malayalam", "Tamil", "Telugu",
              "Gujarati", "Marathi", "Assamese", "Odia", "Nepali"]
+
+try:
+    with open(os.path.join(ENGINE_DIR, os.pardir, "config",
+                           "custom_languages.json"), "r",
+              encoding="utf-8") as _f:
+        for _e in (json.load(_f).get("languages") or []):
+            _n = str((_e or {}).get("name") or "").strip()
+            if _n and _n not in LANGUAGES:
+                LANGUAGES.append(_n)
+except Exception:
+    pass
 
 
 def main() -> int:

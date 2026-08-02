@@ -92,6 +92,31 @@ ENGINE_SETTINGS_FILE = os.path.join(ENGINE_DIR, "engine_settings.json")
 LANGUAGES = ["Bengali", "Hindi", "Kannada", "Malayalam", "Tamil", "Telugu",
              "Gujarati", "Marathi", "Assamese", "Odia", "Nepali"]
 
+
+def _custom_language_names():
+    """Names from config/custom_languages.json (v0.7).
+
+    Read here WITHOUT importing the pipeline: argparse builds its --language
+    choices before any heavy import, and a user-added language must be a
+    valid choice or the run dies at the command line. pipeline/config.py
+    reads the same file and merges the full entries into TTS_LANGUAGES.
+    """
+    path = os.path.join(ENGINE_DIR, os.pardir, "config",
+                        "custom_languages.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return [str(e.get("name") or "").strip()
+                for e in (data.get("languages") or [])
+                if isinstance(e, dict) and str(e.get("name") or "").strip()]
+    except Exception:
+        return []
+
+
+for _name in _custom_language_names():
+    if _name not in LANGUAGES:
+        LANGUAGES.append(_name)
+
 # The five per-language prompt stages the pipeline loads from prompts/.
 PROMPT_STAGES = ["Step1_Translation_Prompt", "Step2_Review_Prompt",
                  "Step3_Punctuation_Prompt", "Step4_Emotion_Prompt",
@@ -413,18 +438,29 @@ def _selfcheck(args) -> int:
     _check_symbols(pl)
 
     # Every per-language prompt file must exist (hard failure when missing —
-    # prompts ship with the repo, so absence means a broken checkout).
-    missing_prompts = []
+    # prompts ship with the repo, so absence means a broken checkout). A
+    # USER-ADDED language (v0.7) is different: its prompts are created by the
+    # panel, so a gap there is a warning naming the files to write, never a
+    # failed selfcheck that blocks setup for the other eleven languages.
+    custom = set(_custom_language_names())
+    missing_prompts, missing_custom = [], []
     for lang in LANGUAGES:
         for stage in PROMPT_STAGES:
             p = os.path.join(pl.PROMPTS_DIR, f"{stage}_{lang}.txt")
             if not os.path.isfile(p):
-                missing_prompts.append(f"prompts/{stage}_{lang}.txt")
+                (missing_custom if lang in custom
+                 else missing_prompts).append(f"prompts/{stage}_{lang}.txt")
     if missing_prompts:
         raise RuntimeError(
             f"{len(missing_prompts)} prompt file(s) missing from "
             f"{pl.PROMPTS_DIR}: " + ", ".join(missing_prompts[:10])
             + ("…" if len(missing_prompts) > 10 else ""))
+    if missing_custom:
+        print(f"WARNING: {len(missing_custom)} prompt file(s) missing for "
+              "user-added language(s) — create them in the panel's Settings "
+              "tab (Prompts → copy from an existing language) before dubbing "
+              "into them: " + ", ".join(missing_custom[:10])
+              + ("…" if len(missing_custom) > 10 else ""), flush=True)
 
     # Config presence is a WARNING, not a failure: a fresh clone passes
     # selfcheck and the user configures keys afterwards (setup / panel).
@@ -1014,6 +1050,9 @@ def _begin_run(args, manifest):
     # calls, so a gateway run used to advertise "gemini-2.5-pro" in its log.
     _note(f"Pipeline loaded. LLM: {pl._llm_provider_label()}; "
           f"TTS model: {args.el_model}.")
+    _roles = getattr(pl, "_llm_role_overrides_label", None)
+    if callable(_roles) and _roles():
+        _note(f"Per-stage model overrides: {_roles()}")
     _require_ffmpeg(pl, hard=(args.steps in ("full", "dub")))
     return pl, api_key, {"audio_path": audio_path}
 
