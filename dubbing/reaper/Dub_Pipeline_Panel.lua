@@ -50,6 +50,8 @@
 --     text, hit Regenerate — the engine synthesizes just that text
 --     ("--regen-chunk") and the panel swaps the item's take source to
 --     the new wav. Non-destructive: new files go to <out_dir>/regen/.
+--     v0.8: an optional voice picker under the button re-synthesizes the
+--     same text in a different voice (empty = the Settings voice).
 --
 -- On success, the "Import to timeline" button builds the SAME layout as
 -- Import_Dub_Results.lua (the import code is duplicated here on
@@ -1137,6 +1139,9 @@ local _regen_sel_guid     = ""     -- GUID of the item whose note was loaded
 local _regen_text         = ""     -- editable chunk text
 local _regen_pending      = nil    -- { guid, note, out_wav } while running
 local _regen_return_phase = "setup" -- phase to return to when regen ends
+-- v0.8: optional per-regen voice override ("" = the ⚙ Settings voice).
+-- V5 field, not a local — the main chunk sits at Lua's 200-local limit.
+V5.regen_voice            = ""
 
 -- v0.4 "I already have the translation": pasted script (in-memory only —
 -- written to <out_dir>/<base>_provided_translation.txt at launch).
@@ -2868,7 +2873,10 @@ end
 -- Write the chunk text + launch the engine in --regen-chunk mode.
 -- chunk id n = item position in ms (stable and unique per chunk); the wav
 -- version suffix _v<K> auto-increments so nothing is ever overwritten.
-local function start_regen(item, text)
+-- v0.8: *voice_id* re-synthesizes the same text in a different voice; nil or
+-- "" keeps the ⚙ Settings voice (the engine still auto-resolves one when no
+-- voice is set anywhere).
+local function start_regen(item, text, voice_id)
   ui_clear_banner()
   if _regen_out_dir == "" then
     ui_set_banner("error",
@@ -2908,8 +2916,11 @@ local function start_regen(item, text)
   if not py then return false end
 
   local lang = (_regen_lang ~= "" and _regen_lang) or LANGUAGE
+  -- Empty stays nil so build_engine_cmd falls back to the Settings voice.
+  local vid = ((voice_id or "") ~= "" and voice_id) or nil
   local cmd = build_engine_cmd(py, {
     regen = true, language = lang, text_file = txt_path, out_wav = wav_path,
+    voice_id = vid,
   })
   _regen_pending      = { guid = _item_guid(item), note = text,
                           out_wav = wav_path }
@@ -2918,6 +2929,8 @@ local function start_regen(item, text)
     "[panel] Regen  : " .. txt_path,
     "[panel] Out wav: " .. wav_path,
     "[panel] Lang   : " .. lang,
+    "[panel] Voice  : " .. (vid or ((VOICE_ID or "") ~= "" and
+                            (VOICE_ID .. "  (Settings)") or "(auto)")),
     "[panel] Python : " .. py,
   })
 end
@@ -3678,7 +3691,7 @@ local function ui_regen_section(ctx, default_open)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x4488CCFF)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x114477FF)
     if reaper.ImGui_Button(ctx, '⟳ Regenerate', 150, 30) and can then
-      start_regen(item, _regen_text)
+      start_regen(item, _regen_text, V5.regen_voice)
     end
     reaper.ImGui_PopStyleColor(ctx, 3)
     _ui_end_disabled(ctx)
@@ -3689,6 +3702,33 @@ local function ui_regen_section(ctx, default_open)
                              or 'text is empty')
       reaper.ImGui_PopStyleColor(ctx)
     end
+
+    -- v0.8: same text, different voice. Sits under the button because it is
+    -- the optional half of the job — leave it alone and regen behaves as it
+    -- always did. Same bookmarks + search widget as Settings / Track Voice
+    -- / Text to Speech.
+    reaper.ImGui_Dummy(ctx, 0, 6)
+    reaper.ImGui_Separator(ctx)
+    reaper.ImGui_Dummy(ctx, 0, 4)
+    reaper.ImGui_Text(ctx, 'Regenerate in another voice (optional)')
+    V5.regen_voice = V5.ui_voice_picker(ctx, 'regen', V5.regen_voice, 'Voice')
+    local rvv
+    rvv, V5.regen_voice = reaper.ImGui_InputText(ctx, 'Voice id##regenid',
+                                                 V5.regen_voice or '')
+    if (V5.regen_voice or "") ~= "" then
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, 'Use Settings voice##regenclr') then
+        V5.regen_voice = ""
+      end
+    end
+    local use_id = ((V5.regen_voice or "") ~= "" and V5.regen_voice)
+                   or (VOICE_ID or "")
+    local use_nm = V5.voice_name(use_id)
+    _grey_hint(ctx, use_id == "" and
+      'No voice set anywhere — the engine picks one from your account.'
+      or string.format('Regenerates with %s%s.',
+          use_nm ~= "" and (use_nm .. '  ·  ') or '', use_id)
+         .. ((V5.regen_voice or "") == "" and '  (⚙ Settings voice)' or ''))
   end
 
   reaper.ImGui_Unindent(ctx, 12)

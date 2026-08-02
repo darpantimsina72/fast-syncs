@@ -238,6 +238,11 @@ from those files only — they are never placed on a command line.
    panel swaps the item's take source to the new wav — non-destructively,
    new files only ever land in `<out_dir>/regen/` with auto-incrementing
    version suffixes.
+   Below the button, **Regenerate in another voice (optional)** re-does the
+   same chunk in a different ElevenLabs voice — same bookmarks + search as
+   the other tabs, or paste a voice id. Leave it empty and regeneration uses
+   the ⚙ Settings voice exactly as before. The choice sticks until you
+   change it, so several chunks can be redone in the new voice one by one.
 8. **Change the voice of a whole track** — go to the **Track Voice** tab,
    pick any project track and a target ElevenLabs voice, click **🎤 Change
    voice**. The track is rendered to a wav, converted with the ElevenLabs

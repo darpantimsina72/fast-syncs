@@ -76,7 +76,7 @@ a runtime dependency.
 
 ### Version (the "which build am I on" answer)
 
-- Root `VERSION` file (started at 0.7.0, currently 0.8.0), shipped in the
+- Root `VERSION` file (started at 0.7.0, currently 0.9.0), shipped in the
   repo so git pull / ZIP overlay updates it. Shown: dub panel title bar and
   Settings tab (`V5.APP_VERSION`), Auto Sync standalone title bar, engine log
   banner (`[engine] Reaper Dubbing App vX (contract v0.7)`).
@@ -740,6 +740,15 @@ the new wav (PCM_Source_CreateFromFile + SetMediaItemTake_Source),
 D_STARTOFFS=0, D_LENGTH=new source length (BR_GetMediaSourceProperties not
 required — use reaper.GetMediaSourceLength), store the edited text back in
 the item's hidden ext state, UpdateArrange. Original synced wav and app files untouched.
+
+v0.8: the regen section carries an optional voice override under the button
+(`V5.regen_voice`, shared `V5.ui_voice_picker` with key `regen`, plus a manual
+voice-id box). Non-empty → `--voice-id` on the `--regen-chunk` launch, so the
+same text comes back in a different voice; empty → the ⚙ Settings voice, i.e.
+the pre-v0.8 behaviour. The choice persists across selections within a panel
+session (deliberate: chunks are usually re-voiced in batches) and is NOT
+written to settings. No engine change — `_run_regen` already resolves
+`--voice-id` through `_resolve_voice`.
 
 ## Hard rules
 
