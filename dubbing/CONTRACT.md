@@ -76,10 +76,14 @@ a runtime dependency.
 
 ### Version (the "which build am I on" answer)
 
-- Root `VERSION` file (starts at 0.7.0), shipped in the repo so git pull /
-  ZIP overlay updates it. Shown: dub panel title bar and Settings tab
-  (`V5.APP_VERSION`), Auto Sync standalone title bar, engine log banner
-  (`[engine] Reaper Dubbing App vX (contract v0.7)`).
+- Root `VERSION` file (started at 0.7.0, currently 0.8.0), shipped in the
+  repo so git pull / ZIP overlay updates it. Shown: dub panel title bar and
+  Settings tab (`V5.APP_VERSION`), Auto Sync standalone title bar, engine log
+  banner (`[engine] Reaper Dubbing App vX (contract v0.7)`).
+- **Every shipped change bumps `VERSION` in the same commit.** It is the only
+  way a user can tell whether their update actually landed — a fix that ships
+  under the old number reads as "the update did nothing". Minor bump for
+  features and behaviour changes, patch bump for fixes.
 - Both ImGui windows now carry a `###` ID suffix (`###dub_pipeline`,
   `###auto_sync_pipeline`) so the version text in the title never resets
   the saved window position again (the one rename to add the suffix does,
