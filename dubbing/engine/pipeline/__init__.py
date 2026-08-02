@@ -17,4 +17,6 @@ Modules:
     sync       — sync engine (springs/bleed-over/order sweep), audio
                  reassembly, captions rechunk
     tm         — translation-memory port (SQLite, data/ dir inside this repo)
+    match      — v0.7 auto-sync-style Gemini section matcher + slot placer
+                 (script sentences ↔ English cues, synced/unsync statuses)
 """

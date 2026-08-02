@@ -122,6 +122,12 @@ def main() -> int:
                          "text never travels on argv)")
     ap.add_argument("--out-wav", dest="out_wav", default=None,
                     help="Output WAV path for --regen-chunk")
+    ap.add_argument("--sync-mode", dest="sync_mode", default=None,
+                    choices=["match", "legacy"],
+                    help="v0.7 chunk-placement mode: 'match' (default) = "
+                         "Gemini section matching + Auto-Sync-style "
+                         "placement with Un sync statuses; 'legacy' = the "
+                         "old whole-script TTS + re-transcription path")
     ap.add_argument("--emotion", dest="emotion", action="store_true",
                     default=None,
                     help="Force Step-4 emotion enrichment ON before TTS")
@@ -275,6 +281,8 @@ def main() -> int:
                 cmd += ["--script", args.script]
             if args.provided_script:
                 cmd += ["--provided-script", args.provided_script]
+            if args.sync_mode:
+                cmd += ["--sync-mode", args.sync_mode]
         if args.voice_id and args.voice_id.strip():
             cmd += ["--voice-id", args.voice_id.strip()]
         # Tri-state emotion pass-through: only forward an explicit choice so

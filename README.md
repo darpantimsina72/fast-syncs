@@ -136,12 +136,22 @@ stays current) through the same **Update…** button as the sync tool.
   fallback: `dubbing/setup_windows.bat` / `bash dubbing/setup_mac.command`.
   Enter your API keys in the panel's **Settings** tab.
 - **Panel tabs**: **Full Pipeline** (transcribe → translate → pauses for
-  your review of the script/translation → TTS → sync), **Paste
-  Translation** (bring your own translated script — skips the LLM),
-  **Auto Sync** (this sync tool, embedded right in the dub window — same
-  pipeline, no second window), **Regen Audio** (re-synthesize one chunk),
-  **Track Voice** (re-voice a whole track), **Logs**, and **Settings**
-  (keys, python override, and the shared Update… button).
+  your review of the script/translation → Gemini-matches the script to the
+  English lines → TTS per matched section → each dubbed chunk lands at its
+  English line's position; chunks that don't match or don't fit go to the
+  **Un sync** track, exactly like Auto Sync), **Paste Translation** (bring
+  your own translated script — skips the LLM translation, then matches +
+  dubs + places the same way), **Auto Sync** (this sync tool, embedded
+  right in the dub window — same pipeline, no second window), **Regen
+  Audio** (re-synthesize one chunk), **Track Voice** (re-voice a whole
+  track), **Logs**, and **Settings** (keys, python override, and the
+  shared Update… button).
+- **Project history**: every run is remembered per REAPER project. Reopen
+  the project later and the panel lists its past runs — resume a paused
+  translation review or re-import a finished dub without transcribing or
+  translating again.
+- **Version**: shown in the panel title bar (and the Settings tab) — it
+  comes from the `VERSION` file the updater keeps current.
 - **Two projects at once**: each REAPER project gets its own status folder
   under `dubbing/engine/status/`, so you can run a second REAPER instance
   (macOS: `open -na REAPER`, Windows: `reaper.exe -newinst`) and dub a

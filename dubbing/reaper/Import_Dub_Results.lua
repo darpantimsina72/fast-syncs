@@ -182,6 +182,10 @@ local function parse_timestamps_file(path)
       local synced     = tonumber(sy_ms) / 1000.0
       -- Fall back to end-start when the duration column is not sensible.
       if dur <= 0 then dur = orig_end - orig_start end
+      -- v0.7 optional 6th field: [synced] / [unsync]. Letters only, so the
+      -- trailing "[12345ms]" of a 5-field line can never match. Absent
+      -- field = synced (pre-v0.7 files).
+      local status = line:match("%[%s*(%a+)%s*%]%s*$")
       if dur > 0 then
         entries[#entries + 1] = {
           index        = tonumber(idx),
@@ -189,12 +193,42 @@ local function parse_timestamps_file(path)
           orig_end     = orig_end,
           dur          = dur,
           synced_start = synced,
+          unsync       = (status == "unsync") or nil,
         }
       end
     end
   end
   f:close()
   return entries
+end
+
+-- v0.7 texts sidecar (<base>_sync_texts.txt): blank-line-separated blocks,
+-- block N = chunk text for timestamps index N. Byte-safe: only newline
+-- splitting + ASCII whitespace trims touch the (Indic) text.
+local function parse_texts_file(path)
+  local blocks = {}
+  local content = read_all(path)
+  if not content then return blocks end
+  if content:sub(1, 3) == "\239\187\191" then content = content:sub(4) end
+  content = content:gsub("\r\n", "\n"):gsub("\r", "\n")
+  local parts = nil
+  local function flush()
+    if parts and #parts > 0 then
+      blocks[#blocks + 1] = table.concat(parts, " ")
+    end
+    parts = nil
+  end
+  for line in (content .. "\n"):gmatch("(.-)\n") do
+    local trimmed = line:match("^%s*(.-)%s*$")
+    if trimmed == "" then
+      flush()
+    else
+      parts = parts or {}
+      parts[#parts + 1] = trimmed
+    end
+  end
+  flush()
+  return blocks
 end
 
 -- ---------------------------------------------------------------------------
@@ -315,10 +349,13 @@ local function manifest_from_timestamps(ts_path)
     tts_wav        = "",
     synced_wav     = "",
     synced_srt     = "",
+    sync_texts     = "",
   }
 
   local srt = base .. "_sync_synced.srt"
   if file_exists(srt) then m.synced_srt = srt end
+  local texts = base .. "_sync_texts.txt"
+  if file_exists(texts) then m.sync_texts = texts end
 
   for _, ext in ipairs(AUDIO_EXTS) do
     if file_exists(base .. ext) then m.en_audio = base .. ext break end
@@ -336,6 +373,10 @@ end
 local TRACK_EN     = "EN Original"
 local TRACK_CHUNKS = "Dub Chunks"
 local TRACK_REF    = "Dub Rendered (ref)"
+-- v0.7: chunks the engine marked [unsync] go here. Same name and same
+-- find-or-reuse behaviour as the Auto Sync tab's Un sync track, so both
+-- tools park unplaceable material in one place.
+local TRACK_UNSYNC = "Un sync"
 
 -- v0.1 rule: never reuse an existing same-named track. A second import must
 -- create a fresh set, so find the smallest suffix (" 2", " 3", ...) that is
@@ -367,6 +408,17 @@ local function append_named_track(name)
   local tr = reaper.GetTrack(0, idx)
   reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", name, true)
   return tr
+end
+
+-- Find an existing track by exact name, else append one (the Auto Sync
+-- pipeline's rule for its Un sync track — shared here on purpose).
+local function find_or_append_track(name)
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local ok, nm = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+    if ok and nm == name then return tr end
+  end
+  return append_named_track(name)
 end
 
 -- Create one item on `track` playing `path`. Same construction pattern as
@@ -415,7 +467,8 @@ end
 local MANIFEST_KEYS = {
   "status", "error", "audio", "language", "out_dir",
   "en_audio", "en_srt", "tts_wav", "timestamps_txt",
-  "synced_wav", "synced_srt",
+  "synced_wav", "synced_srt", "sync_texts",
+  "synced_count", "unsynced_count",
 }
 
 local function load_manifest_json(path)
@@ -566,24 +619,60 @@ local function main()
     if not it then skip("en_audio: REAPER could not open the media file") end
   end
 
-  -- 2. Dub Chunks
+  -- 2. Dub Chunks (synced) + Un sync (v0.7 [unsync] entries)
+  local unsync_added = 0
   if #entries > 0 then
-    local tr = append_named_track(TRACK_CHUNKS .. suffix)
-    for i, e in ipairs(entries) do
-      local it = add_file_item(tr, tts_wav, e.synced_start, e.dur,
-                               e.orig_start,
-                               string.format("chunk %02d", e.index or i))
-      if it then
-        chunks_added = chunks_added + 1
-        local note = note_for_chunk(cues, #entries, i, e.synced_start)
-        if note ~= "" then
-          reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
-          notes_matched = notes_matched + 1
+    -- v0.7 texts sidecar: block N = note for timestamps index N (works for
+    -- both tracks). Fallback: the old synced-SRT cue matching.
+    local texts = {}
+    if (m.sync_texts or "") ~= "" and file_exists(m.sync_texts) then
+      texts = parse_texts_file(m.sync_texts)
+    end
+    local synced_entries, unsync_entries = {}, {}
+    for _, e in ipairs(entries) do
+      if e.unsync then unsync_entries[#unsync_entries + 1] = e
+      else synced_entries[#synced_entries + 1] = e end
+    end
+    local function note_for(e, list_n, i)
+      local t = texts[e.index or 0]
+      if t and t ~= "" then return t end
+      return note_for_chunk(cues, list_n, i, e.synced_start)
+    end
+
+    if #synced_entries > 0 then
+      local tr = append_named_track(TRACK_CHUNKS .. suffix)
+      for i, e in ipairs(synced_entries) do
+        local it = add_file_item(tr, tts_wav, e.synced_start, e.dur,
+                                 e.orig_start,
+                                 string.format("chunk %02d", e.index or i))
+        if it then
+          chunks_added = chunks_added + 1
+          local note = note_for(e, #synced_entries, i)
+          if note ~= "" then
+            reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
+            notes_matched = notes_matched + 1
+          end
         end
       end
+      if chunks_added == 0 then
+        skip("tts_wav: REAPER could not open the media file -- no chunks placed")
+      end
     end
-    if chunks_added == 0 then
-      skip("tts_wav: REAPER could not open the media file -- no chunks placed")
+
+    if #unsync_entries > 0 then
+      local tr = find_or_append_track(TRACK_UNSYNC)
+      for i, e in ipairs(unsync_entries) do
+        local it = add_file_item(tr, tts_wav, e.synced_start, e.dur,
+                                 e.orig_start,
+                                 string.format("unsync %02d", e.index or i))
+        if it then
+          unsync_added = unsync_added + 1
+          local note = note_for(e, #unsync_entries, i)
+          if note ~= "" then
+            reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
+          end
+        end
+      end
     end
   end
 
@@ -638,6 +727,11 @@ local function main()
     "Dub chunks placed: " .. chunks_added,
     "Regions created:   " .. regions_added,
   }
+  if unsync_added > 0 then
+    lines[3] = "Synced chunks placed: " .. chunks_added
+    lines[#lines + 1] = "Un sync chunks:    " .. unsync_added
+                        .. '  (on the "' .. TRACK_UNSYNC .. '" track)'
+  end
   if chunks_added > 0 then
     lines[#lines + 1] = "Item notes matched: " .. notes_matched
                         .. " of " .. chunks_added

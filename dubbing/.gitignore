@@ -17,5 +17,8 @@ ffmpeg/
 # Engine runtime status files.
 engine/status/
 
+# v0.7 per-project run history (index into each run's out_dir).
+engine/history/
+
 # macOS noise.
 .DS_Store

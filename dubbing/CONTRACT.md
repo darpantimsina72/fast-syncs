@@ -6,6 +6,105 @@ The original app is READ-ONLY — never modify or write anything inside
 is only a one-time extraction source and optional key-migration source, never
 a runtime dependency.
 
+## v0.7 — Auto-Sync-style matching for dub runs, Un sync track, version, history
+
+### Sync mode (engine)
+
+- `--sync-mode match|legacy` on run_dub.py + dub_engine.py (also a
+  `sync_mode` key in `engine_settings.json`; CLI wins; default **match**).
+  Applies to the dub half of `--steps full` and to `--steps dub`; regen /
+  voice-change / test-llm / list-voices are unaffected.
+- **match** (new default) replaces the S3b/S3c/S3d internals for BOTH the
+  Full Pipeline and Paste Translation runs; **legacy** is the old
+  whole-script-TTS + Scribe-re-transcription + SyncingPrompt path,
+  kept verbatim in `_stage_dub_legacy`.
+- Match flow (`pipeline/match.py` + `tts.synthesize_sections_elevenlabs`):
+  1. The dub script (LLM translation or `--provided-script` text, possibly
+     user-edited at review) is split into sentences
+     (`tts._split_script_into_sentences` — danda-aware, tag-safe).
+  2. ONE Gemini call (`call_match_sections`, transported through the
+     provider-agnostic `_llm_generate`, so vertex/gemini/gateway all work)
+     groups EN sync-SRT cue ids with script sentence ids into sections —
+     the same section prompt idea as the fast-syncs `sync_matcher.py`.
+     Retries once, then HARD-fails (no silent fallback, like Auto Sync).
+     Unmentioned ids are mechanically filed as unmatched.
+  3. `build_chunks`: one TTS chunk per matched section; consecutive
+     unmatched sentences merge into unsync chunks; script order kept.
+  4. Per-section ElevenLabs TTS with request stitching (previous_text /
+     next_text = neighbouring script text) into ONE `tts_wav`, 240 ms
+     silence between sections; exact per-section spans returned — S3b's
+     second Scribe pass and S3c's SyncingPrompt call are GONE in this mode
+     (S3a-S3c are printed as book-keeping lines so the panel checklist
+     still advances in order).
+  5. `place_chunks`: the Auto Sync placement — slot from the section's EN
+     cues, rounds center/align_start/align_end ×2 iterations,
+     align_start fallback (bleed-over), then the order-preserving sweep:
+     a chunk that cannot end before the next chunk's spring position is
+     demoted to **unsync** with a chain position (each unsync chunk sits
+     right after the previous clip, chronological). No silence correction
+     (TTS starts at speech; EN cue starts are word-refined already).
+  6. Step-4 emotion enrichment is SKIPPED in match mode (logged at S2d):
+     per-section enrichment would multiply LLM calls and whole-script
+     enrichment would break the sentence-id mapping.
+- Timestamps file gains an OPTIONAL 6th bracket `[synced]` / `[unsync]`
+  (header gains `[Status]`). 5-field files stay byte-identical and every
+  reader treats a missing status as synced — old runs import unchanged.
+  `_parse_timestamps_text` returns it as `sync_status`.
+- New sidecar `<base>_sync_texts.txt`: blank-line-separated blocks, block N
+  = chunk text for timestamps index N (item notes for BOTH tracks; the
+  synced SRT covers only synced chunks, so notes need their own channel).
+- `_sync_synced.srt` = synced chunks only (regions must not point at the
+  Un sync chain). `_synced.wav` renders synced chunks only, via
+  `sync_audio_with_timestamps(..., extend_last=False)` (spans are exact;
+  extending the last segment would drag trailing unsync audio in).
+- Manifest (full/dub) gains `sync_texts`, `synced_count`, `unsynced_count`
+  (strings; "" from legacy mode — consumers skip empties, as always).
+
+### Import (both importers)
+
+- Entries parse the optional trailing `[synced]/[unsync]` bracket (letters
+  only, so a 5-field line's `[1234ms]` tail can never match).
+- Synced entries → `Dub Chunks` (fresh-suffix rule unchanged). Unsync
+  entries → the **`Un sync`** track — find-by-exact-name or append, the
+  SAME name + reuse rule as `auto_sync_pipeline.lua`, so Auto Sync and dub
+  runs park leftovers on one track. Item take names: `unsync NN`.
+- Item notes prefer the `sync_texts` sidecar (block by entry index) and
+  fall back to the old synced-SRT cue matching. Summary line reports
+  "Synced chunks placed / Un sync chunks" when any unsync exist; the
+  panel success phase shows `Chunks: N synced, M unsynced` from the
+  manifest counts.
+
+### Version (the "which build am I on" answer)
+
+- Root `VERSION` file (starts at 0.7.0), shipped in the repo so git pull /
+  ZIP overlay updates it. Shown: dub panel title bar and Settings tab
+  (`V5.APP_VERSION`), Auto Sync standalone title bar, engine log banner
+  (`[engine] Reaper Dubbing App vX (contract v0.7)`).
+- Both ImGui windows now carry a `###` ID suffix (`###dub_pipeline`,
+  `###auto_sync_pipeline`) so the version text in the title never resets
+  the saved window position again (the one rename to add the suffix does,
+  once).
+
+### Per-project run history (panel)
+
+- `engine/history/<project-slug>.json` (same slug as the status dirs;
+  gitignored; NOT under engine/status/, which run_dub.py wipes per launch).
+  Shape: `{"entries":[{"ts","mode","audio","language","out_dir","status"},…]}`
+  newest first, deduped by out_dir (a finished dub replaces its review
+  entry), capped at 20. Writers: `enter_review_phase` records "review",
+  `_finish_run` records "ok" for full/dub runs. The history file only
+  INDEXES runs — the authority stays each run's `<out_dir>/engine_done.json`
+  (written there since v0.1 precisely because status dirs are transient).
+- Setup phase (Full Pipeline AND Paste Translation tabs) shows a
+  "Project history" section for the ACTIVE REAPER project (slug re-checked
+  every frame, so switching project tabs swaps the list). Per entry:
+  **Resume review** (reload the out_dir manifest → the normal review
+  phase; transcription + translation are NOT redone), **Import to
+  timeline** (finished runs; re-imports from the out_dir manifest),
+  **Use audio + language** (prefill setup), **Folder**.
+- Unsaved projects share the `unsaved` slug — their history is one bucket
+  by design (same trade-off as the status dirs).
+
 ## v0.6 — One entry point, credentials that cannot be half-configured
 
 ### One documented ReaScript
