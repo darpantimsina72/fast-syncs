@@ -217,8 +217,9 @@ from those files only — they are never placed on a command line.
    one undo block:
    - **EN Original** — the original audio at position 0.
    - **Dub Chunks** — one item per synced chunk, at the position of the
-     English line it matched; each item's note holds the chunk's script
-     text, and one region per synced chunk is created.
+     English line it matched. Each item carries its script text invisibly
+     (no note text over the waveform, no regions): select the item and the
+     **Regen Audio** tab loads that text for editing.
    - **Un sync** — chunks that had no English match (or no room to fit in
      order) sit here for manual placement, side by side — the same track
      Auto Sync uses. The success screen shows the synced/unsynced counts.
@@ -237,6 +238,11 @@ from those files only — they are never placed on a command line.
    panel swaps the item's take source to the new wav — non-destructively,
    new files only ever land in `<out_dir>/regen/` with auto-incrementing
    version suffixes.
+   Below the button, **Regenerate in another voice (optional)** re-does the
+   same chunk in a different ElevenLabs voice — same bookmarks + search as
+   the other tabs, or paste a voice id. Leave it empty and regeneration uses
+   the ⚙ Settings voice exactly as before. The choice sticks until you
+   change it, so several chunks can be redone in the new voice one by one.
 8. **Change the voice of a whole track** — go to the **Track Voice** tab,
    pick any project track and a target ElevenLabs voice, click **🎤 Change
    voice**. The track is rendered to a wav, converted with the ElevenLabs

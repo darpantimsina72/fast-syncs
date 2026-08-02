@@ -10,12 +10,15 @@
 --   1. "EN Original"        - one item: the copied original audio, position 0
 --   2. "Dub Chunks"         - one item per timestamps line, cut from tts_wav
 --                             (D_STARTOFFS = orig start, D_LENGTH = orig dur,
---                              D_POSITION = synced start; note = cue text)
+--                              D_POSITION = synced start; cue text stored in
+--                              a hidden item ext state)
 --   3. "Dub Rendered (ref)" - one item: final synced wav, position 0, MUTED
 --
--- Plus one project region per synced-SRT cue. Everything happens inside a
--- single undo block. Empty ("") or missing manifest files are skipped and
--- reported in a summary message box at the end.
+-- v0.8: no project regions and no visible item notes -- the region lines and
+-- the note text painted over the arrange view and hid the waveforms. The
+-- chunk text is still stored per item for regeneration, just not drawn.
+-- Everything happens inside a single undo block. Empty ("") or missing
+-- manifest files are skipped and reported in a summary message box at the end.
 --
 -- A second run never reuses existing tracks: it creates a fresh set with a
 -- " 2" / " 3" / ... suffix on the track names.
@@ -446,6 +449,17 @@ local function add_file_item(track, path, position, length, startoffs, take_name
   return item
 end
 
+-- v0.8: the chunk text goes into a hidden per-item ext state, not P_NOTES --
+-- REAPER draws notes across the item and hid the waveform. The Dub panel's
+-- Regenerate tab reads back this same key.
+local ITEM_TEXT_KEY = "P_EXT:fastsyncs_chunk_text"
+
+local function set_item_text(item, text)
+  reaper.GetSetMediaItemInfo_String(item, ITEM_TEXT_KEY, text or "", true)
+  -- Pre-v0.8 imports wrote the text to the visible notes field; clear it.
+  reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", true)
+end
+
 -- Contract matching rule for item notes: match cues to chunks by order when
 -- counts are equal; otherwise by nearest cue start within 0.5 s; else empty.
 local function note_for_chunk(cues, n_entries, i, synced_start)
@@ -581,10 +595,10 @@ local function main()
   if synced_srt ~= "" and file_exists(synced_srt) then
     cues = parse_srt_file(synced_srt)
     if #cues == 0 then
-      skip("synced_srt: no parsable cues -- no regions / item notes")
+      skip("synced_srt: no parsable cues -- no chunk text fallback")
     end
   elseif synced_srt == "" then
-    skip("synced_srt: empty in manifest -- no regions / item notes")
+    skip("synced_srt: empty in manifest -- no chunk text fallback")
   else
     skip('synced_srt: file not found ("' .. synced_srt .. '")')
   end
@@ -610,7 +624,7 @@ local function main()
   reaper.PreventUIRefresh(1)
 
   local suffix = fresh_name_suffix()
-  local chunks_added, regions_added, notes_matched = 0, 0, 0
+  local chunks_added, notes_matched = 0, 0
 
   -- 1. EN Original
   if en_audio ~= "" then
@@ -649,7 +663,7 @@ local function main()
           chunks_added = chunks_added + 1
           local note = note_for(e, #synced_entries, i)
           if note ~= "" then
-            reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
+            set_item_text(it, note)
             notes_matched = notes_matched + 1
           end
         end
@@ -669,7 +683,7 @@ local function main()
           unsync_added = unsync_added + 1
           local note = note_for(e, #unsync_entries, i)
           if note ~= "" then
-            reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
+            set_item_text(it, note)
           end
         end
       end
@@ -684,37 +698,10 @@ local function main()
     if not it then skip("synced_wav: REAPER could not open the media file") end
   end
 
-  -- Regions: one per synced-SRT cue. A re-import must not stack a second
-  -- identical region per cue, so collect the existing regions first and skip
-  -- cues whose start/stop/name already match (keys quantised to 1 ms, the
-  -- SRT resolution, so float noise cannot defeat the match).
-  local existing_regions = {}
-  do
-    local ri = 0
-    while true do
-      local retval, isrgn, pos, rgnend, name = reaper.EnumProjectMarkers3(0, ri)
-      if retval == 0 then break end
-      if isrgn then
-        existing_regions[string.format("%.3f|%.3f|%s", pos, rgnend, name or "")] = true
-      end
-      ri = ri + 1
-    end
-  end
-  local regions_skipped = 0
-  for _, c in ipairs(cues) do
-    local key = string.format("%.3f|%.3f|%s", c.start, c.stop, c.text or "")
-    if existing_regions[key] then
-      regions_skipped = regions_skipped + 1
-    else
-      reaper.AddProjectMarker2(0, true, c.start, c.stop, c.text or "", -1, 0)
-      existing_regions[key] = true
-      regions_added = regions_added + 1
-    end
-  end
-  if regions_skipped > 0 then
-    skip("regions: " .. regions_skipped
-         .. " identical region(s) already in project -- not re-added")
-  end
+  -- v0.8: no regions. One region per cue put a vertical line through every
+  -- track at every cue boundary, which is what made the arrange view
+  -- unreadable at normal zoom. Cues are still parsed -- they are the fallback
+  -- source of the per-item chunk text above.
 
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
@@ -725,7 +712,6 @@ local function main()
     "Import finished" .. (suffix ~= "" and " (track set" .. suffix .. ")" or "") .. ".",
     "",
     "Dub chunks placed: " .. chunks_added,
-    "Regions created:   " .. regions_added,
   }
   if unsync_added > 0 then
     lines[3] = "Synced chunks placed: " .. chunks_added
@@ -733,8 +719,9 @@ local function main()
                         .. '  (on the "' .. TRACK_UNSYNC .. '" track)'
   end
   if chunks_added > 0 then
-    lines[#lines + 1] = "Item notes matched: " .. notes_matched
+    lines[#lines + 1] = "Chunk text stored:  " .. notes_matched
                         .. " of " .. chunks_added
+                        .. "  (hidden -- read by the Regenerate tab)"
   end
   if #skipped > 0 then
     lines[#lines + 1] = ""
