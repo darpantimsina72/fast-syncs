@@ -163,6 +163,27 @@ from those files only — they are never placed on a command line.
    stay there across projects, languages and restarts, so you never scroll
    the whole account catalogue again. Bookmarks are saved in
    `reaper/voice_bookmarks.json` on your machine only.
+
+   **A model per stage** (⚙ Settings → *Model per stage*). By default every
+   AI call uses the one **Model** field. Fill in a stage's box to give just
+   that stage its own model — a fast, cheap one for the mechanical work
+   (matching, emotion tags) and the strong one for translation. Stages:
+   Translate, Emotion tags, Dub matching, Legacy sync map, and Auto Sync
+   match (handed to the Auto Sync tab when you save). Empty = use the main
+   Model, which is what every existing setup already does.
+
+   **Add a language** (⚙ Settings → *Languages*). Type a name, optionally a
+   locale code, pick an existing language to copy prompts from, and click
+   **Add language**. The new language appears in every language dropdown
+   immediately. Copying the prompts gives you a working starting point —
+   open the **Prompts** section afterwards and edit them so they name the
+   right language. Removing a language leaves its prompt files alone.
+
+   **Edit the prompts** (⚙ Settings → *Prompts*). Pick a language and a
+   stage to see the exact instructions sent to the AI, edit them in place,
+   and **💾 Save**. **Open in editor** saves first, then opens the file in
+   your normal text editor — easier for long prompts and for languages
+   whose script REAPER cannot shape properly.
 4. Click **▶ Run dubbing pipeline**. By default this is a **staged run**:
    the engine transcribes and translates (stages S1a–S2c), then pauses.
    Progress and the stage checklist stay on the **Full Pipeline** tab; the

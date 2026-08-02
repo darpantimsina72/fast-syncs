@@ -85,6 +85,58 @@ a runtime dependency.
   the saved window position again (the one rename to add the suffix does,
   once).
 
+### A model per stage (engine + panel)
+
+- `llm_settings.json` gains `model_translate`, `model_emotion`,
+  `model_match`, `model_mapping`, `model_sync_match`. **Blank is the
+  default and means "use the provider model"**, so an upgraded install
+  behaves exactly as before until a field is filled in.
+- `_llm_generate(prompt, model, static_prefix, role=None)` resolves the
+  model through `_model_for(role, fallback)`: `model_<role>` → the
+  provider-wide model (`openai_model` / `gemini_model`) → the caller's
+  default. Roles are named at the call sites: `translate` (Step1-3),
+  `emotion` (Step4), `match` (v0.7 section matching), `mapping` (legacy
+  S3c). `--test-llm` deliberately passes no role — it tests the main model.
+- `_llm_role_overrides_label()` is printed in the startup banner whenever
+  anything is overridden, for the same reason `_llm_provider_label()` is:
+  a run that used a different model than the Settings field shows must
+  say so in its own log.
+- `model_sync_match` is Auto Sync's, and Auto Sync reads its model from
+  `sync_pipeline_settings.json` — so `save_sync_credentials()` writes that
+  value into `gemini_model` there (falling back to the main model when
+  blank). The engine never reads `model_sync_match`.
+
+### User-added languages (engine + panel)
+
+- `config/custom_languages.json`:
+  `{"languages":[{"name","code","tag"}]}` (gitignored with the rest of
+  `config/`). A language is a name plus five prompt files — nothing else
+  in the engine is language-specific.
+- `pipeline/config.py::_load_custom_languages()` merges each entry into
+  `TTS_LANGUAGES` at import (marked `google_unavailable`; ElevenLabs
+  detects the script from the text). A name that collides with a built-in
+  is **ignored, not overwritten** — the shipped entries carry Google voice
+  lists a hand-written one cannot.
+- `dub_engine.py` and `run_dub.py` extend their `--language` choices from
+  the SAME file with their own stdlib-only read: argparse builds choices
+  before the pipeline import, and the launcher validates `--language`
+  before spawning the worker, so both lists must agree.
+- `--selfcheck` treats missing prompts for a user-added language as a
+  WARNING naming the files, not a failure. A half-configured extra
+  language must never block setup for the eleven built-ins.
+
+### Prompt editing (panel)
+
+- Settings → **Prompts**: language combo × stage combo → the file's text in
+  an editable box, with Save / Reload / Open in editor.
+  `dubbing/prompts/<Stage>_<Language>.txt`, the same files the engine
+  loads through `_load_lang_prompt()`.
+- Settings → **Languages** → *Add language* writes the JSON entry and
+  seeds the five prompts from an existing language (`V5.prompts_seed`,
+  which never overwrites an existing file). *Remove* drops the entry and
+  leaves the prompt files on disk — deleting user-edited text on a
+  mis-click is not recoverable.
+
 ### Voice bookmarks + search (panel)
 
 - `reaper/voice_bookmarks.json` (gitignored, GLOBAL — not per project, not
