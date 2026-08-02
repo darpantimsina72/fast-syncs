@@ -12,16 +12,26 @@ Adaptations (everything else is verbatim):
     were UI plumbing and are not ported).
 """
 
+import hashlib
+import http.client
 import json
 import mimetypes
 import os
 import re
+import shutil
+import socket
+import ssl
+import subprocess
+import threading
+import time
 import urllib.error
 import urllib.request
+import wave
 from typing import Dict, List, Optional
 
-from .config import (_SSL_CTX, TTS_DEFAULT_LANGUAGE, TTS_SETTINGS_FILE,
-                     _lang_tokens, load_tts_settings)
+from .config import (_SSL_CTX, DATA_DIR, FFMPEG_PATH, IS_WINDOWS,
+                     TTS_DEFAULT_LANGUAGE, TTS_SETTINGS_FILE, _lang_tokens,
+                     load_tts_settings)
 
 # ElevenLabs voice cache keyed by (api-key fingerprint, language name) so we
 # don't re-fetch the voice list on every TTS run.
@@ -305,7 +315,338 @@ def _multipart_body(fields, files):
     return body, boundary
 
 
-def _transcribe_audio(audio_path, api_key):
+# ─── Scribe robustness ───────────────────────────────────────────────────────
+# One slow response used to kill a whole 60-minute job. The call was a single
+# urlopen with a fixed timeout=180 and no retry, so a slow uplink, a corporate
+# proxy or a busy Scribe queue surfaced as
+#     TimeoutError: The read operation timed out
+# raised from resp.read() — i.e. AFTER the multipart upload had succeeded, the
+# expensive part. The connection was fine; the script simply stopped waiting
+# for the answer. Identical code transcribes 60-minute audio fine on a fast
+# desk, so the timeout constant was never the bug on its own: the gap was
+# robustness. Hence, in order of value:
+#   1. retry the transient failures with backoff,
+#   2. size the timeout to the audio instead of a fixed 180 s,
+#   3. prove the cheap things (key, file, proxy) before the upload,
+#   4. print a heartbeat so "working" and "hung" stop looking identical,
+#   5. checkpoint the transcript so a later crash never re-uploads — and
+#      re-pays for — a transcription we already have.
+
+_STT_ATTEMPTS       = 4
+_STT_BACKOFF_SECS   = (5, 15, 45)   # waits after attempts 1, 2, 3
+_STT_TIMEOUT_FLOOR  = 300.0         # never allow less than 5 min of patience
+_STT_TIMEOUT_PER_S  = 2.0           # ...then 2 s per second of audio
+_STT_TIMEOUT_CAP    = 1800.0        # ...but past 30 min of silence it is dead
+_STT_HEARTBEAT_SECS = 30.0
+_STT_CACHE_DIR      = os.path.join(DATA_DIR, "stt_cache")
+
+# HTTP codes that fail identically forever — retrying only wastes a minute and
+# buries the real message.
+_STT_FATAL_HTTP = frozenset({400, 401, 403, 404, 413, 422})
+
+# Fingerprints of keys already checked in this process: the preflight
+# GET /v1/user must not repeat for the second (S3b) transcription.
+_STT_KEYS_CHECKED: set = set()
+
+_NO_WINDOW_FLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
+
+_PROXY_ENV_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                   "http_proxy", "https_proxy", "all_proxy", "no_proxy")
+
+
+def _stt_log(msg: str) -> None:
+    """Progress line for the Scribe call.
+
+    Tagged [stt], NOT [Sxx]: this helper serves both S1a (English audio) and
+    S3b (TTS audio), and the REAPER panel takes the last "[Sxx]" tag it sees
+    as the current stage — printing [S1a] here would drag the panel backwards
+    mid-dub. Module tag matches the existing [config] / [LLM] lines.
+    """
+    print(f"[stt] {msg}", flush=True)
+
+
+def _fmt_duration(seconds: float) -> str:
+    """'61m 12s' — for logs, so operators can eyeball audio length."""
+    if seconds <= 0:
+        return "unknown length"
+    total = int(round(seconds))
+    return f"{total // 60}m {total % 60:02d}s"
+
+
+def _ffprobe_path() -> Optional[str]:
+    """Locate ffprobe: PATH first, else alongside the ffmpeg config found."""
+    found = shutil.which("ffprobe")
+    if found:
+        return found
+    if FFMPEG_PATH:
+        exe = "ffprobe.exe" if IS_WINDOWS else "ffprobe"
+        candidate = os.path.join(os.path.dirname(FFMPEG_PATH), exe)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _audio_duration_seconds(audio_path: str) -> float:
+    """Best-effort audio length in seconds; 0.0 when it cannot be determined.
+
+    Only used to size the read timeout, so an estimate is good enough — three
+    tiers, cheapest reliable first:
+      1. ffprobe when present (exact, one short subprocess),
+      2. the stdlib wave header for PCM .wav (no dependency at all),
+      3. file size / 16 KB per second — the ~128 kbps MP3 rule of thumb.
+    Never raises and never loads the audio: failing to measure the file must
+    not stop us transcribing it, and librosa would cost more than the call.
+    """
+    probe = _ffprobe_path()
+    if probe:
+        try:
+            out = subprocess.run(
+                [probe, "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
+                capture_output=True, text=True, timeout=20,
+                creationflags=_NO_WINDOW_FLAGS)
+            dur = float((out.stdout or "").strip())
+            if dur > 0:
+                return dur
+        except Exception:
+            pass
+    if audio_path.lower().endswith(".wav"):
+        try:
+            with wave.open(audio_path, "rb") as w:
+                rate = w.getframerate()
+                if rate:
+                    return w.getnframes() / float(rate)
+        except Exception:
+            pass
+    try:
+        return os.path.getsize(audio_path) / 16000.0
+    except OSError:
+        return 0.0
+
+
+def _stt_timeout_for(duration_s: float) -> float:
+    """Read timeout sized to the work.
+
+    A 3-minute clip and a 60-minute talk are not the same request, so one
+    fixed number is wrong by definition — too tight for the talk or uselessly
+    slack for the clip. Note this is a per-socket-read timeout: it bounds how
+    long Scribe may stay silent, not how long the job may take.
+    """
+    scaled = float(duration_s) * _STT_TIMEOUT_PER_S
+    return max(_STT_TIMEOUT_FLOOR, min(scaled, _STT_TIMEOUT_CAP))
+
+
+def _redact_proxy_url(value: str) -> str:
+    """Strip any user:password@ out of a proxy URL before it reaches a log."""
+    return re.sub(r"://[^/@\s]*@", "://<credentials>@", value)
+
+
+def _proxy_env_note() -> str:
+    """Proxy environment as one line, credentials removed; '' when unset.
+
+    Worth logging on every run: a proxy on one desk and none on another is
+    the usual difference between "works" and "times out", and nobody can see
+    it after the fact unless the run log recorded it.
+    """
+    seen: Dict[str, str] = {}
+    for name in _PROXY_ENV_VARS:
+        val = (os.environ.get(name) or "").strip()
+        if val:
+            seen[name.upper()] = _redact_proxy_url(val)
+    return ", ".join(f"{k}={v}" for k, v in sorted(seen.items()))
+
+
+def _stt_key_precheck(api_key: str) -> None:
+    """Validate the API key once per process with one cheap GET /v1/user.
+
+    Failing in two seconds with "your API key is wrong" beats failing in
+    eight minutes with a stack trace, after a 58 MB upload. A network failure
+    here is NOT fatal, though — that is exactly what the retry loop below is
+    for, so an unreachable /v1/user only logs and continues. Only a key the
+    server actively rejects (401) stops the run, because it will keep being
+    rejected no matter how many times we upload the audio.
+    """
+    fingerprint = _api_key_fingerprint(api_key)
+    if fingerprint in _STT_KEYS_CHECKED:
+        return
+    try:
+        info = _validate_api_key(api_key)
+    except ValueError as e:
+        msg = str(e)
+        # _validate_api_key flattens everything into ValueError; the "(401)"
+        # marker and the empty-key message are the two verdicts that are
+        # about the key itself rather than about the network.
+        if "(401)" in msg or "API key is empty" in msg:
+            raise
+        _stt_log(f"key precheck inconclusive ({msg}) — continuing to the "
+                 "upload anyway.")
+        return
+    _STT_KEYS_CHECKED.add(fingerprint)
+    _stt_log(f"API key {_redact_api_key(api_key)} accepted"
+             + (f" (tier: {info['tier']})" if info.get("tier") else "") + ".")
+
+
+def _stt_preflight(audio_path: str, api_key: str) -> None:
+    """Cheap checks before an expensive upload. Fail fast, be patient later."""
+    if not audio_path or not os.path.isfile(audio_path):
+        raise ValueError(
+            f"Audio file to transcribe does not exist: {audio_path}")
+    if os.path.getsize(audio_path) <= 0:
+        raise ValueError(f"Audio file to transcribe is empty (0 bytes): "
+                         f"{audio_path}")
+    proxies = _proxy_env_note()
+    if proxies:
+        _stt_log(f"proxy environment: {proxies}")
+    _stt_key_precheck(api_key)
+
+
+class _Heartbeat:
+    """Print '<n>s elapsed' every 30 s while a blocking call runs.
+
+    Without this the log printed "Transcribing…" and then went silent for
+    minutes: nobody — operator or developer — could tell working from hung,
+    which is why the original failure needed a stack trace to diagnose at
+    all. Daemon thread, so it can never hold the process open.
+    """
+
+    def __init__(self, label: str, interval: float = _STT_HEARTBEAT_SECS):
+        self._label = label
+        self._interval = interval
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._started = 0.0
+
+    def __enter__(self) -> "_Heartbeat":
+        self._started = time.monotonic()
+        self._thread = threading.Thread(target=self._tick, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc_info) -> bool:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+        return False
+
+    def _tick(self) -> None:
+        while not self._stop.wait(self._interval):
+            _stt_log(f"{self._label} — {int(self.elapsed())}s elapsed")
+
+    def elapsed(self) -> float:
+        return time.monotonic() - self._started
+
+
+def _transcript_cache_path(audio_path: str) -> str:
+    """Cache file for this exact audio file.
+
+    Keyed on absolute path + size + mtime, so a re-rendered or edited audio
+    file can never reuse a stale transcript.
+    """
+    abs_path = os.path.abspath(audio_path)
+    try:
+        st = os.stat(abs_path)
+        stamp = f"{abs_path}|{st.st_size}|{int(st.st_mtime)}"
+    except OSError:
+        stamp = abs_path
+    digest = hashlib.sha1(stamp.encode("utf-8", "replace")).hexdigest()[:16]
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.basename(abs_path))[:60]
+    return os.path.join(_STT_CACHE_DIR, f"{name}.{digest}.json")
+
+
+def _load_cached_transcript(audio_path: str) -> Optional[dict]:
+    """Return a previously checkpointed Scribe payload, or None."""
+    try:
+        with open(_transcript_cache_path(audio_path), "r",
+                  encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) and data.get("words") else None
+
+
+def _save_cached_transcript(audio_path: str, result: dict) -> None:
+    """Checkpoint the Scribe JSON the moment it arrives.
+
+    A crash in a later stage must not re-upload and re-pay for a
+    transcription already in hand. Best effort and atomic: a cache we cannot
+    write is no reason to fail a run that just succeeded.
+    """
+    path = _transcript_cache_path(audio_path)
+    try:
+        os.makedirs(_STT_CACHE_DIR, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except Exception as e:
+        _stt_log(f"WARNING: could not checkpoint the transcript ({e}) — a "
+                 "re-run will transcribe again.")
+
+
+def _stt_retryable(exc: BaseException) -> bool:
+    """Is this failure worth another attempt?
+
+    Retry the transient ones — read timeouts, dropped connections, truncated
+    bodies, 429 and 5xx. Never retry the verdicts in _STT_FATAL_HTTP.
+    """
+    if isinstance(exc, urllib.error.HTTPError):   # checked first: it IS a URLError
+        return exc.code not in _STT_FATAL_HTTP and (exc.code == 429
+                                                    or exc.code >= 500)
+    return isinstance(exc, (TimeoutError, socket.timeout, ssl.SSLError,
+                            ConnectionError, urllib.error.URLError,
+                            http.client.HTTPException, json.JSONDecodeError))
+
+
+def _stt_retry_after(exc: BaseException) -> float:
+    """Seconds the server explicitly asked us to wait (429/503), else 0.0.
+
+    Honouring Retry-After beats guessing: a rate limit usually clears in
+    seconds, and ignoring the header risks tripping it again. Capped by the
+    caller. The HTTP-date form is ignored — our own backoff covers it.
+    """
+    headers = getattr(exc, "headers", None)
+    raw = headers.get("Retry-After") if headers else None
+    try:
+        return max(0.0, float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _stt_error_detail(exc: BaseException) -> str:
+    """Short human phrasing of a failure — no stack trace needed to read it."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"HTTP {exc.code} from ElevenLabs"
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return "read timeout — the upload finished, the answer never arrived"
+    if isinstance(exc, urllib.error.URLError):
+        return f"network error: {exc.reason}"
+    if isinstance(exc, json.JSONDecodeError):
+        return "malformed response body (truncated?)"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _transcribe_audio(audio_path, api_key, use_cache: bool = True):
+    """Transcribe *audio_path* with ElevenLabs Scribe. Returns the Scribe JSON.
+
+    Retries transient network failures with backoff, sizes the read timeout
+    to the audio length, preflights the cheap checks before uploading, prints
+    a heartbeat while it waits, and checkpoints the result so a crash in a
+    later stage never re-uploads the same audio. Pass use_cache=False to
+    force a fresh transcription.
+    """
+    audio_path = os.path.abspath(os.path.expanduser(str(audio_path)))
+
+    if use_cache:
+        cached = _load_cached_transcript(audio_path)
+        if cached is not None:
+            _stt_log(f"reusing the checkpointed transcript for "
+                     f"{os.path.basename(audio_path)} "
+                     f"({len(cached.get('words') or [])} word tokens) — no "
+                     "re-upload, no re-charge.")
+            return cached
+
+    _stt_preflight(audio_path, api_key)
+
     with open(audio_path, "rb") as f:
         audio_data = f.read()
     mime, _ = mimetypes.guess_type(audio_path)
@@ -314,11 +655,61 @@ def _transcribe_audio(audio_path, api_key):
         fields=[("model_id", "scribe_v2")],
         files=[("file", os.path.basename(audio_path), mime, audio_data)],
     )
-    req = urllib.request.Request(
-        "https://api.elevenlabs.io/v1/speech-to-text",
-        data=body, method="POST",
-        headers={"xi-api-key": api_key,
-                 "Content-Type": f"multipart/form-data; boundary={boundary}"},
-    )
-    with urllib.request.urlopen(req, timeout=180, context=_SSL_CTX) as resp:
-        return json.loads(resp.read().decode())
+    del audio_data          # the multipart copy is the only one the retries need
+
+    duration = _audio_duration_seconds(audio_path)
+    timeout = _stt_timeout_for(duration)
+    megabytes = len(body) / (1024.0 * 1024.0)
+    _stt_log(f"audio {_fmt_duration(duration)} | upload {megabytes:.1f} MB | "
+             f"timeout {int(timeout)}s | up to {_STT_ATTEMPTS} attempts")
+
+    for attempt in range(1, _STT_ATTEMPTS + 1):
+        # Rebuilt per attempt: a urllib Request is consumed by urlopen, the
+        # body bytes are not.
+        req = urllib.request.Request(
+            "https://api.elevenlabs.io/v1/speech-to-text",
+            data=body, method="POST",
+            headers={"xi-api-key": api_key,
+                     "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        with _Heartbeat(f"waiting for Scribe (attempt {attempt}/"
+                        f"{_STT_ATTEMPTS})") as beat:
+            try:
+                with urllib.request.urlopen(req, timeout=timeout,
+                                            context=_SSL_CTX) as resp:
+                    raw = resp.read()
+                result = json.loads(raw.decode("utf-8", errors="replace"))
+                if not isinstance(result, dict):
+                    raise ValueError("Scribe returned an unexpected payload "
+                                     f"shape ({type(result).__name__}).")
+            except Exception as e:
+                waited = int(beat.elapsed())
+                detail = _stt_error_detail(e)
+                if isinstance(e, urllib.error.HTTPError) and e.code == 401:
+                    raise ValueError(
+                        "Invalid or expired ElevenLabs API key (401).") from None
+                if not _stt_retryable(e) or attempt == _STT_ATTEMPTS:
+                    proxies = _proxy_env_note()
+                    raise RuntimeError(
+                        f"ElevenLabs Scribe transcription failed after "
+                        f"{attempt} attempt(s): {detail}. Last attempt waited "
+                        f"{waited}s of a {int(timeout)}s timeout for "
+                        f"{os.path.basename(audio_path)} "
+                        f"({_fmt_duration(duration)}, {megabytes:.1f} MB)."
+                        + (f" Proxy environment: {proxies}." if proxies else "")
+                        + " If this machine sits behind a proxy or TLS "
+                          "inspection, allow api.elevenlabs.io through it; "
+                          "otherwise re-run — a successful transcript is "
+                          "checkpointed and never re-uploaded.") from e
+                delay = _STT_BACKOFF_SECS[min(attempt - 1,
+                                              len(_STT_BACKOFF_SECS) - 1)]
+                delay = max(delay, min(_stt_retry_after(e), 120.0))
+                _stt_log(f"attempt {attempt} failed after {waited}s: "
+                         f"{detail} — retrying in {int(delay)}s")
+                time.sleep(delay)
+                continue
+            words = result.get("words") or []
+            _stt_log(f"attempt {attempt} OK — {len(words)} word tokens in "
+                     f"{int(beat.elapsed())}s")
+        _save_cached_transcript(audio_path, result)
+        return result

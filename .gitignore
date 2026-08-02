@@ -45,6 +45,9 @@ sync_python_log.txt
 sync_python_pid.txt
 sync_python_done.txt
 .clip_tmp.txt
+# Scribe transcripts checkpointed by the dubbing engine so a crash in a later
+# stage never re-uploads (and re-pays for) the same transcription.
+dubbing/data/stt_cache/
 
 # ── Audio + project artifacts ────────────────────────────────
 *.wav

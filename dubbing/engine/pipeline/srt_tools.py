@@ -604,37 +604,51 @@ def _format_timestamps_as_text(timestamps: list) -> str:
 
     Each entry comes from sync._build_timestamps() and contains:
         index, orig_start_ms, orig_end_ms, synced_start_ms
+    Match-mode entries (contract v0.7) additionally carry a "sync_status"
+    of "synced" or "unsync"; when present it is written as a 6th bracket.
+    Files without the 6th field keep the exact pre-v0.7 format, and readers
+    treat a missing status as "synced".
     """
+    with_status = any(e.get("sync_status") for e in timestamps)
     header = "[Index] [Orig Start] [Orig End] [Orig Duration] [Synced Start]"
-    lines  = [header]
+    if with_status:
+        header += " [Status]"
+    lines = [header]
     for entry in timestamps:
         orig_dur = entry['orig_end_ms'] - entry['orig_start_ms']
-        lines.append(
+        line = (
             f"[{entry['index']}] "
             f"[{entry['orig_start_ms']}ms] "
             f"[{entry['orig_end_ms']}ms] "
             f"[{orig_dur}ms] "
             f"[{entry['synced_start_ms']}ms]"
         )
+        if with_status:
+            line += f" [{entry.get('sync_status') or 'synced'}]"
+        lines.append(line)
     return '\n'.join(lines)
 
 
 def _parse_timestamps_text(path: str) -> list:
     """Inverse of _format_timestamps_as_text — read a *_sync_timestamps.txt
     file back into the list-of-dicts shape sync_audio_with_timestamps()
-    expects. Returns [] when the file is missing or unparsable."""
+    expects. Returns [] when the file is missing or unparsable. A v0.7
+    trailing [synced]/[unsync] bracket is returned as "sync_status"
+    (absent field → "synced")."""
     entries = []
     try:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 m = re.match(r"\[(\d+)\]\s+\[(\d+)ms\]\s+\[(\d+)ms\]\s+"
-                             r"\[\d+ms\]\s+\[(\d+)ms\]", line.strip())
+                             r"\[\d+ms\]\s+\[(\d+)ms\]"
+                             r"(?:\s+\[(synced|unsync)\])?", line.strip())
                 if m:
                     entries.append({
                         "index":           int(m.group(1)),
                         "orig_start_ms":   int(m.group(2)),
                         "orig_end_ms":     int(m.group(3)),
                         "synced_start_ms": int(m.group(4)),
+                        "sync_status":     m.group(5) or "synced",
                     })
     except Exception:
         return []

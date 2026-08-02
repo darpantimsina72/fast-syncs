@@ -1,5 +1,6 @@
 -- ============================================================
--- DUB PIPELINE PANEL v0.4  (Reaper Dubbing App — contract v0.4)
+-- DUB PIPELINE PANEL  (Reaper Dubbing App — contract v0.7; the app
+-- version shown in the title bar comes from the root VERSION file)
 --
 -- One-click: pick English audio → run the dubbing pipeline
 -- headless (engine/run_dub.py) → import the results to the timeline.
@@ -129,6 +130,17 @@ function V5.set_status_paths()
   DONE_JSON  = STATUS_DIR .. SEP .. "engine_done.json"
 end
 V5.set_status_paths()
+
+-- v0.7: app version, read from the fast-syncs root VERSION file (kept
+-- current by the updater). Shown above the tab bar and in Settings.
+V5.APP_VERSION = (function()
+  local root = BASE_DIR:match("^(.*)[/\\][^/\\]*$") or BASE_DIR
+  local f = io.open(root .. SEP .. "VERSION", "r")
+  if not f then return "" end
+  local v = (f:read("*l") or ""):match("^%s*(.-)%s*$")
+  f:close()
+  return v or ""
+end)()
 
 local ENGINE_SETTINGS_PATH = ENGINE_DIR .. SEP .. "engine_settings.json"
 local PANEL_SETTINGS_PATH  = SCRIPT_DIR .. SEP .. "dub_panel_settings.json"
@@ -1011,17 +1023,20 @@ end
 
 local STAGE_ORDER = { "S1a", "S1b", "S2a", "S2b", "S2c", "S2d",
                       "S3a", "S3b", "S3c", "S3d", "S3e" }
+-- v0.7: the default match mode does Gemini matching + per-section TTS
+-- under S2d and only book-keeps S3a-S3c, so those labels are worded to
+-- fit both modes (legacy still re-transcribes + maps in S3b/S3c).
 local STAGE_LABELS = {
   S1a = "Transcribe (speech-to-text)",
   S1b = "Regions / SRT",
   S2a = "Translate",
   S2b = "Review",
   S2c = "Punctuation",
-  S2d = "TTS (ElevenLabs)",
+  S2d = "Match + TTS (ElevenLabs)",
   S3a = "Sync SRT (EN)",
-  S3b = "Sync SRT (target)",
-  S3c = "LLM mapping",
-  S3d = "Sync algorithm",
+  S3b = "Chunk boundaries",
+  S3c = "EN ↔ script mapping",
+  S3d = "Placement (springs)",
   S3e = "Render synced audio",
 }
 local STAGE_INDEX = {}
@@ -1406,6 +1421,8 @@ local MANIFEST_KEYS = {
   "provider", "model", "reply",
   -- v0.4: --voice-change manifest field.
   "vc_wav",
+  -- v0.7: match sync mode (texts sidecar for item notes + chunk counts).
+  "sync_texts", "synced_count", "unsynced_count",
 }
 
 -- Parse the "voices" array of a --list-voices manifest:
@@ -1521,6 +1538,10 @@ local function parse_timestamps_file(path)
       local dur        = tonumber(d_ms) / 1000.0
       local synced     = tonumber(sy_ms) / 1000.0
       if dur <= 0 then dur = orig_end - orig_start end
+      -- v0.7 optional 6th field [synced]/[unsync] (letters only — a
+      -- 5-field line's trailing "[1234ms]" can never match). Absent =
+      -- synced, so pre-v0.7 files import exactly as before.
+      local status = line:match("%[%s*(%a+)%s*%]%s*$")
       if dur > 0 then
         entries[#entries + 1] = {
           index        = tonumber(idx),
@@ -1528,12 +1549,41 @@ local function parse_timestamps_file(path)
           orig_end     = orig_end,
           dur          = dur,
           synced_start = synced,
+          unsync       = (status == "unsync") or nil,
         }
       end
     end
   end
   f:close()
   return entries
+end
+
+-- v0.7 texts sidecar (<base>_sync_texts.txt): blank-line-separated blocks,
+-- block N = chunk text for timestamps index N (item notes on both tracks).
+-- V5 field, not a local — the main chunk sits at Lua's 200-local limit.
+function V5.parse_texts_file(path)
+  local blocks = {}
+  local content = read_all(path)
+  if not content then return blocks end
+  if content:sub(1, 3) == "\239\187\191" then content = content:sub(4) end
+  content = content:gsub("\r\n", "\n"):gsub("\r", "\n")
+  local parts = nil
+  local function flush()
+    if parts and #parts > 0 then
+      blocks[#blocks + 1] = table.concat(parts, " ")
+    end
+    parts = nil
+  end
+  for line in (content .. "\n"):gmatch("(.-)\n") do
+    local trimmed = line:match("^%s*(.-)%s*$")
+    if trimmed == "" then flush()
+    else
+      parts = parts or {}
+      parts[#parts + 1] = trimmed
+    end
+  end
+  flush()
+  return blocks
 end
 
 -- ---------------------------------------------------------------------------
@@ -1594,6 +1644,22 @@ end
 local TRACK_EN     = "EN Original"
 local TRACK_CHUNKS = "Dub Chunks"
 local TRACK_REF    = "Dub Rendered (ref)"
+-- v0.7: [unsync] chunks land here — same name + find-or-reuse rule as the
+-- Auto Sync tab's Un sync track (both tools park leftovers in one place).
+V5.TRACK_UNSYNC = "Un sync"
+
+function V5.find_or_append_track(name)
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local ok, nm = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+    if ok and nm == name then return tr end
+  end
+  local idx = reaper.CountTracks(0)
+  reaper.InsertTrackAtIndex(idx, true)
+  local tr = reaper.GetTrack(0, idx)
+  reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", name, true)
+  return tr
+end
 
 -- Never reuse an existing same-named track: find the smallest suffix
 -- (" 2", " 3", ...) free for ALL THREE names at once ("" first import).
@@ -1737,24 +1803,58 @@ local function import_to_timeline(m)
     if not it then skip("en_audio: REAPER could not open the media file") end
   end
 
-  -- 2. Dub Chunks
+  -- 2. Dub Chunks (synced) + Un sync (v0.7 [unsync] entries)
+  local unsync_added = 0
   if #entries > 0 then
-    local tr = append_named_track(TRACK_CHUNKS .. suffix)
-    for i, e in ipairs(entries) do
-      local it = add_file_item(tr, tts_wav, e.synced_start, e.dur,
-                               e.orig_start,
-                               string.format("chunk %02d", e.index or i))
-      if it then
-        chunks_added = chunks_added + 1
-        local note = note_for_chunk(cues, #entries, i, e.synced_start)
-        if note ~= "" then
-          reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
-          notes_matched = notes_matched + 1
+    local texts = {}
+    if (m.sync_texts or "") ~= "" and file_exists(m.sync_texts) then
+      texts = V5.parse_texts_file(m.sync_texts)
+    end
+    local synced_entries, unsync_entries = {}, {}
+    for _, e in ipairs(entries) do
+      if e.unsync then unsync_entries[#unsync_entries + 1] = e
+      else synced_entries[#synced_entries + 1] = e end
+    end
+    local function note_for(e, list_n, i)
+      local t = texts[e.index or 0]
+      if t and t ~= "" then return t end
+      return note_for_chunk(cues, list_n, i, e.synced_start)
+    end
+
+    if #synced_entries > 0 then
+      local tr = append_named_track(TRACK_CHUNKS .. suffix)
+      for i, e in ipairs(synced_entries) do
+        local it = add_file_item(tr, tts_wav, e.synced_start, e.dur,
+                                 e.orig_start,
+                                 string.format("chunk %02d", e.index or i))
+        if it then
+          chunks_added = chunks_added + 1
+          local note = note_for(e, #synced_entries, i)
+          if note ~= "" then
+            reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
+            notes_matched = notes_matched + 1
+          end
         end
       end
+      if chunks_added == 0 then
+        skip("tts_wav: REAPER could not open the media file -- no chunks placed")
+      end
     end
-    if chunks_added == 0 then
-      skip("tts_wav: REAPER could not open the media file -- no chunks placed")
+
+    if #unsync_entries > 0 then
+      local tr = V5.find_or_append_track(V5.TRACK_UNSYNC)
+      for i, e in ipairs(unsync_entries) do
+        local it = add_file_item(tr, tts_wav, e.synced_start, e.dur,
+                                 e.orig_start,
+                                 string.format("unsync %02d", e.index or i))
+        if it then
+          unsync_added = unsync_added + 1
+          local note = note_for(e, #unsync_entries, i)
+          if note ~= "" then
+            reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
+          end
+        end
+      end
     end
   end
 
@@ -1782,6 +1882,11 @@ local function import_to_timeline(m)
     "Dub chunks placed: " .. chunks_added,
     "Regions created:   " .. regions_added,
   }
+  if unsync_added > 0 then
+    lines[3] = "Synced chunks placed: " .. chunks_added
+    lines[#lines + 1] = "Un sync chunks:    " .. unsync_added
+                        .. '  (on the "' .. V5.TRACK_UNSYNC .. '" track)'
+  end
   if chunks_added > 0 then
     lines[#lines + 1] = "Item notes matched: " .. notes_matched
                         .. " of " .. chunks_added
@@ -2438,9 +2543,189 @@ local function enter_review_phase(m)
   }
   -- Remember (and persist) the run's out_dir for the regen section.
   V5.set_regen_target(m.out_dir, m.language)
+  -- v0.7: reaching review is a resumable milestone — record it.
+  V5.history_record("review", m)
   _ui_phase = "review"
   return true
 end
+
+-- ---------------------------------------------------------------------------
+-- v0.7 per-project run history. One JSON per REAPER project under
+-- engine/history/ (the status dirs are wiped at every launch — this dir is
+-- not). Reopening the project (and this panel) lists its past runs with
+-- Resume review / Import, so transcription+translation are never redone.
+-- All state lives on V5 (main chunk is at Lua's 200-local limit); the
+-- manifests themselves stay in each run's out_dir — history only indexes.
+-- ---------------------------------------------------------------------------
+
+V5.HISTORY_DIR  = ENGINE_DIR .. SEP .. "history"
+V5.history_slug = nil
+V5.hist         = {}
+
+function V5.history_path()
+  return V5.HISTORY_DIR .. SEP .. (V5.history_slug or "unsaved") .. ".json"
+end
+
+function V5.history_load()
+  V5.history_slug = V5.project_status_slug()
+  V5.hist = {}
+  local text = read_all(V5.history_path())
+  if not text then return end
+  -- Walk the "entries" array of flat string-valued objects with the real
+  -- JSON string decoder (same shape as parse_voices_json).
+  local a, b = text:find('"entries"', 1, true)
+  if not a then return end
+  local i = skip_ws(text, b + 1)
+  if text:sub(i, i) ~= ":" then return end
+  i = skip_ws(text, i + 1)
+  if text:sub(i, i) ~= "[" then return end
+  i = i + 1
+  while i <= #text do
+    i = skip_ws(text, i)
+    local c = text:sub(i, i)
+    if c == "]" or c == "" then break end
+    if c == "{" then
+      local obj = {}
+      i = i + 1
+      while i <= #text do
+        i = skip_ws(text, i)
+        local cc = text:sub(i, i)
+        if cc == "}" then i = i + 1 break end
+        if cc == '"' then
+          local key; key, i = decode_json_string(text, i)
+          i = skip_ws(text, i)
+          if text:sub(i, i) == ":" then
+            i = skip_ws(text, i + 1)
+            if text:sub(i, i) == '"' then
+              local val; val, i = decode_json_string(text, i)
+              obj[key] = val
+            else
+              i = text:find("[,}%]]", i) or (#text + 1)
+            end
+          end
+        else
+          i = i + 1
+        end
+      end
+      if (obj.out_dir or "") ~= "" then V5.hist[#V5.hist + 1] = obj end
+    else
+      i = i + 1
+    end
+  end
+end
+
+function V5.history_write()
+  reaper.RecursiveCreateDirectory(V5.HISTORY_DIR, 0)
+  local f = io.open(V5.history_path(), "wb")
+  if not f then return end
+  f:write('{\n  "entries": [\n')
+  for i, e in ipairs(V5.hist) do
+    f:write(string.format(
+      '    {"ts": "%s", "mode": "%s", "audio": "%s", "language": "%s", '
+      .. '"out_dir": "%s", "status": "%s"}%s\n',
+      _json_escape(e.ts or ""), _json_escape(e.mode or ""),
+      _json_escape(e.audio or ""), _json_escape(e.language or ""),
+      _json_escape(e.out_dir or ""), _json_escape(e.status or ""),
+      i < #V5.hist and "," or ""))
+  end
+  f:write('  ]\n}\n')
+  f:close()
+end
+
+-- Record a milestone for the CURRENT project. Newest first, deduped by
+-- out_dir (a dub after a review replaces the review entry), capped at 20.
+function V5.history_record(status, m)
+  m = m or {}
+  if (m.out_dir or "") == "" then return end
+  if V5.history_slug ~= V5.project_status_slug() then V5.history_load() end
+  local e = {
+    ts       = os.date("%Y-%m-%d %H:%M"),
+    mode     = (SCRIPT_MODE == "have") and "paste" or "full",
+    audio    = (m.audio ~= "" and m.audio) or LAST_AUDIO or "",
+    language = (m.language ~= "" and m.language) or LANGUAGE or "",
+    out_dir  = m.out_dir,
+    status   = status,
+  }
+  local kept = { e }
+  for _, old in ipairs(V5.hist) do
+    if old.out_dir ~= e.out_dir and #kept < 20 then kept[#kept + 1] = old end
+  end
+  V5.hist = kept
+  V5.history_write()
+end
+
+-- Setup-phase history section. Re-loads when the active REAPER project
+-- changes (panel left open, user switches project tabs).
+function V5.ui_history(ctx)
+  if V5.history_slug ~= V5.project_status_slug() then V5.history_load() end
+  if #V5.hist == 0 then return end
+  reaper.ImGui_Dummy(ctx, 0, 2)
+  if not reaper.ImGui_CollapsingHeader(ctx,
+      ('Project history (%d run%s)###dub_history'):format(
+        #V5.hist, #V5.hist == 1 and "" or "s"),
+      reaper.ImGui_TreeNodeFlags_DefaultOpen
+      and reaper.ImGui_TreeNodeFlags_DefaultOpen() or 0) then
+    return
+  end
+  reaper.ImGui_Indent(ctx, 8)
+  for i, e in ipairs(V5.hist) do
+    local label = ('%s  ·  %s  ·  %s  ·  %s'):format(
+      e.ts or "?", basename(e.audio or ""), e.language or "?",
+      (e.status == "review") and "paused at review"
+        or (e.mode == "paste" and "dubbed (pasted script)" or "dubbed"))
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(),
+      e.status == "review" and 0xFFCC55FF or 0xAABBCCFF)
+    reaper.ImGui_TextWrapped(ctx, label)
+    reaper.ImGui_PopStyleColor(ctx)
+
+    local mpath = (e.out_dir or "") .. SEP .. "engine_done.json"
+    if e.status == "review" then
+      if reaper.ImGui_SmallButton(ctx, 'Resume review##h' .. i) then
+        local m = file_exists(mpath) and load_manifest_json(mpath) or nil
+        if m and m.status == "review" then
+          local ok, why = enter_review_phase(m)
+          if not ok then
+            ui_set_banner("error", why or "Could not resume the review.")
+          end
+        else
+          ui_set_banner("error",
+            "The review files are no longer in:\n" .. (e.out_dir or "?") ..
+            "\n(The folder was moved or cleaned — run the pipeline again.)")
+        end
+      end
+      reaper.ImGui_SameLine(ctx)
+    elseif e.status == "ok" then
+      if reaper.ImGui_SmallButton(ctx, 'Import to timeline##h' .. i) then
+        local m = file_exists(mpath) and load_manifest_json(mpath) or nil
+        if m and m.status == "ok" then
+          reaper.ShowMessageBox(import_to_timeline(m),
+                                "Import Dub Results", 0)
+        else
+          ui_set_banner("error",
+            "The run's files are no longer in:\n" .. (e.out_dir or "?"))
+        end
+      end
+      reaper.ImGui_SameLine(ctx)
+    end
+    if reaper.ImGui_SmallButton(ctx, 'Use audio + language##h' .. i) then
+      if (e.audio or "") ~= "" and file_exists(e.audio) then
+        LAST_AUDIO = e.audio
+      end
+      if (e.language or "") ~= "" then LANGUAGE = e.language end
+      save_settings()
+      ui_set_banner("info", "Audio and language loaded from history.")
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Folder##h' .. i) then
+      if (e.out_dir or "") ~= "" then open_path(e.out_dir) end
+    end
+    if i < #V5.hist then reaper.ImGui_Dummy(ctx, 0, 2) end
+  end
+  reaper.ImGui_Unindent(ctx, 8)
+  reaper.ImGui_Separator(ctx)
+end
+
+V5.history_load()
 
 -- The edited translation as one blank-line-separated text blob.
 local function review_collect_text()
@@ -3016,6 +3301,10 @@ local function _finish_run(exit_code)
     -- Remember (and persist) where this run's outputs live, so regen works
     -- in later REAPER sessions without re-picking engine_done.json.
     V5.set_regen_target(m.out_dir, m.language)
+    -- v0.7: finished dub runs land in the per-project history.
+    if _run_mode == "full" or _run_mode == "dub" then
+      V5.history_record("ok", m)
+    end
     _ui_progress = 1.0
     _ui_phase    = "success"
     return
@@ -3929,6 +4218,10 @@ local function ui_phase_setup(ctx, on_start, on_cancel, busy)
     reaper.ImGui_Separator(ctx)
   end
 
+  -- v0.7: this REAPER project's past runs (resume review / re-import
+  -- without re-transcribing or re-translating).
+  if not busy then V5.ui_history(ctx) end
+
   -- v0.5: audio + language + run-mode live in a shared block (the Paste
   -- Translation tab renders the same inputs). Pasted-script entry moved to
   -- its own tab; LLM/TTS settings and Advanced moved to the Settings tab.
@@ -3998,11 +4291,14 @@ function V5.ui_paste_tab(ctx, on_start)
 
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
   reaper.ImGui_Text(ctx,
-    'Your script  →  TTS  →  Sync  →  Import   (no LLM translation)')
+    'Your script  →  Match  →  TTS  →  Synced import   (no LLM translation)')
   reaper.ImGui_PopStyleColor(ctx)
 
   reaper.ImGui_Dummy(ctx, 0, 6)
   _ui_render_banner(ctx)
+
+  -- v0.7: same per-project history as the Full Pipeline tab.
+  V5.ui_history(ctx)
 
   V5.ui_source_inputs(ctx)
 
@@ -4075,6 +4371,13 @@ function V5.ui_settings_tab(ctx)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(),  10.0, 10.0)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(),  8.0, 6.0)
+
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  reaper.ImGui_Text(ctx, 'Fast Syncs '
+    .. (V5.APP_VERSION ~= '' and ('v' .. V5.APP_VERSION)
+        or '(VERSION file missing — run Update…)'))
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 2)
 
   local locked = (_ui_phase ~= "setup")
   if locked then
@@ -4202,6 +4505,16 @@ local function ui_phase_success(ctx, on_close)
     reaper.ImGui_Text(ctx, 'Language : ' .. (_manifest.language ~= '' and _manifest.language or LANGUAGE))
     reaper.ImGui_Text(ctx, 'Output   : ' .. (_manifest.out_dir or ''))
     reaper.ImGui_PopStyleColor(ctx)
+    -- v0.7 match mode reports its chunk split up front.
+    if (_manifest.synced_count or '') ~= '' then
+      local n_un = tonumber(_manifest.unsynced_count or '') or 0
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(),
+                                  n_un > 0 and 0xEEBB44FF or 0x55DD55FF)
+      reaper.ImGui_Text(ctx, ('Chunks   : %s synced, %s unsynced%s'):format(
+        _manifest.synced_count, _manifest.unsynced_count or '0',
+        n_un > 0 and '  (unsynced go to the "Un sync" track on import)' or ''))
+      reaper.ImGui_PopStyleColor(ctx)
+    end
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
     local have = {}
     if (_manifest.en_audio or '') ~= ''       then have[#have + 1] = 'EN audio' end
@@ -4473,7 +4786,12 @@ local function main()
     end
     -- Wide enough for the side-by-side review table.
     reaper.ImGui_SetNextWindowSize(_ui_ctx, 760, 680, reaper.ImGui_Cond_FirstUseEver())
-    local visible, open = reaper.ImGui_Begin(_ui_ctx, 'Dub Pipeline',
+    -- v0.7: version in the title bar. The "###dub_pipeline" suffix pins the
+    -- ImGui window ID, so future version bumps never reset the saved
+    -- window position/size again (only this first rename does, once).
+    local visible, open = reaper.ImGui_Begin(_ui_ctx,
+      'Dub Pipeline' .. (V5.APP_VERSION ~= '' and ('  v' .. V5.APP_VERSION) or '')
+      .. '###dub_pipeline',
       true, reaper.ImGui_WindowFlags_NoCollapse())
     -- Outside the `visible` guard on purpose: a fully off-screen window can
     -- report itself as not visible, which is the case we must still rescue.

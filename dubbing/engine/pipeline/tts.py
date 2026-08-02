@@ -667,6 +667,145 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
     return output_path
 
 
+# Silence inserted between sections in the concatenated wav. Spans exclude
+# it, so cutting a section out of the wav never clips a neighbour even when
+# an item is nudged a few ms in REAPER.
+SECTION_GAP_MS = 240
+
+
+def synthesize_sections_elevenlabs(section_texts, output_path: str,
+                                   api_key: str,
+                                   voice_id: str = ELEVENLABS_TTS_VOICE_ID,
+                                   model_id: str = ELEVENLABS_TTS_MODEL,
+                                   status_cb=None):
+    """Synthesize *section_texts* one by one into ONE concatenated WAV
+    (contract v0.7 match mode). Returns (output_path, spans) where spans is
+    one (start_ms, end_ms) pair per section inside the wav, gaps excluded.
+
+    Every section keeps prosody continuity via ElevenLabs request-stitching:
+    the neighbouring script text travels as previous_text/next_text context.
+    Long sections still go through the ~ELEVENLABS_CHUNK_CHARS splitter.
+    Validation, tag stripping for non-v3 models, the locked-output divert
+    and the ffmpeg/pydub error paths mirror synthesize_tts_elevenlabs."""
+    if not api_key or not api_key.strip():
+        raise ValueError("ElevenLabs API key is missing — set "
+                         "\"elevenlabs_api_key\" in config/tts_settings.json.")
+    if not voice_id or not str(voice_id).strip():
+        raise ValueError(
+            "No ElevenLabs voice selected. Pass --voice-id or let the engine "
+            "auto-resolve one from the account's voice catalogue.")
+    sections = [(t or "").strip() for t in (section_texts or [])]
+    if not sections or any(not t for t in sections):
+        raise ValueError("Section list is empty or contains an empty "
+                         "section — nothing to synthesize.")
+
+    api_key = api_key.strip()
+    raw_voice_id = str(voice_id).strip()
+    voice_id = _sanitize_voice_id(raw_voice_id)
+    if not voice_id:
+        raise ValueError(
+            "Invalid ElevenLabs voice_id "
+            f"(received: {raw_voice_id!r}). The value must be the raw "
+            "voice ID, not a display label.")
+    model_id = (model_id or ELEVENLABS_TTS_MODEL).strip() or ELEVENLABS_TTS_MODEL
+
+    if not model_id.startswith("eleven_v3"):
+        stripped = [_strip_emotion_tags(t) for t in sections]
+        sections = [s.strip() if s.strip() else o
+                    for s, o in zip(stripped, sections)]
+
+    output_path = ensure_writable_output(output_path, status_cb=status_cb)
+
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        raise RuntimeError(
+            "pydub not installed — the sectioned TTS mode needs it to "
+            "assemble the per-section audio. Re-run the setup script.")
+
+    out_base = os.path.splitext(output_path)[0]
+    log_lines = [
+        f"TTS Section Log — {os.path.basename(output_path)}",
+        "Platform : ElevenLabs (sectioned, request-stitched)",
+        f"Voice ID : {voice_id}",
+        f"Model    : {model_id}",
+        f"Sections : {len(sections)}",
+        f"Gap      : {SECTION_GAP_MS}ms between sections (spans exclude it)",
+        "",
+    ]
+
+    seg_list = []
+    total = len(sections)
+    for i, text in enumerate(sections):
+        if status_cb:
+            status_cb(f"TTS: section {i + 1} of {total} "
+                      f"({len(text)} chars)…")
+        prev_ctx = sections[i - 1] if i > 0 else None
+        next_ctx = sections[i + 1] if i + 1 < total else None
+        sec_bytes = []
+        subchunks = _split_text_for_elevenlabs(text)
+        for k, sub in enumerate(subchunks):
+            # Stitching context: everything before/after THIS subchunk, so
+            # multi-subchunk sections stay continuous internally too.
+            p = " ".join(filter(None, [prev_ctx] + subchunks[:k])) or None
+            n = " ".join(filter(None, subchunks[k + 1:] + [next_ctx])) or None
+            sec_bytes.append(_elevenlabs_tts_post(
+                sub, api_key, voice_id, model_id,
+                previous_text=p, next_text=n))
+        raw = b"".join(sec_bytes)
+        with open(f"{out_base}_sec_{i + 1:03d}.mp3", "wb") as sf:
+            sf.write(raw)
+        try:
+            seg = AudioSegment.empty()
+            for rb in sec_bytes:
+                seg += AudioSegment.from_file(io.BytesIO(rb), format="mp3")
+        except FileNotFoundError:
+            raise RuntimeError(
+                "ffmpeg/ffprobe not found — pydub needs it to decode the "
+                "ElevenLabs MP3 audio. Re-run the setup script "
+                "(setup_windows.bat / setup_mac.command); it installs "
+                "ffmpeg automatically. Then run the dub again.")
+        seg_list.append(seg)
+        log_lines += [
+            f"=== SECTION {i + 1} of {total} ===",
+            f"Characters : {len(text)}",
+            f"Duration   : {len(seg)}ms",
+            f"Audio saved: {os.path.basename(out_base)}_sec_{i + 1:03d}.mp3",
+            "--- Text ---",
+            text,
+            "",
+        ]
+
+    frame_rate = seg_list[0].frame_rate
+    gap = AudioSegment.silent(duration=SECTION_GAP_MS, frame_rate=frame_rate)
+    combined = AudioSegment.empty()
+    spans = []
+    cursor = 0
+    for i, seg in enumerate(seg_list):
+        if i > 0:
+            combined += gap
+            cursor += len(gap)
+        start = cursor
+        combined += seg
+        cursor += len(seg)
+        spans.append((start, cursor))
+
+    with open(out_base + "_chunks.txt", "w", encoding="utf-8") as lf:
+        lf.write("\n".join(log_lines))
+
+    if status_cb:
+        status_cb(f"TTS: Saving → {os.path.basename(output_path)}… "
+                  f"({total} sections)")
+    try:
+        combined.export(output_path, format="wav")
+    except PermissionError:
+        output_path = ensure_writable_output(output_path,
+                                             status_cb=status_cb)
+        combined.export(output_path, format="wav")
+
+    return output_path, spans
+
+
 # ─── ElevenLabs Speech-to-Speech (voice changer) ────────────────────────────
 # NEW in v0.4 (not extracted from the bulk app): convert an existing voice
 # recording to a different ElevenLabs voice while keeping timing, pacing and

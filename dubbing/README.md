@@ -142,9 +142,11 @@ from those files only — they are never placed on a command line.
 3. **Already have the translation?** Use the **Paste Translation** tab:
    pick the audio + language there and paste the translated script (one
    blank line between paragraphs — **📥 Paste from clipboard** works too).
-   The engine then skips the LLM translation entirely and goes straight to
-   TTS + sync; the audio is still transcribed once because the sync stages
-   need the timings.
+   The engine then skips the LLM translation entirely: it transcribes the
+   English once, **Gemini-matches your script's sentences to the English
+   lines**, synthesizes each matched section and places every dubbed chunk
+   at its English line's timestamp. Chunks with no English home (or no
+   room) go to the **Un sync** track — the same behaviour as Auto Sync.
 
    The panel has seven tabs (v0.5): **Full Pipeline** (the LLM translates —
    pauses for your review), **Paste Translation** (your script),
@@ -169,7 +171,8 @@ from those files only — they are never placed on a command line.
    - **💾 Save** — writes your edits to
      `<out_dir>/<base>_translation_edited.txt`.
    - **▶ Continue to Dubbing** — saves, then resumes with the edited text:
-     emotion enrichment, TTS and the sync chain (stages S2d–S3e).
+     Gemini section matching, per-section TTS and placement (stages
+     S2d–S3e).
    - **Skip edit** — continues with the engine's own translation.
    - **Back to setup** — the paused run is kept; the setup phase offers
      **Resume review** (it even survives closing the panel).
@@ -184,13 +187,21 @@ from those files only — they are never placed on a command line.
 6. On success, click **Import to timeline**. Appended to your project, in
    one undo block:
    - **EN Original** — the original audio at position 0.
-   - **Dub Chunks** — one item per synced chunk, freely draggable; each
-     item's note holds the matching subtitle cue text.
-   - **Dub Rendered (ref)** — the final synced wav, as a muted reference.
-   - **Regions** — one region per subtitle cue.
+   - **Dub Chunks** — one item per synced chunk, at the position of the
+     English line it matched; each item's note holds the chunk's script
+     text, and one region per synced chunk is created.
+   - **Un sync** — chunks that had no English match (or no room to fit in
+     order) sit here for manual placement, side by side — the same track
+     Auto Sync uses. The success screen shows the synced/unsynced counts.
+   - **Dub Rendered (ref)** — the synced-only render, as a muted reference.
 
    `Import_Dub_Results.lua` can also import any finished run on its own
    (no ReaImGui needed).
+
+   **Project history**: the setup screen lists this REAPER project's past
+   runs — **Resume review** a paused run or **Import to timeline** a
+   finished one at any time, with no re-transcription / re-translation.
+   The app version is in the panel's title bar and Settings tab.
 7. **Fix single lines with chunk regeneration** — go to the **Regen Audio**
    tab, select a chunk item on a "Dub Chunks" track, edit the item's text,
    click **⟳ Regenerate**. The engine synthesizes just that text and the

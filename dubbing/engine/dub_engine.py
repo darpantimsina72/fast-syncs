@@ -131,6 +131,13 @@ REQUIRED_FUNCTIONS = [
     "_llm_generate",                 # provider-agnostic generation (--test-llm)
     "_active_provider_and_model",    # provider/model names (--test-llm manifest)
     "_llm_provider_label",           # provider + credential state (startup banner)
+    # v0.7 match sync mode (pipeline/match.py + tts sectioned synthesis)
+    "call_match_sections",           # Gemini section match (script <-> EN cues)
+    "build_chunks",                  # match result -> TTS chunk list
+    "place_chunks",                  # slot placement + order sweep + statuses
+    "synthesize_sections_elevenlabs",# per-section TTS -> one wav + spans
+    "_split_script_into_sentences",  # script -> sentence match units
+    "_srt_ts",                       # seconds -> SRT timestamp (synced SRT build)
 ]
 REQUIRED_ATTRIBUTES = [
     "librosa",                       # used to load TTS audio like the app does
@@ -143,9 +150,12 @@ REQUIRED_ATTRIBUTES = [
 
 # Per-mode manifest key sets (contract v0.1 + v0.2 + v0.3). _write_manifest
 # filters by the active set, so stray working keys never leak into the JSON.
+# v0.7 adds sync_texts / synced_count / unsynced_count — written by the
+# match sync mode, "" otherwise (consumers skip empties, per contract).
 MANIFEST_KEYS = ["status", "error", "audio", "language", "out_dir",
                  "en_audio", "en_srt", "tts_wav", "timestamps_txt",
-                 "synced_wav", "synced_srt"]
+                 "synced_wav", "synced_srt", "sync_texts",
+                 "synced_count", "unsynced_count"]
 REVIEW_MANIFEST_KEYS = ["status", "error", "audio", "language", "out_dir",
                         "en_srt", "en_text", "translation_text",
                         "final_script"]
@@ -215,6 +225,17 @@ def _parse_args():
                          "text never travels on argv)")
     ap.add_argument("--out-wav", dest="out_wav", default=None,
                     help="Output WAV path for --regen-chunk")
+    ap.add_argument("--sync-mode", dest="sync_mode", default=None,
+                    choices=["match", "legacy"],
+                    help="How dub chunks get their timeline positions "
+                         "(v0.7). 'match' (default): Gemini section-matches "
+                         "the script sentences to the English cues BEFORE "
+                         "TTS, synthesizes per section, places each chunk "
+                         "in its English slot and marks the leftovers "
+                         "unsync (Auto-Sync-style). 'legacy': the v0.1-v0.6 "
+                         "whole-script TTS + re-transcription + mapping "
+                         "path. Also settable via a 'sync_mode' key in "
+                         "engine_settings.json; the CLI wins.")
     ap.add_argument("--emotion", dest="emotion", action="store_true",
                     default=None,
                     help="Run the Step-4 emotion enrichment before TTS "
@@ -311,6 +332,34 @@ def _emotion_enabled(args) -> bool:
     return True
 
 
+def _sync_mode(args) -> str:
+    """v0.7 sync-mode toggle: --sync-mode CLI flag > 'sync_mode' key in
+    engine_settings.json > 'match' (the new default)."""
+    if getattr(args, "sync_mode", None) in ("match", "legacy"):
+        return args.sync_mode
+    try:
+        with open(ENGINE_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        v = (data.get("sync_mode") or "").strip().lower() \
+            if isinstance(data, dict) else ""
+        if v in ("match", "legacy"):
+            return v
+    except Exception:
+        pass
+    return "match"
+
+
+def _app_version() -> str:
+    """Fast-syncs VERSION file (repo root, two levels above engine/)."""
+    try:
+        p = os.path.join(os.path.dirname(os.path.dirname(ENGINE_DIR)),
+                         "VERSION")
+        with open(p, "r", encoding="utf-8") as f:
+            return (f.readline() or "").strip()
+    except Exception:
+        return ""
+
+
 def _say(tag, msg):
     """Progress line in the contract format: '[Sxx] message'."""
     print(f"[{tag}] {msg}", flush=True)
@@ -332,9 +381,10 @@ def _import_pipeline():
     """
     if ENGINE_DIR not in sys.path:
         sys.path.insert(0, ENGINE_DIR)
-    from pipeline import config, stt, srt_tools, llm, tts, sync, tm  # noqa: F401
+    from pipeline import (config, stt, srt_tools, llm, tts, sync, tm,  # noqa: F401
+                          match)
     ns = types.SimpleNamespace()
-    for mod in (config, stt, srt_tools, llm, tts, sync):
+    for mod in (config, stt, srt_tools, llm, tts, sync, match):
         for name, value in vars(mod).items():
             if name.startswith("__"):
                 continue
@@ -634,7 +684,160 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
 
 
 def _stage_dub(pl, args, api_key, manifest, ctx, voice_id):
-    """S2d..S3e: emotion + TTS + sync + render.
+    """S2d..S3e dispatcher (v0.7): 'match' = Gemini section matching before
+    per-section TTS (Auto-Sync-style placement + Un sync statuses);
+    'legacy' = the v0.1-v0.6 whole-script TTS + re-transcription path."""
+    mode = _sync_mode(args)
+    _note(f"Sync mode: {mode}")
+    if mode == "match":
+        _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id)
+    else:
+        _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id)
+
+
+def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
+    """v0.7 match mode, S2d..S3e:
+
+      S2d  script -> sentences -> ONE Gemini section-match call against the
+           English sync-SRT cues -> per-section ElevenLabs TTS (request-
+           stitched) concatenated into one tts_wav with exact spans
+      S3a  English sync SRT persisted (it fed the matcher)
+      S3b  section offsets come from synthesis — NO second Scribe pass
+      S3c  match summary echo
+      S3d  slot placement + order sweep -> synced/unsync statuses,
+           timestamps txt (6th [status] field), texts sidecar, synced SRT
+      S3e  synced-only render
+
+    Step-4 emotion enrichment is NOT applied in this mode: sections are
+    matched and synthesized on the clean reviewed text (enriching each
+    section separately would multiply LLM calls; enriching the whole script
+    first would break the sentence-id mapping).
+    """
+    language = args.language
+    out_dir, base = ctx["out_dir"], ctx["base"]
+    audio_path = ctx["audio_path"]
+    script_text = ctx["script_text"]
+
+    # English cue list: reuse the persisted sync SRT (dub resume) or build
+    # it from the in-memory S1a transcription (full run).
+    en_sync_path = base + "_sync_en.srt"
+    if ctx.get("en_srt_text"):
+        en_srt = ctx["en_srt_text"]
+    else:
+        en_srt = pl._build_english_subtitle_srt(ctx["regions"], ctx["words"])
+        _write_text(en_sync_path, en_srt)
+    en_entries = pl._extract_srt_entries(en_srt)
+    if not en_entries:
+        raise RuntimeError("The English sync SRT contains no cues — cannot "
+                           "match the script against it.")
+
+    # ── [S2d] sentence split + Gemini section match + per-section TTS ──────
+    sentences = pl._split_script_into_sentences(script_text)
+    if not sentences:
+        raise RuntimeError("The dub script produced no sentences to match.")
+    if _emotion_enabled(args):
+        _say("S2d", "note: Step-4 emotion enrichment is skipped in match "
+                    "sync mode (sections are synthesized from the clean "
+                    "reviewed text).")
+    _say("S2d", f"Matching {len(sentences)} script sentence(s) to "
+                f"{len(en_entries)} English cue(s) with Gemini…")
+    sections, unmatched_tr, unmatched_en = pl.call_match_sections(
+        en_entries, sentences, language, pl.GEMINI_DEFAULT_MODEL,
+        status_cb=lambda m: _say("S2d", m))
+    chunks = pl.build_chunks(sections, unmatched_tr, sentences)
+    if not chunks:
+        raise RuntimeError("Section matching produced no TTS chunks.")
+    n_pre_matched = sum(1 for c in chunks if c["en_ids"])
+    _say("S2d", f"Match result: {n_pre_matched} matched chunk(s), "
+                f"{len(chunks) - n_pre_matched} unmatched chunk(s), "
+                f"{len(unmatched_en)} English cue(s) without a translation.")
+
+    _say("S2d", f"Synthesizing {len(chunks)} section(s) ({language}, voice "
+                f"{voice_id}, model {args.el_model})…")
+    tts_path = os.path.join(
+        out_dir, pl._tts_output_name(language, audio_path, "_tts"))
+    tts_path, spans = pl.synthesize_sections_elevenlabs(
+        [c["text"] for c in chunks], tts_path, api_key=api_key,
+        voice_id=voice_id, model_id=args.el_model,
+        status_cb=lambda m: _say("S2d", m))
+    manifest["tts_wav"] = tts_path
+    _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)} "
+                f"({len(spans)} section span(s)).")
+
+    # ── [S3a..S3c] bookkeeping stages (the heavy work already happened) ────
+    _say("S3a", "English sync SRT ready (it drove the matching).")
+    _say("S3b", "Section offsets taken from synthesis — no TTS "
+                "re-transcription needed in match mode.")
+    _say("S3c", "EN <-> script mapping done by the Gemini section match.")
+
+    # ── [S3d] slot placement + order sweep + files ──────────────────────────
+    _say("S3d", "Placing sections into their English slots…")
+    durations = [(e - s) / 1000.0 for (s, e) in spans]
+    placed = pl.place_chunks(chunks, en_entries, durations,
+                             log=lambda m: _say("S3d", m))
+
+    entries = []
+    for i, (span, p) in enumerate(zip(spans, placed), 1):
+        entries.append({
+            "index":           i,
+            "orig_start_ms":   int(span[0]),
+            "orig_end_ms":     int(span[1]),
+            "synced_start_ms": int(round(p["position"] * 1000)),
+            "sync_status":     p["status"],
+        })
+    sync_ts_path = base + "_sync_timestamps.txt"
+    _write_text(sync_ts_path, pl._format_timestamps_as_text(entries))
+    manifest["timestamps_txt"] = sync_ts_path
+
+    # Texts sidecar: block N (blank-line separated) = timestamps index N.
+    # The importers use it for item notes on BOTH tracks (the synced SRT
+    # below only covers the synced chunks).
+    texts_path = base + "_sync_texts.txt"
+    _write_text(texts_path, "\n\n".join(
+        " ".join((c["text"] or "").split()) or EMPTY_PARAGRAPH_PLACEHOLDER
+        for c in chunks) + "\n")
+    manifest["sync_texts"] = texts_path
+
+    synced_entries = [e for e in entries if e["sync_status"] == "synced"]
+    unsynced_n = len(entries) - len(synced_entries)
+    manifest["synced_count"] = str(len(synced_entries))
+    manifest["unsynced_count"] = str(unsynced_n)
+
+    # Synced SRT: cues for the synced chunks at their timeline positions
+    # (drives the REAPER regions; Un sync chunks get no region).
+    srt_lines = []
+    for n, e in enumerate(
+            sorted(synced_entries, key=lambda x: x["synced_start_ms"]), 1):
+        start_s = e["synced_start_ms"] / 1000.0
+        end_s = start_s + (e["orig_end_ms"] - e["orig_start_ms"]) / 1000.0
+        text = " ".join((chunks[e["index"] - 1]["text"] or "").split())
+        srt_lines += [str(n), f"{pl._srt_ts(start_s)} --> {pl._srt_ts(end_s)}",
+                      text, ""]
+    synced_srt_path = base + "_sync_synced.srt"
+    _write_text(synced_srt_path, "\n".join(srt_lines))
+    manifest["synced_srt"] = synced_srt_path
+    _say("S3d", f"{len(synced_entries)} synced / {unsynced_n} unsync — "
+                "timestamps, texts and synced SRT saved.")
+
+    # ── [S3e] synced-only render ────────────────────────────────────────────
+    if not synced_entries:
+        _say("S3e", "WARNING: no synced sections — the synced render is "
+                    "skipped (all chunks go to the Un sync track).")
+        return
+    _say("S3e", "Rendering the synced audio…")
+    synced_path = os.path.join(
+        out_dir, pl._tts_output_name(language, audio_path, "_synced"))
+    synced_path = pl.ensure_writable_output(
+        synced_path, status_cb=lambda m: _say("S3e", m))
+    pl.sync_audio_with_timestamps(
+        tts_path, synced_entries, synced_path,
+        status_cb=lambda m: _say("S3e", m), extend_last=False)
+    manifest["synced_wav"] = synced_path
+    _say("S3e", f"Synced audio saved: {os.path.basename(synced_path)}")
+
+
+def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
+    """S2d..S3e: emotion + TTS + sync + render (v0.1-v0.6 behaviour).
 
     Consumes from *ctx*: out_dir, base, audio_path, en_audio_dur and the
     dub script text (script_text). The English sync SRT comes from the
@@ -1095,6 +1298,9 @@ def _run_list_voices(args, manifest):
 
 def main() -> int:
     args = _parse_args()
+
+    v = _app_version()
+    _note(f"Reaper Dubbing App{' v' + v if v else ''} (contract v0.7)")
 
     if args.app_dir:
         _note("WARNING: --app-dir is deprecated as of v0.3 and IGNORED — "

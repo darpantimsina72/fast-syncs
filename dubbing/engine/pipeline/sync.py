@@ -598,8 +598,15 @@ def _build_timestamps(original_te_subs, synced_subs):
     return entries
 
 
-def sync_audio_with_timestamps(audio_path: str, timestamps: list, out_path: str, status_cb=None):
-    """Cut & overlay TTS audio according to syncing timestamps. Saves as WAV to out_path."""
+def sync_audio_with_timestamps(audio_path: str, timestamps: list, out_path: str, status_cb=None,
+                               extend_last=True):
+    """Cut & overlay TTS audio according to syncing timestamps. Saves as WAV to out_path.
+
+    extend_last=True (legacy) stretches the last segment to the end of the
+    TTS source so a Scribe-derived cue never clips the final word. Match
+    mode (contract v0.7) passes False: its spans are exact synthesis
+    offsets, and the entries may be a synced-only SUBSET of the wav, so
+    extending would drag trailing Un-sync sections into the render."""
     if not PYDUB_AVAILABLE:
         raise ImportError("pydub not installed. Run: pip install pydub")
     if status_cb: status_cb("Sync Audio: Loading audio…")
@@ -617,7 +624,7 @@ def sync_audio_with_timestamps(audio_path: str, timestamps: list, out_path: str,
 
     if status_cb: status_cb(f"Sync Audio: Mixing {len(sorted_ts)} segments…")
     for entry in sorted_ts:
-        if entry is last_entry:
+        if entry is last_entry and extend_last:
             # Last segment: extend to end of TTS source so no word gets clipped
             seg = source[entry["orig_start_ms"]:]
         else:

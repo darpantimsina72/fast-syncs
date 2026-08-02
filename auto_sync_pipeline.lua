@@ -2197,6 +2197,16 @@ local function main()
 
   local function close_window() _ui_window_open = false end
 
+  -- v0.7: app version from the root VERSION file (read once per launch).
+  local _app_version = ""
+  do
+    local f = io.open(get_script_dir() .. package.config:sub(1, 1) .. "VERSION", "r")
+    if f then
+      _app_version = (f:read("*l") or ""):match("^%s*(.-)%s*$") or ""
+      f:close()
+    end
+  end
+
   -- ReaImGui restores this window's last position from its own .ini. A stale
   -- position (monitor unplugged, or a corrupted negative cache) leaves the
   -- window fully off-screen: the action runs, nothing appears. Same rescue as
@@ -2234,7 +2244,12 @@ local function main()
       _pos_fix = nil
     end
     reaper.ImGui_SetNextWindowSize(_ui_ctx, 680, 720, reaper.ImGui_Cond_FirstUseEver())
-    local visible, open = reaper.ImGui_Begin(_ui_ctx, 'Auto Sync Pipeline',
+    -- v0.7: version in the title bar. "###" pins the window ID so later
+    -- bumps don't reset the saved window position (only this rename does,
+    -- once).
+    local visible, open = reaper.ImGui_Begin(_ui_ctx,
+      'Auto Sync Pipeline' .. (_app_version ~= '' and ('  v' .. _app_version) or '')
+      .. '###auto_sync_pipeline',
       true, reaper.ImGui_WindowFlags_NoCollapse())
     -- Outside the `visible` guard: a fully off-screen window can report
     -- itself as not visible — the exact case that needs the rescue.
