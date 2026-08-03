@@ -7,6 +7,19 @@
 --
 -- Phases: setup → running → [review →] running → success/failure.
 --
+-- v0.11 additions:
+--   - Every voice picker (Regen Audio, Track Voice, Text to Speech) has its
+--     own "⟳ Fetch voices" button, so changing a chunk's voice no longer
+--     needs a detour through ⚙ Settings.
+--   - "🔊 Test voice" auditions the picked voice before it is used: a short
+--     sample (the selected chunk's own text in Regen Audio) is synthesized
+--     into engine/preview/ and played outside the timeline — no track, no
+--     item, nothing to undo. Pressing it again with the same voice and text
+--     replays the wav instead of paying for a second ElevenLabs call.
+--   - The fetched catalogue is cached in reaper/voice_cache.json and
+--     reloaded at startup, so the voice combos are filled when the panel
+--     opens instead of only after a fetch.
+--
 -- v0.4 additions:
 --   - Tabs: the log lives in its own "Log" tab; the Pipeline tab keeps
 --     the settings visible (read-only) while a run is in progress.
@@ -1142,7 +1155,7 @@ local _run_mode        = "full"    -- full | translate | dub | regen |
 -- Utility modes never own the phase state: they report back into the phase
 -- they were launched from and leave the last run's manifest untouched.
 local UTIL_MODES = { regen = true, test_llm = true, list_voices = true,
-                     voice_change = true, tts = true }
+                     voice_change = true, tts = true, preview = true }
 local _util_return_phase = "setup" -- phase to return to when test/fetch ends
 
 -- v0.3 Settings section state.
@@ -3303,8 +3316,11 @@ local function _finish_run(exit_code)
       if #voices > 0 then
         _voices = voices
         _voices_language = LANGUAGE
+        -- v0.11: keep it for the next panel session too.
+        V5.voice_cache_save()
         ui_set_banner("info", string.format(
-          "Fetched %d ElevenLabs voices for %s — pick one in Settings.",
+          "Fetched %d ElevenLabs voices for %s — pick one in any Voice list " ..
+          "(Regen Audio, Track Voice, Text to Speech, ⚙ Settings).",
           #voices, LANGUAGE))
       else
         ui_set_banner("warn",
@@ -3371,6 +3387,39 @@ local function _finish_run(exit_code)
                              "\n\nFull log: " .. LOG_PATH)
     end
     V5.tts_pending = nil
+    _ui_phase = back
+    return
+  end
+
+  -- v0.11 voice preview: same --regen-chunk manifest as TTS, but the wav is
+  -- only played — no track, no item, nothing to undo.
+  if _run_mode == "preview" then
+    local back = V5.preview_return_phase or "setup"
+    local pend = V5.preview_pending
+    if cancelled then
+      ui_set_banner("warn", "Voice preview cancelled.")
+    elseif m and m.status == "ok" and exit_code == 0
+           and (m.regen_wav or "") ~= "" then
+      V5.preview_last = { wav = m.regen_wav, txt = pend and pend.txt or "",
+                          voice = pend and pend.voice or "",
+                          text = pend and pend.text or "" }
+      local ok, why = V5.play_wav(m.regen_wav)
+      if ok then
+        ui_set_banner("info", string.format(
+          "Previewing %s — nothing was imported. Press 🔊 Test voice again " ..
+          "to replay it.", V5.voice_label_for_banner(
+            pend and pend.voice or "")))
+      else
+        ui_set_banner("warn",
+          "The preview was generated, but playback failed:\n" ..
+          (why or "(unknown)") .. "\n\nThe wav is at:\n" .. m.regen_wav)
+      end
+    else
+      ui_set_banner("error", "Voice preview failed:\n" ..
+                             _error_detail(600) ..
+                             "\n\nFull log: " .. LOG_PATH)
+    end
+    V5.preview_pending = nil
     _ui_phase = back
     return
   end
@@ -3528,6 +3577,7 @@ local function _stage_line()
   if _run_mode == "test_llm"     then return "Testing LLM connection…" end
   if _run_mode == "list_voices"  then return "Fetching ElevenLabs voices…" end
   if _run_mode == "tts"          then return "Generating speech (ElevenLabs)…" end
+  if _run_mode == "preview"      then return "Generating a voice preview…" end
   if _run_mode == "voice_change" then
     return "Changing track voice (ElevenLabs speech-to-speech)…"
   end
@@ -3746,6 +3796,12 @@ local function ui_regen_section(ctx, default_open)
         V5.regen_voice = ""
       end
     end
+    -- v0.11: say what "🔊 Test voice" above will actually speak — the chunk's
+    -- own words, so the audition matches the regen it is standing in for.
+    _grey_hint(ctx, '🔊 Test voice speaks the start of this chunk in the ' ..
+                    'picked voice and plays it — nothing is imported or ' ..
+                    'replaced.')
+
     local use_id = ((V5.regen_voice or "") ~= "" and V5.regen_voice)
                    or (VOICE_ID or "")
     local use_nm = V5.voice_name(use_id)
@@ -3964,6 +4020,197 @@ function V5.bookmarks_save()
   return true
 end
 
+-- ---------------------------------------------------------------------------
+-- v0.11: the fetched catalogue survives a panel restart.
+--
+-- Until now --list-voices filled an in-memory list that died with the panel,
+-- so every session started with an empty combo and the only way to refill it
+-- was ⚙ Settings. The last fetch is now mirrored to voice_cache.json next to
+-- the bookmarks ({"language": …, "voices":[{id,name}]} — parse_voices_json
+-- reads the array as-is) and loaded at startup, so Regen / Track Voice /
+-- Text to Speech open with a usable voice list.
+-- ---------------------------------------------------------------------------
+V5.VOICE_CACHE_PATH = SCRIPT_DIR .. SEP .. "voice_cache.json"
+
+function V5.voice_cache_load()
+  local raw = read_all(V5.VOICE_CACHE_PATH) or ""
+  local voices = parse_voices_json(raw)
+  if #voices == 0 then return end
+  _voices = voices
+  -- Language names are argparse choices: plain ASCII, no escapes to decode.
+  _voices_language = raw:match('"language"%s*:%s*"([^"]*)"') or ""
+end
+
+function V5.voice_cache_save()
+  local f = io.open(V5.VOICE_CACHE_PATH, "wb")
+  if not f then return false end
+  f:write(string.format('{\n  "language": "%s",\n  "voices": [\n',
+                        _json_escape(_voices_language or "")))
+  for i, v in ipairs(_voices) do
+    f:write(string.format('    {"id": "%s", "name": "%s"}%s\n',
+      _json_escape(v.id or ""), _json_escape(v.name or ""),
+      i < #_voices and "," or ""))
+  end
+  f:write('  ]\n}\n')
+  f:close()
+  return true
+end
+
+-- ---------------------------------------------------------------------------
+-- v0.11: audition a voice BEFORE spending a regen on it.
+--
+-- "🔊 Test voice" synthesizes a short sample with the currently picked voice
+-- and plays it outside the timeline — nothing is imported, no item is
+-- touched. The sample is the text that voice would actually speak (the
+-- selected chunk in Regen Audio, the Text to Speech box), trimmed to keep
+-- the audition cheap; anywhere else it falls back to a fixed sentence.
+--
+-- Re-pressing the button with the same voice AND the same text replays the
+-- wav that is already on disk instead of paying ElevenLabs twice.
+-- ---------------------------------------------------------------------------
+V5.PREVIEW_DIR    = ENGINE_DIR .. SEP .. "preview"
+V5.PREVIEW_SAMPLE = "This is a short voice preview from the dubbing panel."
+V5.PREVIEW_MAX    = 220        -- bytes of sample text sent to ElevenLabs
+V5.preview_pending      = nil  -- { out_wav, voice, text } while running
+V5.preview_return_phase = "setup"
+V5.preview_last         = nil  -- { wav, voice, text } of the last good one
+
+-- Trim to V5.PREVIEW_MAX bytes without splitting a UTF-8 character (Indic
+-- text is multi-byte throughout) and, when possible, without splitting a word.
+function V5.preview_trim(s)
+  s = (s or ""):gsub("%s+", " "):match("^%s*(.-)%s*$")
+  if #s <= V5.PREVIEW_MAX then return s end
+  local cut = V5.PREVIEW_MAX
+  -- Walk back off continuation bytes (10xxxxxx) so the cut lands on a
+  -- character boundary.
+  while cut > 1 do
+    local b = s:byte(cut + 1)
+    if not b or b < 0x80 or b > 0xBF then break end
+    cut = cut - 1
+  end
+  local space = s:sub(1, cut):match("^.*()%s")
+  if space and space > V5.PREVIEW_MAX * 0.5 then cut = space - 1 end
+  return s:sub(1, cut) .. "…"
+end
+
+-- What the "🔊 Test voice" button next to each picker should speak.
+function V5.preview_text(key)
+  local t = ""
+  if key == 'regen' then
+    t = _regen_text or ""
+  elseif key == 'tts' then
+    t = V5.tts_text or ""
+  end
+  if not t:match("%S") then t = V5.PREVIEW_SAMPLE end
+  return V5.preview_trim(t)
+end
+
+-- Play a wav without involving the timeline. REAPER has no portable
+-- "just play this file" API (CF_Preview is SWS-only), so the OS player does
+-- it: backgrounded on macOS/Linux, ExecProcess(-2) on Windows — both
+-- fire-and-forget, so REAPER's UI never blocks on playback.
+function V5.play_wav(path)
+  if not file_exists(path) then
+    return false, "The preview audio is missing:\n" .. path
+  end
+  if _is_windows() then
+    if not reaper.ExecProcess then
+      return false, "This REAPER build cannot start the audio player."
+    end
+    -- PowerShell single-quoted string: '' is the escape for a quote.
+    reaper.ExecProcess(
+      'cmd.exe /C powershell -NoProfile -WindowStyle Hidden -Command ' ..
+      '"(New-Object Media.SoundPlayer \'' .. path:gsub("'", "''") ..
+      '\').PlaySync()"', -2)
+    return true
+  end
+  local os_str = reaper.GetOS() or ""
+  local mac    = os_str:match("^OSX") or os_str:match("^macOS")
+  -- macOS always has afplay; on Linux try ffplay, then aplay.
+  local player = mac and "afplay" or "ffplay -autoexit -nodisp -loglevel quiet"
+  local q = shellquote(path)
+  local line = player .. ' ' .. q
+  if not mac then line = line .. ' || aplay ' .. q end
+  os.execute('{ ' .. line .. ' ; } >/dev/null 2>&1 &')
+  return true
+end
+
+-- Synthesize *text* with *voice* and play it. Returns false (with a banner)
+-- when there is nothing to test with.
+function V5.start_voice_preview(voice, text)
+  ui_clear_banner()
+  voice = ((voice or "") ~= "" and voice) or VOICE_ID or ""
+  if not voice:match("%S") then
+    ui_set_banner("error",
+      "Pick a voice first — there is nothing to test yet.")
+    return false
+  end
+  text = V5.preview_trim(text or V5.PREVIEW_SAMPLE)
+  if not text:match("%S") then text = V5.PREVIEW_SAMPLE end
+
+  -- Same voice, same words, wav still on disk: replay it, don't re-synthesize.
+  local last = V5.preview_last
+  if last and last.voice == voice and last.text == text
+     and file_exists(last.wav) then
+    local ok, why = V5.play_wav(last.wav)
+    ui_set_banner(ok and "info" or "error", ok and
+      ("Replaying the preview of " .. V5.voice_label_for_banner(voice) ..
+       " (no new ElevenLabs call).") or why)
+    return ok
+  end
+
+  -- Only the newest preview is worth keeping — drop the previous pair so
+  -- engine/preview/ can't grow forever.
+  if last then
+    if (last.wav or "") ~= "" then os.remove(last.wav) end
+    if (last.txt or "") ~= "" then os.remove(last.txt) end
+  end
+
+  reaper.RecursiveCreateDirectory(V5.PREVIEW_DIR, 0)
+  local stamp = os.date("%Y%m%d_%H%M%S")
+  local txt_path = string.format("%s%spreview_%s.txt", V5.PREVIEW_DIR, SEP,
+                                 stamp)
+  local f = io.open(txt_path, "wb")
+  if not f then
+    ui_set_banner("error", "Could not write:\n" .. txt_path)
+    return false
+  end
+  f:write(text .. "\n")
+  f:close()
+
+  local k = 1
+  local wav_path = string.format("%s%spreview_%s.wav", V5.PREVIEW_DIR, SEP,
+                                 stamp)
+  while file_exists(wav_path) do
+    k = k + 1
+    wav_path = string.format("%s%spreview_%s_v%d.wav", V5.PREVIEW_DIR, SEP,
+                             stamp, k)
+  end
+
+  local py = preflight_engine()
+  if not py then return false end
+  local cmd = build_engine_cmd(py, {
+    regen = true, language = LANGUAGE, text_file = txt_path,
+    out_wav = wav_path, voice_id = voice,
+  })
+  V5.preview_pending      = { out_wav = wav_path, txt = txt_path,
+                              voice = voice, text = text }
+  V5.preview_return_phase = _ui_phase
+  return launch_engine(cmd, "preview", {
+    "[panel] Mode    : voice preview (not imported anywhere)",
+    "[panel] Voice   : " .. voice,
+    "[panel] Sample  : " .. txt_path,
+    "[panel] Out wav : " .. wav_path,
+    "[panel] Python  : " .. py,
+  })
+end
+
+-- "Name — id" when the voice is known, the bare id otherwise.
+function V5.voice_label_for_banner(id)
+  local nm = V5.voice_name(id)
+  return nm ~= "" and (nm .. "  ·  " .. id) or id
+end
+
 function V5.bookmark_index(id)
   for i, v in ipairs(V5.bookmarks) do
     if v.id == id then return i end
@@ -4022,6 +4269,18 @@ function V5.ui_voice_picker(ctx, key, cur, label)
     filter = ftxt
   end
 
+  -- v0.11: fetch where you pick. Regen (and Track Voice / Text to Speech)
+  -- used to need a detour through ⚙ Settings before the combo had anything
+  -- in it; ⚙ Settings keeps its own full-size button, so skip it there.
+  if key ~= 'settings' then
+    reaper.ImGui_SameLine(ctx)
+    _ui_begin_disabled(ctx, _ui_phase == "running")
+    if reaper.ImGui_SmallButton(ctx, '⟳ Fetch voices##fetch' .. key) then
+      start_fetch_voices()
+    end
+    _ui_end_disabled(ctx)
+  end
+
   local NO_PICK = '(pick a voice)'
   local items, cur_label = { NO_PICK }, NO_PICK
   local by_label = {}
@@ -4051,6 +4310,19 @@ function V5.ui_voice_picker(ctx, key, cur, label)
     V5.bookmark_toggle(cur)
   end
   _ui_end_disabled(ctx)
+
+  -- v0.11: hear the voice before committing a regen (or a whole track) to
+  -- it. Falls back to the ⚙ Settings voice when this picker is empty, so the
+  -- button tests exactly what the run would use.
+  reaper.ImGui_SameLine(ctx)
+  local test_voice = ((cur or "") ~= "" and cur) or (VOICE_ID or "")
+  _ui_begin_disabled(ctx, _ui_phase == "running"
+                          or not test_voice:match("%S"))
+  if reaper.ImGui_SmallButton(ctx, '🔊 Test voice##try' .. key) then
+    V5.start_voice_preview(test_voice, V5.preview_text(key))
+  end
+  _ui_end_disabled(ctx)
+
   reaper.ImGui_SameLine(ctx)
   if #V5.bookmarks == 0 then
     _grey_hint(ctx, 'No bookmarks yet — star a voice to keep it at the top.')
@@ -4061,12 +4333,19 @@ function V5.ui_voice_picker(ctx, key, cur, label)
   end
   if #_voices == 0 and #V5.bookmarks == 0 then
     _grey_hint(ctx,
-      'Tip: "Fetch voices" in ⚙ Settings fills this list from your account.')
+      'No voices loaded — "Fetch voices" pulls the catalogue for ' ..
+      (LANGUAGE or '?') .. ' from your ElevenLabs account.')
+  elseif #_voices > 0 and _voices_language ~= ""
+         and _voices_language ~= LANGUAGE then
+    _grey_hint(ctx, string.format(
+      '%d voice(s) listed for %s — fetch again for %s (bookmarks are not ' ..
+      'affected).', #_voices, _voices_language, LANGUAGE))
   end
   return cur
 end
 
 V5.bookmarks_load()
+V5.voice_cache_load()
 
 local function ui_voice_change_section(ctx, default_open)
   local flags = 0
@@ -4655,12 +4934,8 @@ local function ui_settings_section(ctx, always_open)
 
   -- v0.7: bookmarks + search, shared with the Track Voice and Text to
   -- Speech tabs. The manual id field below still wins — it IS the value.
+  -- The picker itself flags a list fetched for another language (v0.11).
   VOICE_ID = V5.ui_voice_picker(ctx, 'settings', VOICE_ID, 'Voice')
-  if #_voices > 0 and _voices_language ~= "" and _voices_language ~= LANGUAGE then
-    _grey_hint(ctx, 'Fetched list is for ' .. _voices_language ..
-                    ' — fetch again for ' .. LANGUAGE ..
-                    ' (bookmarks are not affected).')
-  end
   rv, VOICE_ID = reaper.ImGui_InputText(ctx, 'Voice id (manual)', VOICE_ID or '')
 
   rv, GOOGLE_TTS_KEY_PATH = reaper.ImGui_InputText(

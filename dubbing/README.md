@@ -244,9 +244,18 @@ from those files only — they are never placed on a command line.
    version suffixes.
    Below the button, **Regenerate in another voice (optional)** re-does the
    same chunk in a different ElevenLabs voice — same bookmarks + search as
-   the other tabs, or paste a voice id. Leave it empty and regeneration uses
-   the ⚙ Settings voice exactly as before. The choice sticks until you
-   change it, so several chunks can be redone in the new voice one by one.
+   the other tabs, or paste a voice id. **⟳ Fetch voices** next to the search
+   box pulls your account's catalogue for the current language right there
+   (no detour through ⚙ Settings), and the list is cached in
+   `reaper/voice_cache.json`, so it is already filled the next time the panel
+   opens. **🔊 Test voice** auditions the pick before you spend a regen on
+   it: the start of the selected chunk is synthesized in that voice and
+   played straight away — nothing is imported, no item is touched, and
+   pressing it again with the same voice and text just replays the sample
+   instead of calling ElevenLabs twice (samples live in `engine/preview/`,
+   newest one only). Leave the voice empty and regeneration uses the ⚙ Settings voice
+   exactly as before. The choice sticks until you change it, so several
+   chunks can be redone in the new voice one by one.
 8. **Change the voice of a whole track** — go to the **Track Voice** tab,
    pick any project track and a target ElevenLabs voice, click **🎤 Change
    voice**. The track is rendered to a wav, converted with the ElevenLabs
