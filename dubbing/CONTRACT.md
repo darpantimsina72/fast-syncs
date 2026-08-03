@@ -6,6 +6,45 @@ The original app is READ-ONLY — never modify or write anything inside
 is only a one-time extraction source and optional key-migration source, never
 a runtime dependency.
 
+## v0.10 — Sentence-sized pieces cut at ElevenLabs' own character times
+
+Match mode's v0.7 pieces were one per matched THOUGHT (several sentences),
+placed as blocks — reported as "coming in bunches" with drift inside each
+block. Pieces are now one per SENTENCE by default, without giving up the
+one-long-recording voice quality and without any re-transcription.
+
+- `--chunk-mode sentence|section` on run_dub.py + dub_engine.py (also a
+  `chunk_mode` key in `engine_settings.json`, written by the panel's
+  Settings → Advanced → "Dub piece size" combo; CLI wins; default
+  **sentence**). `section` is the v0.7 behaviour, kept verbatim.
+- TTS: `tts.synthesize_sentences_elevenlabs` packs sentences into long
+  requests (never splitting inside a sentence; an oversized single
+  sentence gets its own request) and calls the
+  `/v1/text-to-speech/{voice}/with-timestamps` endpoint —
+  `_elevenlabs_tts_post_ts` — which returns the audio AND per-character
+  times. Sentence spans are read from `alignment` (the ORIGINAL-text
+  table, never `normalized_alignment`: our offsets index the text we
+  sent). The last sentence of each stretch keeps the stretch's audio tail
+  so the decay is never clipped. Stretches are joined with the same 240 ms
+  gap as sections; spans exclude it. Defensive: a short/absent alignment
+  degrades to a proportional estimate for that stretch, loudly.
+- Matching is unchanged (same single Gemini sections call). `match.
+  build_pieces` explodes each section into one piece per sentence; the
+  section keeps the certainty, and its English window is sliced among its
+  sentences proportionally by character share (last slice takes the
+  remainder, slices tile the window exactly).
+- `match.place_pieces`: the v0.7 rounds against each piece's own window
+  slice, then the order sweep with ONE-level bounded borrowing — a piece
+  that would overrun the next piece's target may shift that single
+  neighbour later by ≤ `CASCADE_MAX_S` (1.5 s), only when the neighbour
+  still ends before ITS successor's target. Anything else demotes to the
+  Un sync chain exactly as before. Un sync items are now single sentences
+  (drag once), not multi-sentence blobs.
+- Downstream contract UNCHANGED: same timestamps txt (6th [status]
+  field), texts sidecar, synced-only SRT + render
+  (`extend_last=False`), manifest counts, importer behaviour. Sentence
+  mode simply produces more, smaller entries.
+
 ## v0.7 — Auto-Sync-style matching for dub runs, Un sync track, version, history
 
 ### Sync mode (engine)

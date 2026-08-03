@@ -144,9 +144,13 @@ from those files only — they are never placed on a command line.
    blank line between paragraphs — **📥 Paste from clipboard** works too).
    The engine then skips the LLM translation entirely: it transcribes the
    English once, **Gemini-matches your script's sentences to the English
-   lines**, synthesizes each matched section and places every dubbed chunk
-   at its English line's timestamp. Chunks with no English home (or no
-   room) go to the **Un sync** track — the same behaviour as Auto Sync.
+   lines**, speaks the script in long natural stretches, and cuts the audio
+   into **one piece per sentence** at the exact times ElevenLabs itself
+   reports — so every sentence lands on its own English line. Pieces with
+   no English home (or no room) go to the **Un sync** track as single
+   sentences, easy to drag into place — the same behaviour as Auto Sync.
+   (Prefer the older one-piece-per-thought chunks? Settings → Advanced →
+   *Dub piece size*.)
 
    The panel has eight tabs: **Full Pipeline** (the LLM translates —
    pauses for your review), **Paste Translation** (your script),
