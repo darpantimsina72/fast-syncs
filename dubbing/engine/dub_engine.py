@@ -163,6 +163,10 @@ REQUIRED_FUNCTIONS = [
     "synthesize_sections_elevenlabs",# per-section TTS -> one wav + spans
     "_split_script_into_sentences",  # script -> sentence match units
     "_srt_ts",                       # seconds -> SRT timestamp (synced SRT build)
+    # v0.8 sentence-timed pieces
+    "build_pieces",                  # sections -> one piece per sentence
+    "place_pieces",                  # windowed placement + bounded borrowing
+    "synthesize_sentences_elevenlabs",# /with-timestamps TTS -> spans per sentence
 ]
 REQUIRED_ATTRIBUTES = [
     "librosa",                       # used to load TTS audio like the app does
@@ -261,6 +265,16 @@ def _parse_args():
                          "whole-script TTS + re-transcription + mapping "
                          "path. Also settable via a 'sync_mode' key in "
                          "engine_settings.json; the CLI wins.")
+    ap.add_argument("--chunk-mode", dest="chunk_mode", default=None,
+                    choices=["sentence", "section"],
+                    help="Piece size for match mode (v0.8). 'sentence' "
+                         "(default): long natural TTS stretches cut into "
+                         "one timeline piece per script sentence at the "
+                         "character times the /with-timestamps endpoint "
+                         "reports. 'section': one piece per matched "
+                         "thought (the v0.7 behaviour). Also settable via "
+                         "a 'chunk_mode' key in engine_settings.json; the "
+                         "CLI wins.")
     ap.add_argument("--emotion", dest="emotion", action="store_true",
                     default=None,
                     help="Run the Step-4 emotion enrichment before TTS "
@@ -372,6 +386,27 @@ def _sync_mode(args) -> str:
     except Exception:
         pass
     return "match"
+
+
+def _chunk_mode(args) -> str:
+    """v0.8 piece-size toggle for match mode: --chunk-mode CLI flag >
+    'chunk_mode' in engine_settings.json > 'sentence' (the default).
+
+    'sentence' = one timeline piece per script sentence, cut from long
+    natural TTS stretches using the /with-timestamps character table.
+    'section' = the v0.7 behaviour (one piece per matched thought)."""
+    if getattr(args, "chunk_mode", None) in ("sentence", "section"):
+        return args.chunk_mode
+    try:
+        with open(ENGINE_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        v = (data.get("chunk_mode") or "").strip().lower() \
+            if isinstance(data, dict) else ""
+        if v in ("sentence", "section"):
+            return v
+    except Exception:
+        pass
+    return "sentence"
 
 
 def _app_version() -> str:
@@ -732,27 +767,33 @@ def _stage_dub(pl, args, api_key, manifest, ctx, voice_id):
 
 
 def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
-    """v0.7 match mode, S2d..S3e:
+    """v0.7/v0.8 match mode, S2d..S3e:
 
       S2d  script -> sentences -> ONE Gemini section-match call against the
-           English sync-SRT cues -> per-section ElevenLabs TTS (request-
-           stitched) concatenated into one tts_wav with exact spans
+           English sync-SRT cues -> TTS. Piece size is _chunk_mode():
+             sentence (v0.8 default) — long natural stretches through the
+               /with-timestamps endpoint, cut into ONE PIECE PER SENTENCE
+               at the character times ElevenLabs itself reports; each
+               sentence targets its own slice of its section's window
+             section (v0.7)  — one piece per matched thought
       S3a  English sync SRT persisted (it fed the matcher)
-      S3b  section offsets come from synthesis — NO second Scribe pass
+      S3b  piece offsets come from synthesis — NO second Scribe pass
       S3c  match summary echo
-      S3d  slot placement + order sweep -> synced/unsync statuses,
+      S3d  placement + order sweep (sentence mode may borrow bounded slack
+           from a neighbour before demoting) -> synced/unsync statuses,
            timestamps txt (6th [status] field), texts sidecar, synced SRT
       S3e  synced-only render
 
-    Step-4 emotion enrichment is NOT applied in this mode: sections are
+    Step-4 emotion enrichment is NOT applied in this mode: pieces are
     matched and synthesized on the clean reviewed text (enriching each
-    section separately would multiply LLM calls; enriching the whole script
+    piece separately would multiply LLM calls; enriching the whole script
     first would break the sentence-id mapping).
     """
     language = args.language
     out_dir, base = ctx["out_dir"], ctx["base"]
     audio_path = ctx["audio_path"]
     script_text = ctx["script_text"]
+    grain = _chunk_mode(args)
 
     # English cue list: reuse the persisted sync SRT (dub resume) or build
     # it from the in-memory S1a transcription (full run).
@@ -767,50 +808,75 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
         raise RuntimeError("The English sync SRT contains no cues — cannot "
                            "match the script against it.")
 
-    # ── [S2d] sentence split + Gemini section match + per-section TTS ──────
+    # ── [S2d] sentence split + Gemini section match + TTS ──────────────────
     sentences = pl._split_script_into_sentences(script_text)
     if not sentences:
         raise RuntimeError("The dub script produced no sentences to match.")
     if _emotion_enabled(args):
         _say("S2d", "note: Step-4 emotion enrichment is skipped in match "
-                    "sync mode (sections are synthesized from the clean "
+                    "sync mode (pieces are synthesized from the clean "
                     "reviewed text).")
+    _say("S2d", f"Piece size: {grain}.")
     _say("S2d", f"Matching {len(sentences)} script sentence(s) to "
                 f"{len(en_entries)} English cue(s) with Gemini…")
     sections, unmatched_tr, unmatched_en = pl.call_match_sections(
         en_entries, sentences, language, pl.GEMINI_DEFAULT_MODEL,
         status_cb=lambda m: _say("S2d", m))
-    chunks = pl.build_chunks(sections, unmatched_tr, sentences)
-    if not chunks:
-        raise RuntimeError("Section matching produced no TTS chunks.")
-    n_pre_matched = sum(1 for c in chunks if c["en_ids"])
-    _say("S2d", f"Match result: {n_pre_matched} matched chunk(s), "
-                f"{len(chunks) - n_pre_matched} unmatched chunk(s), "
-                f"{len(unmatched_en)} English cue(s) without a translation.")
 
-    _say("S2d", f"Synthesizing {len(chunks)} section(s) ({language}, voice "
-                f"{voice_id}, model {args.el_model})…")
     tts_path = os.path.join(
         out_dir, pl._tts_output_name(language, audio_path, "_tts"))
-    tts_path, spans = pl.synthesize_sections_elevenlabs(
-        [c["text"] for c in chunks], tts_path, api_key=api_key,
-        voice_id=voice_id, model_id=args.el_model,
-        status_cb=lambda m: _say("S2d", m))
+
+    if grain == "sentence":
+        pieces = pl.build_pieces(sections, unmatched_tr, sentences,
+                                 en_entries)
+        if not pieces:
+            raise RuntimeError("Section matching produced no pieces.")
+        texts = [p["text"] for p in pieces]
+        n_matched = sum(1 for p in pieces if p.get("win"))
+        _say("S2d", f"Match result: {n_matched} matched sentence(s), "
+                    f"{len(pieces) - n_matched} unmatched, "
+                    f"{len(unmatched_en)} English cue(s) without a "
+                    "translation.")
+        _say("S2d", f"Synthesizing {len(texts)} sentence(s) in long "
+                    f"stretches ({language}, voice {voice_id}, model "
+                    f"{args.el_model})…")
+        tts_path, spans = pl.synthesize_sentences_elevenlabs(
+            texts, tts_path, api_key=api_key, voice_id=voice_id,
+            model_id=args.el_model, status_cb=lambda m: _say("S2d", m))
+    else:
+        chunks = pl.build_chunks(sections, unmatched_tr, sentences)
+        if not chunks:
+            raise RuntimeError("Section matching produced no TTS chunks.")
+        texts = [c["text"] for c in chunks]
+        n_matched = sum(1 for c in chunks if c["en_ids"])
+        _say("S2d", f"Match result: {n_matched} matched chunk(s), "
+                    f"{len(chunks) - n_matched} unmatched chunk(s), "
+                    f"{len(unmatched_en)} English cue(s) without a "
+                    "translation.")
+        _say("S2d", f"Synthesizing {len(chunks)} section(s) ({language}, "
+                    f"voice {voice_id}, model {args.el_model})…")
+        tts_path, spans = pl.synthesize_sections_elevenlabs(
+            texts, tts_path, api_key=api_key, voice_id=voice_id,
+            model_id=args.el_model, status_cb=lambda m: _say("S2d", m))
     manifest["tts_wav"] = tts_path
     _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)} "
-                f"({len(spans)} section span(s)).")
+                f"({len(spans)} piece span(s)).")
 
     # ── [S3a..S3c] bookkeeping stages (the heavy work already happened) ────
     _say("S3a", "English sync SRT ready (it drove the matching).")
-    _say("S3b", "Section offsets taken from synthesis — no TTS "
+    _say("S3b", "Piece offsets taken from synthesis — no TTS "
                 "re-transcription needed in match mode.")
     _say("S3c", "EN <-> script mapping done by the Gemini section match.")
 
-    # ── [S3d] slot placement + order sweep + files ──────────────────────────
-    _say("S3d", "Placing sections into their English slots…")
+    # ── [S3d] placement + order sweep + files ───────────────────────────────
+    _say("S3d", "Placing pieces into their English slots…")
     durations = [(e - s) / 1000.0 for (s, e) in spans]
-    placed = pl.place_chunks(chunks, en_entries, durations,
-                             log=lambda m: _say("S3d", m))
+    if grain == "sentence":
+        placed = pl.place_pieces(pieces, durations,
+                                 log=lambda m: _say("S3d", m))
+    else:
+        placed = pl.place_chunks(chunks, en_entries, durations,
+                                 log=lambda m: _say("S3d", m))
 
     entries = []
     for i, (span, p) in enumerate(zip(spans, placed), 1):
@@ -827,11 +893,11 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
 
     # Texts sidecar: block N (blank-line separated) = timestamps index N.
     # The importers use it for item notes on BOTH tracks (the synced SRT
-    # below only covers the synced chunks).
+    # below only covers the synced pieces).
     texts_path = base + "_sync_texts.txt"
     _write_text(texts_path, "\n\n".join(
-        " ".join((c["text"] or "").split()) or EMPTY_PARAGRAPH_PLACEHOLDER
-        for c in chunks) + "\n")
+        " ".join((t or "").split()) or EMPTY_PARAGRAPH_PLACEHOLDER
+        for t in texts) + "\n")
     manifest["sync_texts"] = texts_path
 
     synced_entries = [e for e in entries if e["sync_status"] == "synced"]
@@ -847,7 +913,7 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
             sorted(synced_entries, key=lambda x: x["synced_start_ms"]), 1):
         start_s = e["synced_start_ms"] / 1000.0
         end_s = start_s + (e["orig_end_ms"] - e["orig_start_ms"]) / 1000.0
-        text = " ".join((chunks[e["index"] - 1]["text"] or "").split())
+        text = " ".join((texts[e["index"] - 1] or "").split())
         srt_lines += [str(n), f"{pl._srt_ts(start_s)} --> {pl._srt_ts(end_s)}",
                       text, ""]
     synced_srt_path = base + "_sync_synced.srt"
@@ -1340,7 +1406,7 @@ def main() -> int:
     args = _parse_args()
 
     v = _app_version()
-    _note(f"Reaper Dubbing App{' v' + v if v else ''} (contract v0.7)")
+    _note(f"Reaper Dubbing App{' v' + v if v else ''} (contract v0.10)")
 
     if args.app_dir:
         _note("WARNING: --app-dir is deprecated as of v0.3 and IGNORED — "

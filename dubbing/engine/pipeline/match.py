@@ -231,6 +231,187 @@ def _unsync_chunk(tr_ids: List[int], tr_sentences: Sequence[str]) -> dict:
     }
 
 
+# ─── v0.8 sentence-level pieces ──────────────────────────────────────────────
+# One piece per sentence. Gemini's sections stay the unit of CERTAINTY (this
+# thought belongs to that English window); the section's window is then
+# sliced among its sentences proportionally by character share, so each
+# sentence gets its own target on the timeline. Coarse thought-level chunks
+# were placed as blocks, which read as "coming in bunches" — the whole point
+# of pieces is restoring the old fine grain without the old guessing.
+
+CASCADE_MAX_S = 1.5     # most slack one piece may borrow from its neighbour
+
+
+def build_pieces(sections: List[Dict[str, List[int]]],
+                 unmatched_tr: List[int],
+                 tr_sentences: Sequence[str],
+                 en_entries: Sequence[Tuple[float, float, str]]
+                 ) -> List[dict]:
+    """Explode the match result into per-sentence pieces, in script order.
+
+    Matched section → one piece per sentence, each with a "win" (start, end)
+    slice of the section's English window sized by the sentence's share of
+    the section text. Unmatched sentences → one windowless piece each (they
+    end up on Un sync as single draggable lines, not merged blobs). A
+    section that lost a side in sanitizing degrades to unmatched."""
+    pieces: List[dict] = []
+    demoted: List[int] = []
+    for s in sections:
+        if not s["en"] or not s["tr"]:
+            demoted.extend(s["tr"])
+            continue
+        tr_ids = sorted(s["tr"])
+        win_a = min(en_entries[i - 1][0] for i in s["en"])
+        win_b = max(en_entries[i - 1][1] for i in s["en"])
+        texts = [" ".join(tr_sentences[j - 1].split()) for j in tr_ids]
+        total = float(sum(len(t) for t in texts)) or 1.0
+        cur = win_a
+        for k, (j, t) in enumerate(zip(tr_ids, texts)):
+            if k == len(tr_ids) - 1:
+                nxt = win_b                     # last slice takes the rest
+            else:
+                nxt = min(win_b, cur + (win_b - win_a) * (len(t) / total))
+            pieces.append({"tr_ids": [j], "text": t, "win": (cur, nxt)})
+            cur = nxt
+
+    for j in sorted(set(unmatched_tr) | set(demoted)):
+        pieces.append({"tr_ids": [j],
+                       "text": " ".join(tr_sentences[j - 1].split()),
+                       "win": None})
+
+    pieces.sort(key=lambda p: p["tr_ids"][0])
+    return pieces
+
+
+def place_pieces(pieces: List[dict],
+                 durations_s: Sequence[float],
+                 log=None) -> List[dict]:
+    """Windowed placement + order sweep with bounded slack borrowing.
+
+    Same round structure as place_chunks, but against each piece's own
+    window slice. The sweep keeps script order and forbids overlap; a piece
+    that would overrun the next piece's target may borrow up to
+    CASCADE_MAX_S seconds by shifting that ONE neighbour later — only when
+    the neighbour still ends before ITS successor's target. Anything that
+    cannot fit even then is demoted to the Un sync chain (each unsync piece
+    parked right after the previous clip, chronological)."""
+    say = log or (lambda m: None)
+
+    wins = [p.get("win") for p in pieces]
+    order = sorted((i for i in range(len(pieces)) if wins[i]),
+                   key=lambda i: wins[i][0])
+    gaps_b, gaps_a = {}, {}
+    for k, i in enumerate(order):
+        gaps_b[i] = max(0.0, wins[i][0] - wins[order[k - 1]][1]) if k > 0 else 0.0
+        gaps_a[i] = (max(0.0, wins[order[k + 1]][0] - wins[i][1])
+                     if k < len(order) - 1 else 0.0)
+
+    placements: Dict[int, float] = {}
+    processed = set()
+    for iteration in (1, 2):
+        for rnd in (1, 3, 5):
+            for i in order:
+                if i in processed:
+                    continue
+                a, b = wins[i]
+                length = b - a
+                content = float(durations_s[i])
+                strategy = None
+                if rnd == 1 and content <= length:
+                    placements[i] = max(0.0, (a + b) / 2.0 - content / 2.0)
+                    strategy = "center"
+                elif rnd == 3 and content <= length + gaps_a[i]:
+                    placements[i] = max(0.0, a)
+                    strategy = "align_start"
+                elif rnd == 5 and content <= (length + gaps_b[i]
+                                              + gaps_a[i] + MIN_SPRING):
+                    placements[i] = max(0.0, b + gaps_a[i] - MIN_SPRING
+                                        - content)
+                    strategy = "align_end"
+                if strategy:
+                    processed.add(i)
+                    say(f"  piece{i + 1:>3} [iter{iteration} R{rnd} "
+                        f"{strategy:<11}] win=[{a:.2f}-{b:.2f}]s "
+                        f"dub={content:.2f}s")
+    for i in order:
+        if i not in processed:
+            placements[i] = max(0.0, wins[i][0])
+            processed.add(i)
+            say(f"  piece{i + 1:>3} [align_start_fallback] "
+                f"win=[{wins[i][0]:.2f}-{wins[i][1]:.2f}]s "
+                f"dub={float(durations_s[i]):.2f}s")
+
+    # Order sweep with ONE-level bounded borrowing.
+    last_synced_end = 0.0
+    last_any_end = 0.0
+    unsync_pos: Dict[int, float] = {}
+    pushes = borrows = demotions = 0
+
+    def _next_spring_idx(after):
+        for j in range(after + 1, len(pieces)):
+            if j in placements:
+                return j
+        return None
+
+    for i in range(len(pieces)):
+        dur = float(durations_s[i])
+        if i not in placements:
+            pos = max(last_any_end, 0.0)
+            unsync_pos[i] = pos
+            last_any_end = pos + dur
+            continue
+        candidate = max(placements[i], last_synced_end)
+        candidate_end = candidate + dur
+        j = _next_spring_idx(i)
+        next_spring = placements[j] if j is not None else float("inf")
+
+        if candidate_end > next_spring:
+            needed = candidate_end - next_spring
+            ok = False
+            if j is not None and needed <= CASCADE_MAX_S:
+                k = _next_spring_idx(j)
+                j_end = (placements[j] + needed) + float(durations_s[j])
+                if k is None or j_end <= placements[k]:
+                    placements[j] += needed
+                    borrows += 1
+                    ok = True
+                    say(f"  [ORDER] piece{i + 1} borrowed {needed:.3f}s — "
+                        f"piece{j + 1} shifted to {placements[j]:.3f}s")
+            if not ok:
+                pos = max(last_any_end, candidate)
+                placements.pop(i)
+                unsync_pos[i] = pos
+                last_any_end = pos + dur
+                demotions += 1
+                say(f"  [ORDER] piece{i + 1} would end {candidate_end:.3f}s "
+                    f"> next target {next_spring:.3f}s → Un sync at "
+                    f"{pos:.3f}s")
+                continue
+
+        if candidate > placements[i] + MIN_SPRING:
+            pushes += 1
+        placements[i] = candidate
+        last_synced_end = candidate_end
+        last_any_end = candidate_end
+
+    if pushes:
+        say(f"  Order-preserving push fixes : {pushes}")
+    if borrows:
+        say(f"  Slack borrowed from a neighbour : {borrows}")
+    if demotions:
+        say(f"  Order violations → Un sync  : {demotions}")
+
+    out = []
+    for i in range(len(pieces)):
+        if i in placements:
+            out.append({"position": round(placements[i], 6),
+                        "status": "synced"})
+        else:
+            out.append({"position": round(unsync_pos.get(i, 0.0), 6),
+                        "status": "unsync"})
+    return out
+
+
 def place_chunks(chunks: List[dict],
                  en_entries: Sequence[Tuple[float, float, str]],
                  durations_s: Sequence[float],

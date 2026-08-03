@@ -822,6 +822,31 @@ local function seed_credentials_from_sync()
   end
 end
 
+-- v0.8: dub piece size (sentence | section), stored in engine_settings.json
+-- where the engine's _chunk_mode() reads it. V5 fields — 200-local limit.
+V5.chunk_mode = "sentence"
+
+function V5.load_chunk_mode()
+  local content = read_all(ENGINE_SETTINGS_PATH)
+  if not content then return end
+  local v = json_field(content, "chunk_mode")
+  if v == "sentence" or v == "section" then V5.chunk_mode = v end
+end
+
+function V5.save_chunk_mode()
+  -- NOTE: no ui_set_banner here — it is declared further down the file, so
+  -- this closure could not capture it. Returns ok, path for the caller.
+  local content = read_all(ENGINE_SETTINGS_PATH)
+  if not content or not content:find("{") then content = "{\n}\n" end
+  content = _json_set_flat(content, "chunk_mode", V5.chunk_mode)
+  local f = io.open(ENGINE_SETTINGS_PATH, "w")
+  if not f then return false, ENGINE_SETTINGS_PATH end
+  f:write(content)
+  f:close()
+  return true
+end
+V5.load_chunk_mode()
+
 -- app_dir default chain: panel settings → engine/engine_settings.json →
 -- contract default.
 local function resolve_default_app_dir()
@@ -5181,6 +5206,25 @@ function V5.ui_settings_tab(ctx)
       'Python override: leave blank to auto-detect (dubbing/venv/ first, ' ..
       'then system installs). Run ' .. SETUP_SCRIPT .. ' once to create venv/.')
     reaper.ImGui_PopStyleColor(ctx)
+
+    -- v0.8: piece size for dub runs. Written straight into
+    -- engine_settings.json — the engine reads it at launch.
+    reaper.ImGui_Dummy(ctx, 0, 4)
+    local MODES = { 'sentence — one piece per sentence (tight sync)',
+                    'section — one piece per thought (v0.7)' }
+    local cur = (V5.chunk_mode == 'section') and MODES[2] or MODES[1]
+    local ch, picked = _ui_combo(ctx, 'Dub piece size', cur, MODES)
+    if ch then
+      V5.chunk_mode = picked:match('^section') and 'section' or 'sentence'
+      local okc, badpath = V5.save_chunk_mode()
+      if not okc then
+        ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
+      end
+    end
+    _grey_hint(ctx,
+      'sentence (default): the voice is generated in long natural ' ..
+      'stretches, then cut per sentence at the exact times ElevenLabs ' ..
+      'reports, so every sentence lands on its own English line.')
     reaper.ImGui_Unindent(ctx, 12)
   end
   _ui_end_disabled(ctx)

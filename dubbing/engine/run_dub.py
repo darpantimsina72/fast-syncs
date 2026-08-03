@@ -143,6 +143,12 @@ def main() -> int:
                          "Gemini section matching + Auto-Sync-style "
                          "placement with Un sync statuses; 'legacy' = the "
                          "old whole-script TTS + re-transcription path")
+    ap.add_argument("--chunk-mode", dest="chunk_mode", default=None,
+                    choices=["sentence", "section"],
+                    help="v0.8 piece size for match mode: 'sentence' "
+                         "(default) = one timeline piece per script "
+                         "sentence, cut from timed TTS stretches; "
+                         "'section' = one piece per matched thought")
     ap.add_argument("--emotion", dest="emotion", action="store_true",
                     default=None,
                     help="Force Step-4 emotion enrichment ON before TTS")
@@ -298,6 +304,8 @@ def main() -> int:
                 cmd += ["--provided-script", args.provided_script]
             if args.sync_mode:
                 cmd += ["--sync-mode", args.sync_mode]
+            if args.chunk_mode:
+                cmd += ["--chunk-mode", args.chunk_mode]
         if args.voice_id and args.voice_id.strip():
             cmd += ["--voice-id", args.voice_id.strip()]
         # Tri-state emotion pass-through: only forward an explicit choice so

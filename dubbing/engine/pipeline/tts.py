@@ -20,6 +20,7 @@ Adaptations (everything else is verbatim):
     back to config/TTS_Key.json.
 """
 
+import base64
 import io
 import json
 import os
@@ -796,6 +797,295 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
     if status_cb:
         status_cb(f"TTS: Saving → {os.path.basename(output_path)}… "
                   f"({total} sections)")
+    try:
+        combined.export(output_path, format="wav")
+    except PermissionError:
+        output_path = ensure_writable_output(output_path,
+                                             status_cb=status_cb)
+        combined.export(output_path, format="wav")
+
+    return output_path, spans
+
+
+# ─── v0.8 sentence-timed synthesis ───────────────────────────────────────────
+# One long request speaks many sentences with natural flow; the
+# /with-timestamps variant of the endpoint returns, alongside the audio, the
+# exact second every CHARACTER was spoken. Knowing where each sentence starts
+# and ends in the text we sent, we read its start/end seconds straight off
+# that table — so the wav can be cut into per-sentence pieces without ever
+# re-transcribing it and without per-sentence requests.
+
+def _elevenlabs_tts_post_ts(chunk: str, api_key: str, voice_id: str,
+                            model_id: str, previous_text: str = None,
+                            next_text: str = None):
+    """One /with-timestamps request → (mp3 bytes, characters, start_s, end_s).
+
+    The JSON body mirrors _elevenlabs_tts_post (same voice settings, same
+    stitching fields, same error mapping). `alignment` — the table for the
+    ORIGINAL text as sent — is used, never `normalized_alignment`: our
+    sentence offsets are indices into the text we sent, and normalization
+    rewrites numbers etc., shifting every index after it."""
+    body = {
+        "text": chunk,
+        "model_id": model_id,
+        "voice_settings": {
+            "stability": 0.35,
+            "similarity_boost": 0.80,
+            "style": 0.40,
+            "use_speaker_boost": True,
+        },
+    }
+    if previous_text:
+        body["previous_text"] = previous_text[-600:]
+    if next_text:
+        body["next_text"] = next_text[:600]
+
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    url = (f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+           "/with-timestamps")
+    req = urllib.request.Request(
+        url, data=payload, method="POST",
+        headers={
+            "xi-api-key": api_key,
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=300, context=_SSL_CTX) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        if e.code in (400, 422) and (previous_text or next_text):
+            return _elevenlabs_tts_post_ts(chunk, api_key, voice_id, model_id)
+        if e.code == 401:
+            raise ValueError("ElevenLabs rejected the API key (401). "
+                             "Re-paste a valid key.") from None
+        if e.code == 404:
+            raise ValueError(
+                f"ElevenLabs voice not found (404). voice_id={voice_id!r} "
+                "is not on this account. Fetch the voice list again and "
+                "pick a voice from it.") from None
+        if e.code == 429:
+            raise ValueError("ElevenLabs rate limit hit (429). "
+                             "Try again shortly.") from None
+        raise ValueError(
+            f"ElevenLabs TTS error (HTTP {e.code}): {err_body}") from None
+    except urllib.error.URLError as e:
+        raise ValueError(
+            f"Network error during ElevenLabs TTS: {e.reason}") from None
+
+    audio = base64.b64decode(data.get("audio_base64") or "")
+    align = data.get("alignment") or {}
+    chars = align.get("characters") or []
+    starts = align.get("character_start_times_seconds") or []
+    ends = align.get("character_end_times_seconds") or []
+    if not audio:
+        raise ValueError("ElevenLabs returned no audio for a timed request.")
+    return audio, chars, starts, ends
+
+
+def _pack_sentences(sentences, max_chars: int):
+    """Greedy request packing that NEVER splits inside a sentence.
+
+    Returns a list of lists of sentence indices. A single sentence longer
+    than *max_chars* gets a request of its own — the API accepts it (the
+    cap here is our packing size, far below the model limit), and keeping
+    it whole preserves the sentence == piece rule."""
+    groups, cur, cur_len = [], [], 0
+    for i, s in enumerate(sentences):
+        n = len(s)
+        extra = n if not cur else n + 1          # +1 for the joining space
+        if cur and cur_len + extra > max_chars:
+            groups.append(cur)
+            cur, cur_len = [], 0
+        cur.append(i)
+        cur_len += n if cur_len == 0 else n + 1
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def _sentence_spans_from_alignment(text, offsets, chars, starts, ends):
+    """Per-sentence (start_s, end_s) inside one request's audio.
+
+    *offsets* is [(char_start, char_end)] of each sentence in *text* (the
+    exact string sent). The alignment lists run parallel to the text; when
+    their length differs (a defensive case — the API echoes the original
+    text, but never trust a length) the lookup is clamped, and a span with
+    no timed characters falls back to a proportional estimate over the
+    request's total duration."""
+    total = ends[-1] if ends else 0.0
+    n = min(len(chars), len(starts), len(ends), len(text))
+    spans = []
+    for (a, b) in offsets:
+        a2, b2 = min(a, n), min(b, n)
+        first = last = None
+        for k in range(a2, b2):
+            if not (text[k].isspace()):
+                if first is None:
+                    first = k
+                last = k
+        if first is None or first >= n:
+            # Nothing timed (all-whitespace or clamped away): estimate.
+            frac_a = a / max(1, len(text))
+            frac_b = b / max(1, len(text))
+            spans.append((total * frac_a, total * frac_b))
+        else:
+            last = min(last, n - 1)
+            spans.append((starts[first], ends[last]))
+    return spans
+
+
+def synthesize_sentences_elevenlabs(sentences, output_path: str,
+                                    api_key: str,
+                                    voice_id: str = ELEVENLABS_TTS_VOICE_ID,
+                                    model_id: str = ELEVENLABS_TTS_MODEL,
+                                    status_cb=None):
+    """v0.8: speak *sentences* in long natural stretches and return
+    (output_path, spans) with ONE (start_ms, end_ms) pair PER SENTENCE
+    inside the combined wav.
+
+    Sentences are packed into requests at sentence boundaries only
+    (~ELEVENLABS_CHUNK_CHARS per request), each request goes to the
+    /with-timestamps endpoint, and per-sentence spans are read from the
+    returned character table — no re-transcription, no per-sentence calls.
+    Neighbouring script text rides along as previous_text/next_text so
+    prosody survives the few request boundaries. Validation, tag stripping
+    for non-v3 models, and the locked-output divert mirror the other
+    synthesizers."""
+    if not api_key or not api_key.strip():
+        raise ValueError("ElevenLabs API key is missing — set "
+                         "\"elevenlabs_api_key\" in config/tts_settings.json.")
+    if not voice_id or not str(voice_id).strip():
+        raise ValueError(
+            "No ElevenLabs voice selected. Pass --voice-id or let the engine "
+            "auto-resolve one from the account's voice catalogue.")
+    sentences = [(t or "").strip() for t in (sentences or [])]
+    if not sentences or any(not t for t in sentences):
+        raise ValueError("Sentence list is empty or contains an empty "
+                         "sentence — nothing to synthesize.")
+
+    api_key = api_key.strip()
+    raw_voice_id = str(voice_id).strip()
+    voice_id = _sanitize_voice_id(raw_voice_id)
+    if not voice_id:
+        raise ValueError(
+            "Invalid ElevenLabs voice_id "
+            f"(received: {raw_voice_id!r}). The value must be the raw "
+            "voice ID, not a display label.")
+    model_id = (model_id or ELEVENLABS_TTS_MODEL).strip() or ELEVENLABS_TTS_MODEL
+
+    if not model_id.startswith("eleven_v3"):
+        stripped = [_strip_emotion_tags(t) for t in sentences]
+        sentences = [s.strip() if s.strip() else o
+                     for s, o in zip(stripped, sentences)]
+
+    output_path = ensure_writable_output(output_path, status_cb=status_cb)
+
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        raise RuntimeError(
+            "pydub not installed — the sentence-timed TTS mode needs it to "
+            "assemble the audio. Re-run the setup script.")
+
+    groups = _pack_sentences(sentences, ELEVENLABS_CHUNK_CHARS)
+    out_base = os.path.splitext(output_path)[0]
+    log_lines = [
+        f"TTS Sentence Log — {os.path.basename(output_path)}",
+        "Platform : ElevenLabs (/with-timestamps, sentence-timed)",
+        f"Voice ID : {voice_id}",
+        f"Model    : {model_id}",
+        f"Sentences: {len(sentences)} in {len(groups)} request(s)",
+        f"Gap      : {SECTION_GAP_MS}ms between requests (spans exclude it)",
+        "",
+    ]
+
+    combined = AudioSegment.empty()
+    gap = None
+    spans = [None] * len(sentences)
+    cursor = 0
+
+    for gi, group in enumerate(groups):
+        text = " ".join(sentences[i] for i in group)
+        offsets, pos = [], 0
+        for i in group:
+            s = sentences[i]
+            a = text.index(s, pos)
+            offsets.append((a, a + len(s)))
+            pos = a + len(s)
+
+        prev_ctx = sentences[group[0] - 1] if group[0] > 0 else None
+        nxt_i = group[-1] + 1
+        next_ctx = sentences[nxt_i] if nxt_i < len(sentences) else None
+
+        if status_cb:
+            status_cb(f"TTS: stretch {gi + 1} of {len(groups)} "
+                      f"({len(group)} sentence(s), {len(text)} chars)…")
+        audio, chars, starts, ends = _elevenlabs_tts_post_ts(
+            text, api_key, voice_id, model_id,
+            previous_text=prev_ctx, next_text=next_ctx)
+        with open(f"{out_base}_str_{gi + 1:03d}.mp3", "wb") as sf:
+            sf.write(audio)
+        try:
+            seg = AudioSegment.from_file(io.BytesIO(audio), format="mp3")
+        except FileNotFoundError:
+            raise RuntimeError(
+                "ffmpeg/ffprobe not found — pydub needs it to decode the "
+                "ElevenLabs MP3 audio. Re-run the setup script "
+                "(setup_windows.bat / setup_mac.command). Then run the dub "
+                "again.")
+
+        if not chars:
+            if status_cb:
+                status_cb("TTS: WARNING — no character timings in the reply; "
+                          "estimating sentence boundaries proportionally for "
+                          "this stretch.")
+        rel = _sentence_spans_from_alignment(text, offsets, chars, starts,
+                                             ends)
+        # Clamp to the decoded audio, then stamp absolute positions.
+        seg_ms = len(seg)
+        if gi > 0:
+            if gap is None:
+                gap = AudioSegment.silent(duration=SECTION_GAP_MS,
+                                          frame_rate=seg.frame_rate)
+            combined += gap
+            cursor += SECTION_GAP_MS
+        for (i, (rs, re_)) in zip(group, rel):
+            s_ms = max(0, min(seg_ms, int(round(rs * 1000))))
+            e_ms = max(s_ms, min(seg_ms, int(round(re_ * 1000))))
+            if e_ms == s_ms:
+                e_ms = min(seg_ms, s_ms + 1)
+            spans[i] = (cursor + s_ms, cursor + e_ms)
+        # The last sentence of a stretch keeps the audio tail (breath /
+        # reverb after the final word) so cutting at its span end never
+        # clips the decay.
+        li = group[-1]
+        spans[li] = (spans[li][0], cursor + seg_ms)
+        combined += seg
+        cursor += seg_ms
+
+        log_lines += [f"=== STRETCH {gi + 1} of {len(groups)} ===",
+                      f"Sentences  : {[i + 1 for i in group]}",
+                      f"Characters : {len(text)}",
+                      f"Duration   : {seg_ms}ms",
+                      f"Timed chars: {len(chars)}", ""]
+        for k, i in enumerate(group):
+            log_lines += [f"  [{i + 1}] {spans[i][0]}ms-{spans[i][1]}ms  "
+                          + " ".join(sentences[i].split())[:80]]
+        log_lines.append("")
+
+    with open(out_base + "_chunks.txt", "w", encoding="utf-8") as lf:
+        lf.write("\n".join(log_lines))
+
+    if status_cb:
+        status_cb(f"TTS: Saving → {os.path.basename(output_path)}… "
+                  f"({len(sentences)} sentence pieces)")
     try:
         combined.export(output_path, format="wav")
     except PermissionError:
