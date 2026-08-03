@@ -144,10 +144,10 @@ def main() -> int:
                          "placement with Un sync statuses; 'legacy' = the "
                          "old whole-script TTS + re-transcription path")
     ap.add_argument("--chunk-mode", dest="chunk_mode", default=None,
-                    choices=["sentence", "section"],
-                    help="v0.8 piece size for match mode: 'sentence' "
-                         "(default) = one timeline piece per script "
-                         "sentence, cut from timed TTS stretches; "
+                    choices=["clause", "sentence", "section"],
+                    help="Piece size for match mode: 'clause' (default) = "
+                         "sentences, long ones subdivided at ; : , or a "
+                         "dash; 'sentence' = one piece per sentence; "
                          "'section' = one piece per matched thought")
     ap.add_argument("--emotion", dest="emotion", action="store_true",
                     default=None,

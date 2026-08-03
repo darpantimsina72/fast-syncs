@@ -837,13 +837,15 @@ end
 
 -- v0.8: dub piece size (sentence | section), stored in engine_settings.json
 -- where the engine's _chunk_mode() reads it. V5 fields — 200-local limit.
-V5.chunk_mode = "sentence"
+V5.chunk_mode = "clause"
 
 function V5.load_chunk_mode()
   local content = read_all(ENGINE_SETTINGS_PATH)
   if not content then return end
   local v = json_field(content, "chunk_mode")
-  if v == "sentence" or v == "section" then V5.chunk_mode = v end
+  if v == "clause" or v == "sentence" or v == "section" then
+    V5.chunk_mode = v
+  end
 end
 
 function V5.save_chunk_mode()
@@ -5485,21 +5487,26 @@ function V5.ui_settings_tab(ctx)
     -- v0.8: piece size for dub runs. Written straight into
     -- engine_settings.json — the engine reads it at launch.
     reaper.ImGui_Dummy(ctx, 0, 4)
-    local MODES = { 'sentence — one piece per sentence (tight sync)',
+    local MODES = { 'clause — smallest pieces, like the old behaviour',
+                    'sentence — one piece per sentence',
                     'section — one piece per thought (v0.7)' }
-    local cur = (V5.chunk_mode == 'section') and MODES[2] or MODES[1]
+    local cur = MODES[1]
+    if V5.chunk_mode == 'section' then cur = MODES[3]
+    elseif V5.chunk_mode == 'sentence' then cur = MODES[2] end
     local ch, picked = _ui_combo(ctx, 'Dub piece size', cur, MODES)
     if ch then
-      V5.chunk_mode = picked:match('^section') and 'section' or 'sentence'
+      V5.chunk_mode = picked:match('^section') and 'section'
+                      or (picked:match('^sentence') and 'sentence' or 'clause')
       local okc, badpath = V5.save_chunk_mode()
       if not okc then
         ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
       end
     end
     _grey_hint(ctx,
-      'sentence (default): the voice is generated in long natural ' ..
-      'stretches, then cut per sentence at the exact times ElevenLabs ' ..
-      'reports, so every sentence lands on its own English line.')
+      'clause (default): the voice is generated in long natural stretches, ' ..
+      'then cut at the exact times ElevenLabs reports — at sentence ends, ' ..
+      'and inside a long sentence at its ; : , or dash. That is the ' ..
+      'granularity the old pipeline got from cutting at every silence.')
     reaper.ImGui_Unindent(ctx, 12)
   end
   _ui_end_disabled(ctx)

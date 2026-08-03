@@ -6,6 +6,39 @@ The original app is READ-ONLY — never modify or write anything inside
 is only a one-time extraction source and optional key-migration source, never
 a runtime dependency.
 
+## v0.12 — Clause-sized pieces (sentence boundaries were still too coarse)
+
+v0.10 cut per SENTENCE, which is coarse for these scripts: Indic
+translations chain clauses with `;`, `,` and dashes, so one sentence ran
+up to ~15 s and landed as a block. Measured on a real 3.4k-char Telugu
+script: 53 sentence pieces, 7 of them over 8 s, worst 14.7 s. The
+pre-v0.7 pipeline avoided this by cutting the TTS audio wherever it went
+quiet (80 ms at −42 dB) — those silences ARE the clause marks.
+
+- `tts._split_script_into_units(text, max_chars, min_chars)`: sentence
+  split first, then any unit over `max_chars` subdivided at the hierarchy
+  the Auto Sync matcher prompt already documents — `;`/`:`, then `,`,
+  then a dash. Punctuation stays with the LEFT part and only whitespace is
+  consumed, so re-joining the units reproduces the text exactly: the TTS
+  request (and therefore prosody) is unchanged by how we cut.
+  `_merge_tiny_units` folds fragments under `min_chars` (18) into a
+  neighbour — a stray two-word piece desyncs easily and clutters Un sync.
+  A sentence with no clause mark is left WHOLE; nothing is ever cut
+  mid-phrase.
+- `CLAUSE_MAX_CHARS = 60` (≈4 s at the ~14.3 chars/s these voices
+  average). Same script: ~85 pieces, worst 5.7 s, none over 6 s. Below
+  ~55 nothing improves — the marks run out. Overridable per install via
+  `chunk_max_chars` in `engine_settings.json` (values < 20 ignored).
+- `--chunk-mode` gains `clause` and it is the **new default**;
+  `sentence` (v0.10) and `section` (v0.7) are kept verbatim as fallbacks.
+  Panel: Settings → Advanced → "Dub piece size" offers all three.
+- S2d logs the unit count and the longest unit in seconds, so a run that
+  still produces blocks says so in its own log instead of only in the
+  arrange view.
+- Everything downstream is untouched: clause units flow through the same
+  matcher, `build_pieces`/`place_pieces`, timestamps/texts/SRT/manifest
+  and importers. Only the number of pieces changes.
+
 ## v0.10 — Sentence-sized pieces cut at ElevenLabs' own character times
 
 Match mode's v0.7 pieces were one per matched THOUGHT (several sentences),

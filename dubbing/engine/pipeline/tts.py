@@ -399,6 +399,81 @@ def _split_script_into_sentences(text: str) -> List[str]:
     return sentences
 
 
+# ─── v0.12 clause-level units ────────────────────────────────────────────────
+# Sentence boundaries alone are too coarse for these scripts: Indic
+# translations chain clauses with ";", "," and dashes, so one "sentence" can
+# run 15 seconds and land on the timeline as a block — the "chunks are too
+# big" report. The pre-v0.7 pipeline cut wherever the TTS audio went quiet
+# (80 ms at -42 dB), which is exactly where those marks are read, hence its
+# 350 small pieces. We reproduce that granularity from the TEXT instead, using
+# the boundary hierarchy the Auto Sync matcher prompt already documents:
+# paragraph → . ? ! → ; : → , → dash.
+# 60 chars ≈ 4 s at the ~14.3 chars/s these voices average. Measured on a
+# real 3.4k-char Telugu script: 90 → 66 pieces (worst 7.4 s), 60 → ~85
+# pieces (worst 5.7 s), and below ~55 nothing improves because the clause
+# marks run out. The old silence-cut pipeline averaged ~1.8 s per piece, so
+# this lands in the same neighbourhood without ever cutting mid-phrase.
+CLAUSE_MAX_CHARS = 60     # longer units get subdivided at clause marks
+CLAUSE_MIN_CHARS = 18     # shorter fragments are merged back into a neighbour
+
+_CLAUSE_PATTERNS = (
+    r'(?<=[;:])\s+',          # strongest: semicolon / colon
+    r'(?<=,)\s+',             # then comma
+    r'(?<=[-–—])\s+',         # then a dash that ends a phrase
+)
+
+
+def _merge_tiny_units(units: List[str], min_chars: int) -> List[str]:
+    """Fold sub-threshold fragments into their neighbour.
+
+    A stray "సరేనా?" on its own is a worse timeline piece than a slightly
+    long neighbour: it desyncs easily and clutters the Un sync track."""
+    out: List[str] = []
+    for u in units:
+        if out and len(u) < min_chars:
+            out[-1] = out[-1] + " " + u
+        else:
+            out.append(u)
+    # A tiny FIRST unit has no left neighbour — push it onto the second.
+    if len(out) > 1 and len(out[0]) < min_chars:
+        out[1] = out[0] + " " + out[1]
+        out.pop(0)
+    return out
+
+
+def _subdivide_unit(s: str, max_chars: int) -> List[str]:
+    """Split *s* at the strongest available clause mark until every part fits.
+
+    Punctuation stays attached to the LEFT part and only whitespace is
+    consumed, so joining the parts back with a single space reproduces the
+    original text — that is what keeps the TTS request (and its prosody)
+    identical to speaking the sentence whole."""
+    if len(s) <= max_chars:
+        return [s]
+    for pat in _CLAUSE_PATTERNS:
+        parts = [p.strip() for p in re.split(pat, s) if p.strip()]
+        if len(parts) > 1:
+            out: List[str] = []
+            for p in parts:
+                out.extend(_subdivide_unit(p, max_chars))
+            return out
+    return [s]          # no clause mark to cut at — keep it whole
+
+
+def _split_script_into_units(text: str, max_chars: int = CLAUSE_MAX_CHARS,
+                             min_chars: int = CLAUSE_MIN_CHARS) -> List[str]:
+    """Script → timeline-sized units: sentences, long ones cut at clauses.
+
+    max_chars <= 0 (or huge) disables subdivision, giving plain sentences."""
+    units: List[str] = []
+    for sent in _split_script_into_sentences(text):
+        if max_chars and max_chars > 0:
+            units.extend(_subdivide_unit(sent, max_chars))
+        else:
+            units.append(sent)
+    return _merge_tiny_units(units, min_chars) if min_chars > 0 else units
+
+
 def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
                          previous_text: str = None, next_text: str = None) -> bytes:
     """

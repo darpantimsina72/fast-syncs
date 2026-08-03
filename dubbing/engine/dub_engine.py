@@ -167,6 +167,7 @@ REQUIRED_FUNCTIONS = [
     "build_pieces",                  # sections -> one piece per sentence
     "place_pieces",                  # windowed placement + bounded borrowing
     "synthesize_sentences_elevenlabs",# /with-timestamps TTS -> spans per sentence
+    "_split_script_into_units",      # v0.12 clause-level units
 ]
 REQUIRED_ATTRIBUTES = [
     "librosa",                       # used to load TTS audio like the app does
@@ -175,6 +176,7 @@ REQUIRED_ATTRIBUTES = [
     "PROMPTS_DIR", "LLM_SETTINGS_FILE", "TTS_SETTINGS_FILE",
     "DEFAULT_THR_DB", "DEFAULT_HYS_DB", "DEFAULT_MIN_MS",          # EN regions
     "DEFAULT_BN_THR_DB", "DEFAULT_BN_HYS_DB", "DEFAULT_BN_MIN_MS", # TTS regions
+    "CLAUSE_MAX_CHARS",              # v0.12 clause subdivision threshold
 ]
 
 # Per-mode manifest key sets (contract v0.1 + v0.2 + v0.3). _write_manifest
@@ -266,15 +268,16 @@ def _parse_args():
                          "path. Also settable via a 'sync_mode' key in "
                          "engine_settings.json; the CLI wins.")
     ap.add_argument("--chunk-mode", dest="chunk_mode", default=None,
-                    choices=["sentence", "section"],
-                    help="Piece size for match mode (v0.8). 'sentence' "
-                         "(default): long natural TTS stretches cut into "
-                         "one timeline piece per script sentence at the "
-                         "character times the /with-timestamps endpoint "
-                         "reports. 'section': one piece per matched "
-                         "thought (the v0.7 behaviour). Also settable via "
-                         "a 'chunk_mode' key in engine_settings.json; the "
-                         "CLI wins.")
+                    choices=["clause", "sentence", "section"],
+                    help="Piece size for match mode. 'clause' (default, "
+                         "v0.12): sentences, with any sentence longer than "
+                         "~90 chars subdivided at ; : , or a dash — the "
+                         "granularity the pre-v0.7 pipeline got by cutting "
+                         "the TTS audio at every silence. 'sentence' "
+                         "(v0.8): one piece per sentence, no subdivision. "
+                         "'section' (v0.7): one piece per matched thought. "
+                         "Also settable via a 'chunk_mode' key in "
+                         "engine_settings.json; the CLI wins.")
     ap.add_argument("--emotion", dest="emotion", action="store_true",
                     default=None,
                     help="Run the Step-4 emotion enrichment before TTS "
@@ -388,25 +391,50 @@ def _sync_mode(args) -> str:
     return "match"
 
 
-def _chunk_mode(args) -> str:
-    """v0.8 piece-size toggle for match mode: --chunk-mode CLI flag >
-    'chunk_mode' in engine_settings.json > 'sentence' (the default).
+CHUNK_MODES = ("clause", "sentence", "section")
 
-    'sentence' = one timeline piece per script sentence, cut from long
-    natural TTS stretches using the /with-timestamps character table.
-    'section' = the v0.7 behaviour (one piece per matched thought)."""
-    if getattr(args, "chunk_mode", None) in ("sentence", "section"):
+
+def _chunk_mode(args) -> str:
+    """Piece-size toggle for match mode: --chunk-mode CLI flag >
+    'chunk_mode' in engine_settings.json > 'clause' (the v0.12 default).
+
+    'clause'   = sentences, and any sentence longer than
+                 tts.CLAUSE_MAX_CHARS subdivided at ; : , or a dash. This
+                 is the granularity the pre-v0.7 pipeline got by cutting
+                 the TTS audio at every silence — Indic scripts chain
+                 clauses with those marks, so sentence-only splitting left
+                 15-second blocks on the timeline.
+    'sentence' = one piece per sentence, no subdivision (v0.8).
+    'section'  = one piece per matched thought (v0.7)."""
+    if getattr(args, "chunk_mode", None) in CHUNK_MODES:
         return args.chunk_mode
     try:
         with open(ENGINE_SETTINGS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         v = (data.get("chunk_mode") or "").strip().lower() \
             if isinstance(data, dict) else ""
-        if v in ("sentence", "section"):
+        if v in CHUNK_MODES:
             return v
     except Exception:
         pass
-    return "sentence"
+    return "clause"
+
+
+def _chunk_max_chars(args, pl) -> int:
+    """Clause-subdivision threshold: 'chunk_max_chars' in
+    engine_settings.json, else tts.CLAUSE_MAX_CHARS. Exposed as a setting so
+    a talk that still feels blocky (or too choppy) can be retuned without a
+    code change. Values below 20 are ignored — that only produces fragments
+    the merge step would glue back together anyway."""
+    try:
+        with open(ENGINE_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        v = int(data.get("chunk_max_chars") or 0) if isinstance(data, dict) else 0
+        if v >= 20:
+            return v
+    except Exception:
+        pass
+    return pl.CLAUSE_MAX_CHARS
 
 
 def _app_version() -> str:
@@ -808,10 +836,20 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
         raise RuntimeError("The English sync SRT contains no cues — cannot "
                            "match the script against it.")
 
-    # ── [S2d] sentence split + Gemini section match + TTS ──────────────────
-    sentences = pl._split_script_into_sentences(script_text)
+    # ── [S2d] unit split + Gemini section match + TTS ──────────────────────
+    # 'clause' subdivides an over-long sentence at ; : , or a dash so a
+    # single unit never becomes a 15-second block on the timeline.
+    if grain == "clause":
+        sentences = pl._split_script_into_units(script_text,
+                                                _chunk_max_chars(args, pl))
+    else:
+        sentences = pl._split_script_into_sentences(script_text)
     if not sentences:
-        raise RuntimeError("The dub script produced no sentences to match.")
+        raise RuntimeError("The dub script produced no units to match.")
+    _longest = max(len(s) for s in sentences)
+    _say("S2d", f"Script split into {len(sentences)} unit(s) "
+                f"(longest {_longest} chars ≈ {_longest / 14.3:.1f}s of "
+                "speech).")
     if _emotion_enabled(args):
         _say("S2d", "note: Step-4 emotion enrichment is skipped in match "
                     "sync mode (pieces are synthesized from the clean "
@@ -826,7 +864,7 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     tts_path = os.path.join(
         out_dir, pl._tts_output_name(language, audio_path, "_tts"))
 
-    if grain == "sentence":
+    if grain != "section":
         pieces = pl.build_pieces(sections, unmatched_tr, sentences,
                                  en_entries)
         if not pieces:
@@ -871,7 +909,7 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     # ── [S3d] placement + order sweep + files ───────────────────────────────
     _say("S3d", "Placing pieces into their English slots…")
     durations = [(e - s) / 1000.0 for (s, e) in spans]
-    if grain == "sentence":
+    if grain != "section":
         placed = pl.place_pieces(pieces, durations,
                                  log=lambda m: _say("S3d", m))
     else:
@@ -1406,7 +1444,7 @@ def main() -> int:
     args = _parse_args()
 
     v = _app_version()
-    _note(f"Reaper Dubbing App{' v' + v if v else ''} (contract v0.10)")
+    _note(f"Reaper Dubbing App{' v' + v if v else ''} (contract v0.12)")
 
     if args.app_dir:
         _note("WARNING: --app-dir is deprecated as of v0.3 and IGNORED — "
