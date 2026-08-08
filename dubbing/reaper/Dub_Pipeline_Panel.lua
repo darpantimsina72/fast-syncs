@@ -4788,6 +4788,51 @@ function V5.ui_tts_tab(ctx)
   reaper.ImGui_PopStyleVar(ctx, 3)
 end
 
+-- ─── Tools tab (v0.13) ──────────────────────────────────────
+-- The three small voice utilities behind one segmented row, replacing the
+-- three separate tabs they used to be. Which tool is showing persists
+-- (V5.tool, see save_settings).
+function V5.ui_tools_tab(ctx)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(),  10.0, 10.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(),  8.0, 6.0)
+
+  local tool = V5.segmented(ctx, 'tool', V5.tool, {
+    { 'tts',   'Text to speech',
+      'Type or paste text and hear it in a chosen voice. The wav lands on a ' ..
+      '"TTS" track at the edit cursor. No transcription, translation or sync.' },
+    { 'regen', 'Redo one line',
+      'Select a dub chunk item in the arrange view, fix its text (or change ' ..
+      'its voice) and regenerate just that line. Non-destructive: new files ' ..
+      'go to the run\'s regen/ folder.' },
+    { 'voice', 'Re-voice a track',
+      'Convert a whole track to a different voice with the ElevenLabs voice ' ..
+      'changer. Timing is preserved, so a synced dub stays synced.' },
+  })
+  if tool ~= V5.tool then
+    V5.tool = tool
+    save_settings()
+  end
+
+  reaper.ImGui_Dummy(ctx, 0, 6)
+
+  if V5.tool == 'tts' then
+    V5.heading(ctx, 'Text to speech',
+      'Paste text  →  speak it  →  it lands on a "TTS" track at the cursor')
+    V5.ui_tts_tab(ctx)
+  elseif V5.tool == 'regen' then
+    V5.heading(ctx, 'Redo one line',
+      'Select a dub chunk in the arrange view, then edit and regenerate it')
+    ui_regen_section(ctx, true)
+  else
+    V5.heading(ctx, 'Re-voice a track',
+      'Render a track  →  convert it to another voice  →  import it back')
+    ui_voice_change_section(ctx, true)
+  end
+
+  reaper.ImGui_PopStyleVar(ctx, 3)
+end
+
 -- ─── Review phase (staged run paused after translation) ─────
 -- Estimated pixel height for one editable paragraph box (grows with text).
 local function _para_box_height(en, tr)
@@ -4965,48 +5010,51 @@ end
 
 -- v0.5: `always_open` renders the body without the CollapsingHeader gate —
 -- used by the dedicated Settings tab.
-local function ui_settings_section(ctx, always_open)
-  if not always_open then
-    if not reaper.ImGui_CollapsingHeader(ctx, '⚙ Settings  (LLM + TTS keys)') then
-      return
-    end
-  end
-  reaper.ImGui_Indent(ctx, 12)
+-- Password-style flags for the key fields. One place, so the "Show keys"
+-- toggle reaches every field without each one re-deriving it.
+function V5.pw_flags()
+  return (_ui_show_keys and 0) or
+         (reaper.ImGui_InputTextFlags_Password and
+          reaper.ImGui_InputTextFlags_Password() or 0)
+end
+
+-- ── Connection pane ─────────────────────────────────────────
+-- The LLM that translates, reviews and maps. These keys are the only copy:
+-- the Sync tab reads the same ones and has no fields of its own.
+function V5.pane_connection(ctx)
+  V5.heading(ctx, 'Connection',
+    'The AI that translates, reviews and maps — and the keys it uses')
   local rv
+  local pw = V5.pw_flags()
 
-  local pw_flags = (_ui_show_keys and 0) or
-                   (reaper.ImGui_InputTextFlags_Password and
-                    reaper.ImGui_InputTextFlags_Password() or 0)
+  V5.field(ctx, 'Provider', 200)
+  _, LLM_PROVIDER = _ui_combo(ctx, '##provider', LLM_PROVIDER, PROVIDER_UI)
+  V5.hint(ctx, 'These keys are the only copy — the Sync tab uses the same ' ..
+               'ones and has no fields of its own.')
 
-  -- ── LLM (translation chain) ─────────────────────────────
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xDDDDDDFF)
-  reaper.ImGui_Text(ctx, 'LLM — translation / review / mapping')
-  reaper.ImGui_PopStyleColor(ctx)
-
-  _grey_hint(ctx, 'These keys are the only copy — the Auto Sync tab uses the ' ..
-                  'same ones and has no fields of its own.')
-  _, LLM_PROVIDER = _ui_combo(ctx, 'Provider', LLM_PROVIDER, PROVIDER_UI)
-  rv, LLM_MODEL = reaper.ImGui_InputText(ctx, 'Model', LLM_MODEL or '')
+  V5.field(ctx, 'Model', 260)
+  rv, LLM_MODEL = reaper.ImGui_InputText(ctx, '##llmmodel', LLM_MODEL or '')
   if LLM_PROVIDER == 'openai' then
-    _grey_hint(ctx, 'Model id your gateway serves, e.g. gemini-3-flash-preview.')
+    V5.hint(ctx, 'Model id your gateway serves, e.g. gemini-3-flash-preview.')
   elseif LLM_PROVIDER == 'server' then
-    _grey_hint(ctx, 'Model Auto Sync asks your server for — the server may ' ..
-                    'override it.')
+    V5.hint(ctx, 'Model Sync asks your server for — the server may override it.')
   else
-    _grey_hint(ctx, 'Gemini model, e.g. gemini-2.5-pro or gemini-3.5-flash.')
+    V5.hint(ctx, 'Gemini model, e.g. gemini-2.5-pro or gemini-3.5-flash.')
   end
 
   if LLM_PROVIDER == 'gemini' then
-    rv, LLM_GEMINI_KEY = reaper.ImGui_InputText(ctx, 'Gemini API key',
-                                                LLM_GEMINI_KEY or '', pw_flags)
+    V5.field(ctx, 'Gemini key', 260)
+    rv, LLM_GEMINI_KEY = reaper.ImGui_InputText(ctx, '##gemkey',
+                                                LLM_GEMINI_KEY or '', pw)
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_SmallButton(ctx, 'Clear##gemk') then
       LLM_GEMINI_KEY, V5.cred_cleared.gemini = '', true
     end
-    _grey_hint(ctx, 'Google AI Studio key (starts with "AIza") — ' ..
-                    'aistudio.google.com/apikey.')
+    V5.hint(ctx, 'Google AI Studio key (starts with "AIza") — ' ..
+                 'aistudio.google.com/apikey.')
   elseif LLM_PROVIDER == 'vertex' then
-    rv, LLM_VERTEX_JSON = reaper.ImGui_InputText(ctx, 'Vertex key path',
+    V5.field(ctx, 'Vertex key', 260)
+    rv, LLM_VERTEX_JSON = reaper.ImGui_InputText(ctx, '##vtxpath',
                                                  LLM_VERTEX_JSON or '')
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_SmallButton(ctx, 'Browse…##vtx') then
@@ -5014,64 +5062,79 @@ local function ui_settings_section(ctx, always_open)
         LLM_VERTEX_JSON or "", "Select Vertex service-account JSON", "json")
       if ok and picked and picked ~= "" then LLM_VERTEX_JSON = picked end
     end
-    _grey_hint(ctx, 'Path to a Google service-account JSON. Leave blank to ' ..
-                    'use config/vertex_key.json when it exists.')
+    V5.hint(ctx, 'Path to a Google service-account JSON. Leave blank to ' ..
+                 'use config/vertex_key.json when it exists.')
   elseif LLM_PROVIDER == 'server' then
-    rv, LLM_SERVER_URL = reaper.ImGui_InputText(ctx, 'Server URL',
+    V5.field(ctx, 'Server URL', 260)
+    rv, LLM_SERVER_URL = reaper.ImGui_InputText(ctx, '##srvurl',
                                                 LLM_SERVER_URL or '')
-    rv, LLM_SERVER_TOKEN = reaper.ImGui_InputText(ctx, 'Access token',
-                                                  LLM_SERVER_TOKEN or '', pw_flags)
+    V5.field(ctx, 'Access token', 260)
+    rv, LLM_SERVER_TOKEN = reaper.ImGui_InputText(ctx, '##srvtok',
+                                                  LLM_SERVER_TOKEN or '', pw)
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_SmallButton(ctx, 'Clear##srvt') then
       LLM_SERVER_TOKEN, V5.cred_cleared.server = '', true
     end
-    _grey_hint(ctx, 'Auto Sync routes every AI call through your server, which ' ..
-                    'holds the real provider keys — only this token lives on ' ..
-                    'this machine.')
-    _grey_hint(ctx, 'DUBBING CANNOT USE THIS MODE: the dub engine calls the LLM ' ..
-                    'directly, so dub runs will stop with that message. Pick ' ..
-                    'Vertex, Gemini or OpenAI-compatible above to dub.')
+    V5.hint(ctx, 'Sync routes every AI call through your server, which holds ' ..
+                 'the real provider keys — only this token lives on this ' ..
+                 'machine.')
+    -- Blocking: a dub run in this mode stops with exactly this message, so it
+    -- stays inline rather than hiding behind a hover.
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
+    reaper.ImGui_TextWrapped(ctx,
+      'DUBBING CANNOT USE THIS MODE: the dub engine calls the LLM directly, ' ..
+      'so dub runs will stop with that message. Pick Vertex, Gemini or ' ..
+      'OpenAI-compatible above to dub.')
+    reaper.ImGui_PopStyleColor(ctx)
   else -- openai
-    rv, LLM_OPENAI_URL = reaper.ImGui_InputText(ctx, 'Base URL',
+    V5.field(ctx, 'Base URL', 260)
+    rv, LLM_OPENAI_URL = reaper.ImGui_InputText(ctx, '##oaiurl',
                                                 LLM_OPENAI_URL or '')
-    rv, LLM_OPENAI_KEY = reaper.ImGui_InputText(ctx, 'API key',
-                                                LLM_OPENAI_KEY or '', pw_flags)
+    V5.hint(ctx, 'API base of an OpenAI-compatible gateway (LiteLLM, ' ..
+                 'OpenRouter, vLLM, ...). Host or host/v1 — e.g. ' ..
+                 'https://llm.example.com/v1 — NOT the chat UI address and ' ..
+                 'without /chat/completions.')
+    V5.field(ctx, 'API key', 260)
+    rv, LLM_OPENAI_KEY = reaper.ImGui_InputText(ctx, '##oaikey',
+                                                LLM_OPENAI_KEY or '', pw)
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_SmallButton(ctx, 'Clear##oaik') then
       LLM_OPENAI_KEY, V5.cred_cleared.openai = '', true
     end
     if LLM_OPENAI_KEY == '' and V5.gateway_needs_key(LLM_OPENAI_URL) then
-      _grey_hint(ctx, 'API key is empty — this gateway is remote, so every ' ..
-                      'request would go out unauthenticated and come back 401.')
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
+      reaper.ImGui_TextWrapped(ctx,
+        'API key is empty — this gateway is remote, so every request would ' ..
+        'go out unauthenticated and come back 401.')
+      reaper.ImGui_PopStyleColor(ctx)
     end
-    _grey_hint(ctx, 'API base of an OpenAI-compatible gateway (LiteLLM, ' ..
-                    'OpenRouter, vLLM, ...) plus its Bearer key. Host or ' ..
-                    'host/v1 — e.g. https://llm.example.com/v1 — NOT the ' ..
-                    'chat UI address and without /chat/completions.')
   end
 
   if LLM_PROVIDER ~= 'server' then
+    reaper.ImGui_Dummy(ctx, 0, 4)
     if reaper.ImGui_Button(ctx, 'Test connection', 150, 26) then
       start_test_llm()
     end
-    reaper.ImGui_SameLine(ctx)
-    _grey_hint(ctx, 'one tiny LLM call — result shows in a banner')
+    V5.hint(ctx, 'One tiny LLM call — the result shows in a banner.')
   end
+end
 
-  reaper.ImGui_Dummy(ctx, 0, 4)
-  reaper.ImGui_Separator(ctx)
+-- ── Voices pane ─────────────────────────────────────────────
+-- The ElevenLabs key, the synthesis model, and the default voice every
+-- stage falls back to.
+function V5.pane_voices(ctx)
+  V5.heading(ctx, 'Voices',
+    'Your ElevenLabs key, the synthesis model, and the default voice')
+  local rv
+  local pw = V5.pw_flags()
 
-  -- ── TTS (ElevenLabs) ────────────────────────────────────
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xDDDDDDFF)
-  reaper.ImGui_Text(ctx, 'TTS — ElevenLabs')
-  reaper.ImGui_PopStyleColor(ctx)
-
-  rv, EL_KEY = reaper.ImGui_InputText(ctx, 'ElevenLabs key',
-                                      EL_KEY or '', pw_flags)
+  V5.field(ctx, 'ElevenLabs key', 260)
+  rv, EL_KEY = reaper.ImGui_InputText(ctx, '##elkey', EL_KEY or '', pw)
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, 'Clear##elk') then
     EL_KEY, V5.cred_cleared.el = '', true
   end
+  V5.hint(ctx, 'Transcription and every voice stage need this key.')
 
   -- Model combo: keep an unknown persisted model visible by prepending it.
   local model_items = {}
@@ -5083,55 +5146,37 @@ local function ui_settings_section(ctx, always_open)
   if not known and (EL_MODEL or "") ~= "" then
     table.insert(model_items, 1, EL_MODEL)
   end
-  _, EL_MODEL = _ui_combo(ctx, 'EL model', EL_MODEL, model_items)
+  V5.field(ctx, 'Voice model', 260)
+  _, EL_MODEL = _ui_combo(ctx, '##elmodel', EL_MODEL, model_items)
 
-  -- Voice: fetch the catalogue for the current language, pick from a combo,
-  -- or type a voice id manually (fallback — always wins, it IS the value).
+  reaper.ImGui_Dummy(ctx, 0, 4)
   if reaper.ImGui_Button(ctx, 'Fetch voices', 150, 26) then
     start_fetch_voices()
   end
-  reaper.ImGui_SameLine(ctx)
-  _grey_hint(ctx, 'ElevenLabs voice catalogue for: ' .. (LANGUAGE or '?'))
+  V5.hint(ctx, 'Pulls the ElevenLabs voice catalogue for ' ..
+               (LANGUAGE or '?') .. ' into the pickers.')
 
-  -- v0.7: bookmarks + search, shared with the Track Voice and Text to
-  -- Speech tabs. The manual id field below still wins — it IS the value.
-  -- The picker itself flags a list fetched for another language (v0.11).
-  VOICE_ID = V5.ui_voice_picker(ctx, 'settings', VOICE_ID, 'Voice')
-  rv, VOICE_ID = reaper.ImGui_InputText(ctx, 'Voice id (manual)', VOICE_ID or '')
+  -- v0.7: bookmarks + search, shared with the Tools tab. The manual id field
+  -- below still wins — it IS the value. The picker itself flags a list
+  -- fetched for another language (v0.11) and can audition a voice (v0.11).
+  VOICE_ID = V5.ui_voice_picker(ctx, 'settings', VOICE_ID, 'Default voice')
 
-  rv, GOOGLE_TTS_KEY_PATH = reaper.ImGui_InputText(
-    ctx, 'Google TTS key (optional)', GOOGLE_TTS_KEY_PATH or '')
+  if V5.advanced(ctx, 'voiceid_settings', 'Enter a voice id by hand') then
+    reaper.ImGui_Indent(ctx, 12)
+    V5.field(ctx, 'Voice id', 260)
+    rv, VOICE_ID = reaper.ImGui_InputText(ctx, '##vidmanual', VOICE_ID or '')
+    V5.hint(ctx, 'An ElevenLabs voice id, for a voice that is not in your ' ..
+                 'fetched list. It overrides the picker above.')
+    V5.field(ctx, 'Google TTS key', 260)
+    rv, GOOGLE_TTS_KEY_PATH = reaper.ImGui_InputText(
+      ctx, '##gttskey', GOOGLE_TTS_KEY_PATH or '')
+    V5.hint(ctx, 'Optional. Path to a Google Cloud TTS service-account JSON, ' ..
+                 'for the Google voice backend.')
+    reaper.ImGui_Unindent(ctx, 12)
+  end
 
   reaper.ImGui_Dummy(ctx, 0, 4)
   rv, _ui_show_keys = reaper.ImGui_Checkbox(ctx, 'Show keys', _ui_show_keys)
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, '💾 Save settings', 150, 24) then
-    local ok, path = save_config_files()
-    if ok and LAST_SYNC_CRED_ERR then
-      ui_set_banner("error", "Saved for dubbing, but could not share the keys " ..
-                             "with Auto Sync:\n" .. LAST_SYNC_CRED_ERR ..
-                             "\nThe Auto Sync tab may still use older keys.")
-    elseif ok then
-      -- Don't let "Settings saved" be the last word when the LLM still can't
-      -- run: say what is missing now, or spend one tiny --test-llm call to
-      -- prove the credentials actually work. A paid dub run should never be
-      -- the first thing that discovers a blank key.
-      local why = V5.llm_creds_error()
-      if why then
-        ui_set_banner("warn", "Settings saved, but the LLM is not usable yet:\n"
-                              .. why)
-      elseif LLM_PROVIDER ~= 'server' then
-        start_test_llm()
-      else
-        ui_set_banner("info", "Settings saved to:\n" .. LLM_SETTINGS_PATH ..
-                              "\n" .. TTS_SETTINGS_PATH ..
-                              "\n" .. SYNC_SETTINGS_PATH .. "  (Auto Sync keys)")
-      end
-    else
-      ui_set_banner("error", "Could not write settings file:\n" ..
-                             tostring(path))
-    end
-  end
 
   -- Masked one-line summary of what is configured (fast-syncs _mask_key).
   local llm_key_summary
@@ -5152,6 +5197,51 @@ local function ui_settings_section(ctx, always_open)
   _grey_hint(ctx, string.format('%s  ·  EL key %s',
     llm_key_summary,
     EL_KEY ~= '' and _mask_key(EL_KEY) or '(not set)'))
+end
+
+-- Kept for the setup phase, which still offers the credentials inline behind
+-- a collapsing header. Same two panes in the same order, and the same Save
+-- button as before — the settings window owns a Save of its own.
+local function ui_settings_section(ctx, always_open)
+  if not always_open then
+    if not reaper.ImGui_CollapsingHeader(ctx, '⚙ Settings  (LLM + TTS keys)') then
+      return
+    end
+  end
+  reaper.ImGui_Indent(ctx, 12)
+  V5.pane_connection(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  reaper.ImGui_Separator(ctx)
+  V5.pane_voices(ctx)
+
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  if reaper.ImGui_Button(ctx, '💾 Save settings', 150, 24) then
+    local ok, path = save_config_files()
+    if ok and LAST_SYNC_CRED_ERR then
+      ui_set_banner("error", "Saved for dubbing, but could not share the keys " ..
+                             "with Sync:\n" .. LAST_SYNC_CRED_ERR ..
+                             "\nThe Sync tab may still use older keys.")
+    elseif ok then
+      -- Don't let "Settings saved" be the last word when the LLM still can't
+      -- run: say what is missing now, or spend one tiny --test-llm call to
+      -- prove the credentials actually work. A paid dub run should never be
+      -- the first thing that discovers a blank key.
+      local why = V5.llm_creds_error()
+      if why then
+        ui_set_banner("warn", "Settings saved, but the LLM is not usable yet:\n"
+                              .. why)
+      elseif LLM_PROVIDER ~= 'server' then
+        start_test_llm()
+      else
+        ui_set_banner("info", "Settings saved to:\n" .. LLM_SETTINGS_PATH ..
+                              "\n" .. TTS_SETTINGS_PATH ..
+                              "\n" .. SYNC_SETTINGS_PATH .. "  (Sync keys)")
+      end
+    else
+      ui_set_banner("error", "Could not write settings file:\n" ..
+                             tostring(path))
+    end
+  end
   _grey_hint(ctx, 'Saved automatically before every run. Files stay in ' ..
                   'config/ (gitignored — they never leave this machine).')
 
@@ -5456,8 +5546,12 @@ end
 -- and the shared fast-syncs updater. Locked while a run is active — the
 -- engine reads config/*.json at launch time.
 -- v0.7: one model per pipeline stage. Blank = the single Model field above.
-function V5.ui_models_section(ctx)
-  if not reaper.ImGui_CollapsingHeader(ctx, 'Model per stage') then return end
+-- *bare* (v0.13): drawn as a settings-window pane, which supplies its own
+-- heading — so the collapsing header is skipped and the body always draws.
+function V5.ui_models_section(ctx, bare)
+  if not bare and not reaper.ImGui_CollapsingHeader(ctx, 'Model per stage') then
+    return
+  end
   reaper.ImGui_Indent(ctx, 12)
   _grey_hint(ctx, 'Leave a box empty to use the Model set above (' ..
                   ((LLM_MODEL or '') ~= '' and LLM_MODEL or 'not set') ..
@@ -5481,8 +5575,10 @@ end
 -- v0.7: add a target language. The engine picks it up from
 -- config/custom_languages.json — no code change, but it needs prompt files,
 -- so adding one seeds them from a language that already works.
-function V5.ui_languages_section(ctx)
-  if not reaper.ImGui_CollapsingHeader(ctx, 'Languages') then return end
+function V5.ui_languages_section(ctx, bare)
+  if not bare and not reaper.ImGui_CollapsingHeader(ctx, 'Languages') then
+    return
+  end
   reaper.ImGui_Indent(ctx, 12)
   _grey_hint(ctx, #V5.custom_langs .. ' added by you, ' ..
                   (#LANGUAGES - #V5.custom_langs) .. ' built in.')
@@ -5558,8 +5654,10 @@ function V5.ui_languages_section(ctx)
 end
 
 -- v0.7: edit the per-language prompt files from inside the panel.
-function V5.ui_prompts_section(ctx)
-  if not reaper.ImGui_CollapsingHeader(ctx, 'Prompts') then return end
+function V5.ui_prompts_section(ctx, bare)
+  if not bare and not reaper.ImGui_CollapsingHeader(ctx, 'Prompts') then
+    return
+  end
   reaper.ImGui_Indent(ctx, 12)
   _grey_hint(ctx, 'These are the instructions sent to the AI at each stage. ' ..
                   'One file per language per stage, in dubbing/prompts/.')
@@ -5626,116 +5724,260 @@ function V5.ui_prompts_section(ctx)
   reaper.ImGui_Unindent(ctx, 12)
 end
 
-function V5.ui_settings_tab(ctx)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(),  10.0, 10.0)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(),  8.0, 6.0)
+-- ── Remaining settings panes ────────────────────────────────
+-- Each supplies its own heading; the shared bodies are drawn *bare*, without
+-- the collapsing header they wear when they appear inline in the old tab.
 
+function V5.pane_models(ctx)
+  V5.heading(ctx, 'Models',
+    'A different model per stage, when the default is not the right trade-off')
+  V5.ui_models_section(ctx, true)
+end
+
+function V5.pane_languages(ctx)
+  V5.heading(ctx, 'Languages', 'The target languages offered in the Dub tab')
+  V5.ui_languages_section(ctx, true)
+end
+
+function V5.pane_prompts(ctx)
+  V5.heading(ctx, 'Prompts', 'The instructions sent to the AI at each stage')
+  V5.ui_prompts_section(ctx, true)
+end
+
+-- Advanced: the two engine switches and the Python override. Both switches
+-- are written straight into engine_settings.json, which the engine reads at
+-- launch — so they are settings, not per-run choices.
+function V5.pane_advanced(ctx)
+  V5.heading(ctx, 'Advanced',
+    'Engine behaviour and the Python interpreter — rarely worth changing')
+  local rv
+
+  -- v0.8: piece size for dub runs.
+  V5.label(ctx, 'Dub pieces')
+  local cm = V5.segmented(ctx, 'chunkmode', V5.chunk_mode, {
+    { 'clause',   'Clause',
+      'Default. The voice is generated in long natural stretches, then cut ' ..
+      'at the exact times ElevenLabs reports — at sentence ends, and inside ' ..
+      'a long sentence at its ; : , or dash. That is the granularity the old ' ..
+      'pipeline got from cutting at every silence.' },
+    { 'sentence', 'Sentence', 'One piece per sentence.' },
+    { 'section',  'Section',  'One piece per thought (v0.7).' },
+  })
+  if cm ~= V5.chunk_mode then
+    V5.chunk_mode = cm
+    local okc, badpath = V5.save_chunk_mode()
+    if not okc then
+      ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
+    end
+  end
+
+  -- v0.12: sync mode (match | legacy).
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  V5.label(ctx, 'Sync mode')
+  local sm = V5.segmented(ctx, 'syncmode', V5.sync_mode, {
+    { 'match',  'Match',
+      'v0.7 default. Pre-TTS Gemini matching. Fast, saves API costs, but ' ..
+      'strict on timing — overruns go to the Un sync track.' },
+    { 'legacy', 'Legacy',
+      'v0.2/v0.3 behaviour. Post-TTS transcription matching. Slower, but ' ..
+      'lenient on timing: overlapping items are nudged forward instead of ' ..
+      'parked. Switch here if your translations run long and clips keep ' ..
+      'landing on Un sync.' },
+  })
+  if sm ~= V5.sync_mode then
+    V5.sync_mode = sm
+    local okc, badpath = V5.save_chunk_mode()
+    if not okc then
+      ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
+    end
+  end
+
+  reaper.ImGui_Dummy(ctx, 0, 8)
+  V5.field(ctx, 'Python', 260)
+  rv, PYTHON_CMD = reaper.ImGui_InputText(ctx, '##pycmd', PYTHON_CMD or '')
+  V5.hint(ctx, 'Leave blank to auto-detect (dubbing/venv/ first, then system ' ..
+               'installs). Run ' .. SETUP_SCRIPT .. ' once to create venv/.')
+end
+
+function V5.pane_about(ctx)
+  V5.heading(ctx, 'About', 'Version and updates')
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
   reaper.ImGui_Text(ctx, 'Fast Syncs '
     .. (V5.APP_VERSION ~= '' and ('v' .. V5.APP_VERSION)
         or '(VERSION file missing — run Update…)'))
   reaper.ImGui_PopStyleColor(ctx)
-  reaper.ImGui_Dummy(ctx, 0, 2)
 
+  reaper.ImGui_Dummy(ctx, 0, 8)
+  if V5.updater_path() then
+    if reaper.ImGui_Button(ctx, 'Update…', 150, 30) then
+      V5.run_updater()
+    end
+    V5.hint(ctx, 'Updates the whole fast-syncs install — the sync tool AND ' ..
+                 'this dubbing app.')
+  else
+    _grey_hint(ctx, 'No fast-syncs updater found above dubbing/ — this ' ..
+                    'looks like a standalone install.')
+  end
+end
+
+V5.PANES = {
+  { 'connection', 'Connection', V5.pane_connection },
+  { 'voices',     'Voices',     V5.pane_voices     },
+  { 'models',     'Models',     V5.pane_models     },
+  { 'languages',  'Languages',  V5.pane_languages  },
+  { 'prompts',    'Prompts',    V5.pane_prompts    },
+  { 'advanced',   'Advanced',   V5.pane_advanced   },
+  { 'about',      'About',      V5.pane_about      },
+}
+
+-- The settings window itself: sidebar left, one pane right, one Save for the
+-- whole window at the bottom. Locked while a run is active — the engine reads
+-- config/*.json at launch time, so editing mid-run would be a lie.
+function V5.ui_settings_body(ctx)
   local locked = (_ui_phase ~= "setup")
   if locked then
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
     reaper.ImGui_TextWrapped(ctx,
-      'Settings are locked while a run is active — they are read at ' ..
-      'launch time. Finish (or cancel) the run to edit them.')
+      'Locked while a run is active — settings are read at launch time. ' ..
+      'Finish or cancel the run to edit them.')
     reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_Dummy(ctx, 0, 4)
   end
 
   _ui_render_banner(ctx)
-
   _ui_begin_disabled(ctx, locked)
-  ui_settings_section(ctx, true)
 
-  reaper.ImGui_Dummy(ctx, 0, 4)
-  V5.ui_models_section(ctx)
-  reaper.ImGui_Dummy(ctx, 0, 4)
-  V5.ui_languages_section(ctx)
-  reaper.ImGui_Dummy(ctx, 0, 4)
-  V5.ui_prompts_section(ctx)
-
-  reaper.ImGui_Dummy(ctx, 0, 4)
-  if reaper.ImGui_CollapsingHeader(ctx, 'Advanced') then
-    reaper.ImGui_Indent(ctx, 12)
-    local rv
-    rv, PYTHON_CMD = reaper.ImGui_InputText(ctx, 'Python override', PYTHON_CMD or '')
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-    reaper.ImGui_TextWrapped(ctx,
-      'Python override: leave blank to auto-detect (dubbing/venv/ first, ' ..
-      'then system installs). Run ' .. SETUP_SCRIPT .. ' once to create venv/.')
-    reaper.ImGui_PopStyleColor(ctx)
-
-    -- v0.8: piece size for dub runs. Written straight into
-    -- engine_settings.json — the engine reads it at launch.
-    reaper.ImGui_Dummy(ctx, 0, 4)
-    local MODES = { 'clause — smallest pieces, like the old behaviour',
-                    'sentence — one piece per sentence',
-                    'section — one piece per thought (v0.7)' }
-    local cur = MODES[1]
-    if V5.chunk_mode == 'section' then cur = MODES[3]
-    elseif V5.chunk_mode == 'sentence' then cur = MODES[2] end
-    local ch, picked = _ui_combo(ctx, 'Dub piece size', cur, MODES)
-    if ch then
-      V5.chunk_mode = picked:match('^section') and 'section'
-                      or (picked:match('^sentence') and 'sentence' or 'clause')
-      local okc, badpath = V5.save_chunk_mode()
-      if not okc then
-        ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
+  -- Sidebar. A child window so the pane beside it can scroll on its own.
+  if reaper.ImGui_BeginChild(ctx, '##panes', 132, -38) then
+    for _, pane in ipairs(V5.PANES) do
+      local on = (V5.settings_pane == pane[1])
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),
+                                 on and 0x3A5A8CFF or 0x00000000)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(),
+                                 on and 0x4A6A9CFF or 0x2A3038FF)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),
+                                 0x2A4A7CFF)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(),
+                                 on and 0xFFFFFFFF or 0x99A3B0FF)
+      if reaper.ImGui_Button(ctx, pane[2] .. '##pane' .. pane[1], -1, 24) then
+        V5.settings_pane = pane[1]
+        save_settings()
       end
+      reaper.ImGui_PopStyleColor(ctx, 4)
     end
-    _grey_hint(ctx,
-      'clause (default): the voice is generated in long natural stretches, ' ..
-      'then cut at the exact times ElevenLabs reports — at sentence ends, ' ..
-      'and inside a long sentence at its ; : , or dash. That is the ' ..
-      'granularity the old pipeline got from cutting at every silence.')
-
-    -- v0.12: sync mode (match | legacy), stored in engine_settings.json
-    reaper.ImGui_Dummy(ctx, 0, 4)
-    local SYNC_MODES = { 'match — (v0.7 default) Pre-TTS Gemini matching. Fast, saves API costs, but strict on timing (overruns go to Un sync).',
-                         'legacy — (v0.2/v0.3) Post-TTS transcription matching. Slower, but lenient on timing (nudges items forward).' }
-    local scur = SYNC_MODES[1]
-    if V5.sync_mode == 'legacy' then scur = SYNC_MODES[2] end
-    local sch, spicked = _ui_combo(ctx, 'Sync mode', scur, SYNC_MODES)
-    if sch then
-      V5.sync_mode = spicked:match('^legacy') and 'legacy' or 'match'
-      local okc, badpath = V5.save_chunk_mode()
-      if not okc then
-        ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
-      end
-    end
-    _grey_hint(ctx,
-      'legacy: if your translations are long and clips keep landing on the "Un sync" track due to overlaps, ' ..
-      'switch to "legacy" mode to nudge overlapping items forward instead of parking them.')
-    reaper.ImGui_Unindent(ctx, 12)
+    reaper.ImGui_EndChild(ctx)
   end
-  _ui_end_disabled(ctx)
 
-  reaper.ImGui_Dummy(ctx, 0, 8)
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_BeginChild(ctx, '##pane_body', -1, -38) then
+    local drawn = false
+    for _, pane in ipairs(V5.PANES) do
+      if V5.settings_pane == pane[1] then pane[3](ctx); drawn = true end
+    end
+    if not drawn then V5.pane_connection(ctx) end
+    reaper.ImGui_EndChild(ctx)
+  end
+
+  -- One Save for the window. Every pane writes to the same two config files,
+  -- so a per-section button was only ever a chance to forget one.
   reaper.ImGui_Separator(ctx)
-  reaper.ImGui_Dummy(ctx, 0, 4)
-
-  _ui_begin_disabled(ctx, locked)
-  if V5.updater_path() then
-    if reaper.ImGui_Button(ctx, 'Update…', 150, 30) then
-      V5.run_updater()
+  if reaper.ImGui_Button(ctx, 'Save settings', 140, 26) then
+    local ok, path = save_config_files()
+    if ok and LAST_SYNC_CRED_ERR then
+      ui_set_banner("error", "Saved for dubbing, but could not share the keys " ..
+                             "with Sync:\n" .. LAST_SYNC_CRED_ERR ..
+                             "\nThe Sync tab may still use older keys.")
+    elseif ok then
+      local why = V5.llm_creds_error()
+      if why then
+        ui_set_banner("warn", "Saved, but the LLM is not usable yet:\n" .. why)
+      elseif LLM_PROVIDER ~= 'server' then
+        start_test_llm()
+      else
+        ui_set_banner("info", "Saved.")
+      end
+    else
+      ui_set_banner("error", "Could not write settings file:\n" ..
+                             tostring(path))
     end
-    reaper.ImGui_SameLine(ctx)
-    _grey_hint(ctx, 'updates the whole fast-syncs install — sync tool ' ..
-                    'AND this dubbing app')
-  else
-    _grey_hint(ctx, 'No fast-syncs updater found above dubbing/ — this ' ..
-                    'looks like a standalone install.')
   end
+  reaper.ImGui_SameLine(ctx)
+  _grey_hint(ctx, 'Also saved automatically before every run.')
   _ui_end_disabled(ctx)
-
-  reaper.ImGui_PopStyleVar(ctx, 3)
 end
+
+-- Its own top-level window, so it can be moved, resized and closed without
+-- disturbing the work surface behind it.
+function V5.ui_settings_window(ctx)
+  if not V5.settings_open then return end
+  reaper.ImGui_SetNextWindowSize(ctx, 620, 470,
+                                 reaper.ImGui_Cond_FirstUseEver())
+  local visible, open = reaper.ImGui_Begin(ctx, 'Settings###dub_settings', true)
+  if visible then
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(), 10.0, 8.0)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
+    reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 8.0, 5.0)
+    V5.ui_settings_body(ctx)
+    reaper.ImGui_PopStyleVar(ctx, 3)
+  end
+  reaper.ImGui_End(ctx)
+  V5.settings_open = open and true or false
+end
+
+-- ── Header and status bar ───────────────────────────────────
+-- One readiness light for the whole app, instead of each tab working it out
+-- again when you press Start.
+function V5.ui_header(ctx)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  reaper.ImGui_Text(ctx, 'Fast Syncs'
+    .. (V5.APP_VERSION ~= '' and ('  v' .. V5.APP_VERSION) or ''))
+  reaper.ImGui_PopStyleColor(ctx)
+
+  local why = V5.llm_creds_error()
+  local no_voice_key = (EL_KEY or '') == ''
+  reaper.ImGui_SameLine(ctx, 0, 16)
+  if why or no_voice_key then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+    reaper.ImGui_Text(ctx, '●  needs setup')
+    reaper.ImGui_PopStyleColor(ctx)
+    V5.hint(ctx, why or 'No ElevenLabs key yet — transcription and every ' ..
+                        'voice stage need one. Open settings to add it.')
+  else
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55DD77FF)
+    reaper.ImGui_Text(ctx, '●  keys ready')
+    reaper.ImGui_PopStyleColor(ctx)
+  end
+
+  local ww = reaper.ImGui_GetWindowWidth(ctx)
+  reaper.ImGui_SameLine(ctx, math.max(220, ww - 122))
+  if reaper.ImGui_Button(ctx, '⚙  Settings', 104, 22) then
+    V5.settings_open = not V5.settings_open
+  end
+end
+
+-- The one place the current run configuration is summarised. Every tab used
+-- to print its own version of this.
+function V5.ui_status_bar(ctx)
+  reaper.ImGui_Separator(ctx)
+  local voice = V5.voice_name(VOICE_ID or '')
+  if voice == '' then
+    voice = (VOICE_ID or '') ~= '' and 'voice set' or 'no voice'
+  end
+  local parts = {
+    LANGUAGE or '?',
+    (LLM_MODEL or '') ~= '' and LLM_MODEL or 'no model',
+    (EL_MODEL or '') ~= '' and EL_MODEL or 'eleven_v3',
+    voice,
+    FULL_RUN and 'straight through' or 'pauses for review',
+    SCRIPT_MODE == 'have' and 'own script' or 'AI translation',
+    V5.chunk_mode .. ' pieces',
+    V5.sync_mode .. ' sync',
+  }
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
+  reaper.ImGui_Text(ctx, table.concat(parts, '   ·   '))
+  reaper.ImGui_PopStyleColor(ctx)
+end
+
 
 -- ─── Running phase ────────────────────────────────────────
 local function ui_phase_running(ctx, elapsed_s)
@@ -6141,28 +6383,50 @@ local function main()
         end
       end
 
-      -- v0.5: seven tabs. Dubbing: Full Pipeline (all phases, pauses for
-      -- review), Paste Translation (bring your own script). Auto Sync: the
-      -- fast-syncs pipeline embedded (its own settings live inside it).
-      -- Regen Audio / Track Voice: the post-run utilities as their own tabs.
-      -- Logs (dub live log) and Settings (dub keys, python override,
-      -- updater). A dub run in progress renders on BOTH dubbing tabs so
-      -- neither entrance ever looks dead.
+      -- v0.13: four tabs, one job each.
+      --   Dub    — the whole dubbing run, whichever way the script arrives.
+      --   Sync   — the fast-syncs pipeline embedded.
+      --   Tools  — the three small voice utilities behind a segmented row.
+      --   Log    — the live engine log.
+      -- Credentials, models, languages and prompts moved out of the tab bar
+      -- entirely, into the settings window the header opens. What used to be
+      -- "Paste Translation" is a Script mode on the Dub tab, and the three
+      -- utility tabs are a segmented row inside Tools.
+      V5.ui_header(_ui_ctx)
+      reaper.ImGui_Dummy(_ui_ctx, 0, 2)
+
       if reaper.ImGui_BeginTabBar
          and reaper.ImGui_BeginTabBar(_ui_ctx, '##tabs') then
-        if reaper.ImGui_BeginTabItem(_ui_ctx, ' Full Pipeline ') then
-          render_phase()
-          reaper.ImGui_EndTabItem(_ui_ctx)
-        end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, ' Paste Translation ') then
+        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Dub  ') then
           if _ui_phase == "setup" then
-            V5.ui_paste_tab(_ui_ctx, start_paste_run)
+            -- Where the translated script comes from decides which entrance
+            -- draws below — the two run paths themselves are unchanged.
+            reaper.ImGui_Dummy(_ui_ctx, 0, 4)
+            V5.label(_ui_ctx, 'Script')
+            local mode = V5.segmented(_ui_ctx, 'scriptmode', SCRIPT_MODE, {
+              { 'auto', 'AI translation',
+                'The pipeline transcribes the audio and translates it with ' ..
+                'the LLM — the full run.' },
+              { 'have', 'I have a script',
+                'Skip the LLM translation: paste the translated script and ' ..
+                'the run matches, synthesizes and syncs it.' },
+            })
+            if mode ~= SCRIPT_MODE then
+              SCRIPT_MODE = mode
+              save_settings()
+            end
+            reaper.ImGui_Dummy(_ui_ctx, 0, 2)
+            if SCRIPT_MODE == 'have' then
+              V5.ui_paste_tab(_ui_ctx, start_paste_run)
+            else
+              ui_phase_setup(_ui_ctx, start_full_pipeline, close_window)
+            end
           else
             render_phase()
           end
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, ' Auto Sync ') then
+        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Sync  ') then
           V5.load_sync()
           if V5.SYNC then
             V5.SYNC.render(_ui_ctx, close_window)
@@ -6171,45 +6435,38 @@ local function main()
             reaper.ImGui_PushStyleColor(_ui_ctx, reaper.ImGui_Col_Text(),
                                         0xFFAA55FF)
             reaper.ImGui_TextWrapped(_ui_ctx,
-              V5.sync_err or 'Auto Sync module is not loaded.')
+              V5.sync_err or 'Sync module is not loaded.')
             reaper.ImGui_PopStyleColor(_ui_ctx)
           end
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, ' Text to Speech ') then
-          reaper.ImGui_Dummy(_ui_ctx, 0, 6)
-          V5.ui_tts_tab(_ui_ctx)
+        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Tools  ') then
+          reaper.ImGui_Dummy(_ui_ctx, 0, 4)
+          V5.ui_tools_tab(_ui_ctx)
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, ' Regen Audio ') then
-          reaper.ImGui_Dummy(_ui_ctx, 0, 6)
-          ui_regen_section(_ui_ctx, true)
-          reaper.ImGui_EndTabItem(_ui_ctx)
-        end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, ' Track Voice ') then
-          reaper.ImGui_Dummy(_ui_ctx, 0, 6)
-          ui_voice_change_section(_ui_ctx, true)
-          reaper.ImGui_EndTabItem(_ui_ctx)
-        end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, ' Logs ') then
+        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Log  ') then
           _render_log_child(_ui_ctx, -34)
-          reaper.ImGui_EndTabItem(_ui_ctx)
-        end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, ' Settings ') then
-          V5.ui_settings_tab(_ui_ctx)
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
         reaper.ImGui_EndTabBar(_ui_ctx)
       else
-        -- Very old ReaImGui without tab support: previous inline layout
-        -- (settings included via the setup phase is gone — show the
-        -- settings body after the phase instead).
+        -- Very old ReaImGui without tab support: the Dub phase inline. The
+        -- settings window is a separate window, so the header's gear still
+        -- reaches everything else.
         render_phase()
         if _ui_phase == "setup" then ui_settings_section(_ui_ctx, false) end
         if _ui_phase == "running" then _render_log_child(_ui_ctx, -34) end
       end
+
+      V5.ui_status_bar(_ui_ctx)
     end
     reaper.ImGui_End(_ui_ctx)   -- always paired with Begin()
+
+    -- v0.13: the settings window is a sibling top-level window, drawn after
+    -- the main one closes its Begin/End pair. Closing it never closes the app.
+    V5.ui_settings_window(_ui_ctx)
+
     _ui_window_open = _ui_window_open and open
     if _ui_window_open then
       reaper.defer(frame)
