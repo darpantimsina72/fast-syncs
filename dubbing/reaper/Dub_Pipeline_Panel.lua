@@ -838,6 +838,7 @@ end
 -- v0.8: dub piece size (sentence | section), stored in engine_settings.json
 -- where the engine's _chunk_mode() reads it. V5 fields — 200-local limit.
 V5.chunk_mode = "clause"
+V5.sync_mode  = "match"
 
 function V5.load_chunk_mode()
   local content = read_all(ENGINE_SETTINGS_PATH)
@@ -845,6 +846,10 @@ function V5.load_chunk_mode()
   local v = json_field(content, "chunk_mode")
   if v == "clause" or v == "sentence" or v == "section" then
     V5.chunk_mode = v
+  end
+  local s = json_field(content, "sync_mode")
+  if s == "match" or s == "legacy" then
+    V5.sync_mode = s
   end
 end
 
@@ -854,6 +859,7 @@ function V5.save_chunk_mode()
   local content = read_all(ENGINE_SETTINGS_PATH)
   if not content or not content:find("{") then content = "{\n}\n" end
   content = _json_set_flat(content, "chunk_mode", V5.chunk_mode)
+  content = _json_set_flat(content, "sync_mode", V5.sync_mode)
   local f = io.open(ENGINE_SETTINGS_PATH, "w")
   if not f then return false, ENGINE_SETTINGS_PATH end
   f:write(content)
@@ -2486,6 +2492,14 @@ local function start_dub_run()
   save_settings()
 
   local audio = LAST_AUDIO
+  if audio and audio ~= "" then
+    local base = audio:match("^.-([^\\/]+)%.[^\\/]+$")
+    local out_dir = audio:match("^(.*)[\\/]")
+    if out_dir and base then
+      local edited_path = out_dir .. SEP .. base .. "_translation_edited.txt"
+      os.remove(edited_path)
+    end
+  end
   if audio == "" then
     ui_set_banner("error", "Pick an English audio file first.")
     return false
@@ -5103,17 +5117,45 @@ local function ui_phase_setup(ctx, on_start, on_cancel, busy)
   -- manifest is still in engine/status/. Offer to resume instead of paying
   -- for the translate step again.
   if _resume_manifest and not busy then
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
-    reaper.ImGui_TextWrapped(ctx,
-      'A previous staged run is paused for translation review.')
-    reaper.ImGui_PopStyleColor(ctx)
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_SmallButton(ctx, 'Resume review') then
-      local m = _resume_manifest
-      _resume_manifest = nil
-      local ok, why = enter_review_phase(m)
-      if not ok then
-        ui_set_banner("error", why or "Could not resume the review.")
+    local m_lang = _resume_manifest.language or ""
+    if m_lang ~= "" and m_lang ~= LANGUAGE then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF5555FF)
+      reaper.ImGui_TextWrapped(ctx,
+        'WARNING: Paused review is for ' .. m_lang ..
+        ', but you selected ' .. LANGUAGE .. '. Change language back to ' ..
+        m_lang .. ' to resume, or click Discard to start a new ' .. LANGUAGE .. ' run.')
+      reaper.ImGui_PopStyleColor(ctx)
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, 'Discard paused run') then
+        local p1 = DONE_JSON
+        local p2 = V5.STATUS_ROOT .. SEP .. "engine_done.json"
+        os.remove(p1)
+        os.remove(p2)
+        _resume_manifest = nil
+        ui_set_banner("info", "Paused run discarded.")
+      end
+    else
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
+      reaper.ImGui_TextWrapped(ctx,
+        'A previous staged run is paused for translation review.')
+      reaper.ImGui_PopStyleColor(ctx)
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, 'Resume review') then
+        local m = _resume_manifest
+        _resume_manifest = nil
+        local ok, why = enter_review_phase(m)
+        if not ok then
+          ui_set_banner("error", why or "Could not resume the review.")
+        end
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, 'Discard paused run') then
+        local p1 = DONE_JSON
+        local p2 = V5.STATUS_ROOT .. SEP .. "engine_done.json"
+        os.remove(p1)
+        os.remove(p2)
+        _resume_manifest = nil
+        ui_set_banner("info", "Paused run discarded.")
       end
     end
     reaper.ImGui_Separator(ctx)
@@ -5507,6 +5549,24 @@ function V5.ui_settings_tab(ctx)
       'then cut at the exact times ElevenLabs reports — at sentence ends, ' ..
       'and inside a long sentence at its ; : , or dash. That is the ' ..
       'granularity the old pipeline got from cutting at every silence.')
+
+    -- v0.12: sync mode (match | legacy), stored in engine_settings.json
+    reaper.ImGui_Dummy(ctx, 0, 4)
+    local SYNC_MODES = { 'match — (v0.7 default) Pre-TTS Gemini matching. Fast, saves API costs, but strict on timing (overruns go to Un sync).',
+                         'legacy — (v0.2/v0.3) Post-TTS transcription matching. Slower, but lenient on timing (nudges items forward).' }
+    local scur = SYNC_MODES[1]
+    if V5.sync_mode == 'legacy' then scur = SYNC_MODES[2] end
+    local sch, spicked = _ui_combo(ctx, 'Sync mode', scur, SYNC_MODES)
+    if sch then
+      V5.sync_mode = spicked:match('^legacy') and 'legacy' or 'match'
+      local okc, badpath = V5.save_chunk_mode()
+      if not okc then
+        ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
+      end
+    end
+    _grey_hint(ctx,
+      'legacy: if your translations are long and clips keep landing on the "Un sync" track due to overlaps, ' ..
+      'switch to "legacy" mode to nudge overlapping items forward instead of parking them.')
     reaper.ImGui_Unindent(ctx, 12)
   end
   _ui_end_disabled(ctx)

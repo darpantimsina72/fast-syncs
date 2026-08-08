@@ -470,9 +470,9 @@ def _import_pipeline():
     if ENGINE_DIR not in sys.path:
         sys.path.insert(0, ENGINE_DIR)
     from pipeline import (config, stt, srt_tools, llm, tts, sync, tm,  # noqa: F401
-                          match)
+                          match, agent_splitter, agent_aligner)
     ns = types.SimpleNamespace()
-    for mod in (config, stt, srt_tools, llm, tts, sync, match):
+    for mod in (config, stt, srt_tools, llm, tts, sync, match, agent_splitter, agent_aligner):
         for name, value in vars(mod).items():
             if name.startswith("__"):
                 continue
@@ -857,7 +857,7 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     _say("S2d", f"Piece size: {grain}.")
     _say("S2d", f"Matching {len(sentences)} script sentence(s) to "
                 f"{len(en_entries)} English cue(s) with Gemini…")
-    sections, unmatched_tr, unmatched_en = pl.call_match_sections(
+    sections, unmatched_tr, unmatched_en, sentences = pl.agentic_split_match(
         en_entries, sentences, language, pl.GEMINI_DEFAULT_MODEL,
         status_cb=lambda m: _say("S2d", m))
 
@@ -910,8 +910,10 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     _say("S3d", "Placing pieces into their English slots…")
     durations = [(e - s) / 1000.0 for (s, e) in spans]
     if grain != "section":
-        placed = pl.place_pieces(pieces, durations,
-                                 log=lambda m: _say("S3d", m))
+        placed = pl.agentic_place_pieces(pieces, durations, en_entries, language,
+                                         pl.GEMINI_DEFAULT_MODEL, api_key=api_key,
+                                         voice_id=voice_id, el_model=args.el_model,
+                                         log=lambda m: _say("S3d", m))
     else:
         placed = pl.place_chunks(chunks, en_entries, durations,
                                  log=lambda m: _say("S3d", m))
@@ -1227,6 +1229,14 @@ def _run_translate(args, manifest):
     en_sync_srt = pl._build_english_subtitle_srt(ctx["regions"],
                                                  ctx["words"])
     _write_text(base + "_sync_en.srt", en_sync_srt)
+
+    # Delete any stale edited translation script from a previous run
+    edited_path = base + "_translation_edited.txt"
+    if os.path.exists(edited_path):
+        try:
+            os.remove(edited_path)
+        except Exception:
+            pass
 
     en_text, tr_text, n_rows = _paired_paragraph_texts(
         pl, ctx["final_srt"], ctx["punc_result"])

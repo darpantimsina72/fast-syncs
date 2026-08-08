@@ -414,15 +414,56 @@ def _process_round(rnd, mappings, en_subs, te, processed, log_lines=None):
     return count
 
 
+def _neighbour_bounds(mg_no, mappings, te, processed):
+    """
+    Nearest already-placed section on each side of section `mg_no`.
+
+    Section numbers follow the English timeline, so walking outward through
+    the numbering walks outward in time. Keeps stepping until it finds a
+    section that is placed AND still owns at least one valid dubbed cue —
+    a run of consecutive EN-less sections is skipped over rather than
+    giving up on the first one.
+
+    Returns (left_end_ms, right_start_ms); either side is None when nothing
+    usable exists there.
+    """
+    by_no = {mg.no: mg for mg in mappings}
+    nos = sorted(by_no)
+    try:
+        pos = nos.index(mg_no)
+    except ValueError:
+        return None, None
+
+    left = None
+    for n in reversed(nos[:pos]):
+        if n in processed and _te_valid(by_no[n], te):
+            left = _te_end(by_no[n], te)
+            break
+
+    right = None
+    for n in nos[pos + 1:]:
+        if n in processed and _te_valid(by_no[n], te):
+            right = _te_start(by_no[n], te)
+            break
+
+    return left, right
+
+
 def _process_overflow(mappings, en_subs, te, processed, log_lines=None,
                       en_audio_duration: float = None):
     """
     Place sections that remain unprocessed after iterations 1 & 2.
 
-    Each unprocessed section is moved to its corresponding English section's
-    start time PLUS an extra offset. The extra offset is the length of the
-    English audio file (en_audio_duration, in SECONDS) when supplied;
-    otherwise we fall back to the max end of the English subtitle file.
+    Sections WITH a valid English anchor are placed at their English start and
+    allowed to bleed over into the next slot.
+
+    Sections with NO valid English anchor (every one of their EN indices is
+    missing from en_subs — a blank cue the parser skipped, a malformed cue, or
+    an index the mapper invented) are placed beside their nearest already-
+    placed neighbour, see _neighbour_bounds. Only when no neighbour exists at
+    all do they fall back to the end-of-audio offset: the length of the
+    English audio file (en_audio_duration, in SECONDS) when supplied,
+    otherwise the max end of the English subtitle file.
 
     NOTE: Subtitle.start/.end are in MILLISECONDS (see _parse_srt_time),
     so en_audio_duration must be converted from seconds → ms here to keep
@@ -476,18 +517,38 @@ def _process_overflow(mappings, en_subs, te, processed, log_lines=None,
                 f"{want/1000.0:.2f}s (may bleed into the next slot)  "
                 f"{te_info}  [bleed-over]")
 
+    # An EN-less section has no anchor of its own, but its NEIGHBOURS do —
+    # they were placed in rounds 1-5 (or in the bleed-over loop just above).
+    # Tuck it in beside the nearest placed neighbour and let the order sweep
+    # resolve the overlap, exactly like a bleed-over section. Dumping it at
+    # end-of-audio drags every later clip with it through the sweep, which
+    # turns one lost section into a ruined file; that path survives below
+    # only for the case where no neighbour exists at all.
     if orphans and log_lines is not None:
         log_lines.append(
-            f"  Overflow offset for {len(orphans)} EN-less section(s): "
-            f"{total_dur/1000.0:.2f}s ({total_dur:.0f} ms) [{offset_label}]")
+            f"  {len(orphans)} EN-less section(s) — placing beside the nearest "
+            f"placed neighbour (fallback offset "
+            f"{total_dur/1000.0:.2f}s [{offset_label}])")
     placed_ends = []
-    for mg in orphans:
+    for mg in sorted(orphans, key=lambda g: g.no):
         te_v = _te_valid(mg, te)
         if not te_v:
             processed.add(mg.no)
             continue
-        ds = total_dur
-        if placed_ends and ds < placed_ends[-1]: ds = placed_ends[-1]
+
+        left, right = _neighbour_bounds(mg.no, mappings, te, processed)
+        if left is not None:
+            ds = left + MIN_SPRING
+            how = f"after neighbour end {left/1000.0:.2f}s"
+        elif right is not None:
+            ds = right - _te_len(mg, te) - MIN_SPRING
+            how = f"before neighbour start {right/1000.0:.2f}s"
+        else:
+            ds = total_dur
+            if placed_ends and ds < placed_ends[-1]: ds = placed_ends[-1]
+            how = f"no neighbour — end of audio [{offset_label}]"
+        if ds < 0: ds = 0.0
+
         te_before = {i: te[i].start for i in te_v} if log_lines is not None else {}
         _align_start(mg, te, ds)
         placed_ends.append(_te_end(mg, te))
@@ -496,7 +557,8 @@ def _process_overflow(mappings, en_subs, te, processed, log_lines=None,
             te_info = "  ".join(
                 f"TE{i}:{te_before[i]:.2f}s→{te[i].start:.2f}s" for i in te_v)
             log_lines.append(
-                f"  Sec {mg.no:>3} [{mg.mtype:<5}]  overflow at {ds:.2f}s  {te_info}  [overflow]")
+                f"  Sec {mg.no:>3} [{mg.mtype:<5}]  EN-less → placed at "
+                f"{ds/1000.0:.2f}s ({how})  {te_info}  [neighbour-walk]")
     return len(anchored) + len(orphans)
 
 

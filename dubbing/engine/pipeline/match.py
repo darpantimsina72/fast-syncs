@@ -201,11 +201,13 @@ def build_chunks(sections: List[Dict[str, List[int]]],
             demoted.extend(s["tr"])
             continue
         tr_ids = sorted(s["tr"])
-        chunks.append({
-            "tr_ids": tr_ids,
-            "en_ids": sorted(s["en"]),
-            "text": " ".join(tr_sentences[j - 1].strip() for j in tr_ids),
-        })
+        text = " ".join(tr_sentences[j - 1].strip() for j in tr_ids).strip()
+        if text:
+            chunks.append({
+                "tr_ids": tr_ids,
+                "en_ids": sorted(s["en"]),
+                "text": text,
+            })
 
     loose = sorted(set(unmatched_tr) | set(demoted))
     run: List[int] = []
@@ -214,10 +216,14 @@ def build_chunks(sections: List[Dict[str, List[int]]],
             run.append(j)
         else:
             if run:
-                chunks.append(_unsync_chunk(run, tr_sentences))
+                chunk = _unsync_chunk(run, tr_sentences)
+                if chunk["text"].strip():
+                    chunks.append(chunk)
             run = [j]
     if run:
-        chunks.append(_unsync_chunk(run, tr_sentences))
+        chunk = _unsync_chunk(run, tr_sentences)
+        if chunk["text"].strip():
+            chunks.append(chunk)
 
     chunks.sort(key=lambda c: c["tr_ids"][0])
     return chunks
@@ -263,11 +269,17 @@ def build_pieces(sections: List[Dict[str, List[int]]],
         tr_ids = sorted(s["tr"])
         win_a = min(en_entries[i - 1][0] for i in s["en"])
         win_b = max(en_entries[i - 1][1] for i in s["en"])
+        
+        # Filter out empty sentences in the section
         texts = [" ".join(tr_sentences[j - 1].split()) for j in tr_ids]
-        total = float(sum(len(t) for t in texts)) or 1.0
+        valid_pairs = [(j, t) for j, t in zip(tr_ids, texts) if t.strip()]
+        if not valid_pairs:
+            continue
+        
+        total = float(sum(len(t) for j, t in valid_pairs)) or 1.0
         cur = win_a
-        for k, (j, t) in enumerate(zip(tr_ids, texts)):
-            if k == len(tr_ids) - 1:
+        for k, (j, t) in enumerate(valid_pairs):
+            if k == len(valid_pairs) - 1:
                 nxt = win_b                     # last slice takes the rest
             else:
                 nxt = min(win_b, cur + (win_b - win_a) * (len(t) / total))
@@ -275,9 +287,11 @@ def build_pieces(sections: List[Dict[str, List[int]]],
             cur = nxt
 
     for j in sorted(set(unmatched_tr) | set(demoted)):
-        pieces.append({"tr_ids": [j],
-                       "text": " ".join(tr_sentences[j - 1].split()),
-                       "win": None})
+        t = " ".join(tr_sentences[j - 1].split())
+        if t.strip():
+            pieces.append({"tr_ids": [j],
+                           "text": t,
+                           "win": None})
 
     pieces.sort(key=lambda p: p["tr_ids"][0])
     return pieces
