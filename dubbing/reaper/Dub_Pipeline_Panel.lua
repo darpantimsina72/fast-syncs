@@ -2660,8 +2660,8 @@ local function start_dub_run()
   if SCRIPT_MODE == "have" then
     if not (_provided_text or ""):match("%S") then
       ui_set_banner("error",
-        "Script source is set to 'I already have the translation' — " ..
-        "paste the translated script first (or untick the checkbox).")
+        "Script is set to 'I have a script' — paste the translated script " ..
+        "first (or switch Script back to 'Translate with AI').")
       return false
     end
     provided_path = write_provided_script(audio, _provided_text)
@@ -5255,22 +5255,22 @@ end
 function V5.ui_source_inputs(ctx)
   local rv
 
-  -- Audio picker
-  rv, LAST_AUDIO = reaper.ImGui_InputText(ctx, 'English audio', LAST_AUDIO or '')
+  -- Audio: type a path, pick a file, or lift it off a project track. One
+  -- clean item → its source file; anything else is rendered to
+  -- <project>/DubSource/ first (v0.4.1).
+  V5.field(ctx, 'Source', 250)
+  rv, LAST_AUDIO = reaper.ImGui_InputText(ctx, '##audio', LAST_AUDIO or '')
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, 'Browse…') then
+  if reaper.ImGui_Button(ctx, 'File…') then
     local ok, picked = reaper.GetUserFileNameForRead(
       LAST_AUDIO or "", "Select English source audio", "")
     if ok and picked and picked ~= "" then LAST_AUDIO = picked end
   end
 
-  -- v0.4.1: or take the audio straight from a project track — no manual
-  -- browsing. One clean item → its source file; else the track is
-  -- rendered to <project>/DubSource/ and that wav is used.
   local n_src_tracks = reaper.CountTracks(0)
   if n_src_tracks > 0 then
     if _src_track_idx >= n_src_tracks then _src_track_idx = -1 end
-    local NO_TRACK = '(pick a track)'
+    local NO_TRACK = '(from track)'
     local items, cur = { NO_TRACK }, NO_TRACK
     for i = 0, n_src_tracks - 1 do
       local tr = reaper.GetTrack(0, i)
@@ -5281,8 +5281,9 @@ function V5.ui_source_inputs(ctx)
       items[#items + 1] = label
       if i == _src_track_idx then cur = label end
     end
-    reaper.ImGui_SetNextItemWidth(ctx, 300)
-    local tr_changed, picked = _ui_combo(ctx, 'From track', cur, items)
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, 140)
+    local tr_changed, picked = _ui_combo(ctx, '##srctrack', cur, items)
     if tr_changed then
       _src_track_idx = -1
       for i, label in ipairs(items) do
@@ -5291,7 +5292,7 @@ function V5.ui_source_inputs(ctx)
     end
     reaper.ImGui_SameLine(ctx)
     _ui_begin_disabled(ctx, _src_track_idx < 0)
-    if reaper.ImGui_Button(ctx, 'Use track') and _src_track_idx >= 0 then
+    if reaper.ImGui_Button(ctx, 'Use') and _src_track_idx >= 0 then
       local track = reaper.GetTrack(0, _src_track_idx)
       local path, why, rendered = audio_from_track(track)
       if path then
@@ -5306,22 +5307,84 @@ function V5.ui_source_inputs(ctx)
       end
     end
     _ui_end_disabled(ctx)
+    V5.hint(ctx, 'Pick a project track and press Use to take the English ' ..
+                 'audio from it. A track holding one clean item uses that ' ..
+                 "item's file; anything else is rendered to a wav in the " ..
+                 'project folder first.')
   end
 
-  -- Voice id and EL model moved into the ⚙ Settings section (v0.3).
-  _, LANGUAGE = _ui_combo(ctx, 'Language', LANGUAGE, LANGUAGES)
+  -- Voice id and EL model live in the settings window (v0.3 / v0.10).
+  V5.field(ctx, 'Language', 170)
+  local lang_changed
+  lang_changed, LANGUAGE = _ui_combo(ctx, '##lang', LANGUAGE, LANGUAGES)
+  if lang_changed then save_settings() end
+
+  -- v0.10: what used to be the "Paste Translation" tab. Same run either way —
+  -- only the source of the translated script differs — so it is a mode, not
+  -- a second entrance.
+  V5.label(ctx, 'Script')
+  local mode = V5.segmented(ctx, 'scriptmode', SCRIPT_MODE, {
+    { 'auto', 'Translate with AI',
+      'The engine transcribes the audio and runs the LLM translation ' ..
+      'chain to produce the script.' },
+    { 'have', 'I have a script',
+      'Paste your own translated script. The audio is still transcribed ' ..
+      'once, because the sync stages need its timings, but the LLM ' ..
+      'translation chain is skipped.' },
+  })
+  if mode ~= SCRIPT_MODE then
+    SCRIPT_MODE = mode
+    save_settings()
+  end
 
   -- v0.2: staged runs are the default — the pipeline pauses after the
-  -- translation chain for a side-by-side review. This restores v0.1.
-  local fr_changed
-  fr_changed, FULL_RUN = reaper.ImGui_Checkbox(ctx, 'Full run (no review)',
-                                               FULL_RUN)
-  if fr_changed then save_settings() end
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-  reaper.ImGui_Text(ctx, FULL_RUN and 'one-shot: no pause'
-                         or 'pauses after translation for review')
-  reaper.ImGui_PopStyleColor(ctx)
+  -- translation chain for a side-by-side review.
+  V5.label(ctx, 'Review')
+  local full = V5.segmented(ctx, 'runmode', FULL_RUN and 'full' or 'staged', {
+    { 'staged', 'Pause to check translation',
+      'The run stops after the translation chain and shows the English ' ..
+      'transcript beside the translation so you can fix it before paying ' ..
+      'for the voice stage.' },
+    { 'full', 'Run straight through',
+      'One shot, no pause. Nothing to approve — the dub is imported when ' ..
+      'the run finishes.' },
+  }) == 'full'
+  if full ~= FULL_RUN then
+    FULL_RUN = full
+    save_settings()
+  end
+
+  -- The paste box appears only in the mode that uses it.
+  if SCRIPT_MODE == 'have' then
+    reaper.ImGui_Dummy(ctx, 0, 4)
+    V5.label(ctx, 'Your script')
+    local pushedf = _push_font(ctx, 17)
+    local rv2, txt = reaper.ImGui_InputTextMultiline(
+      ctx, '##provided', _provided_text or '', -1, 150)
+    if pushedf then _pop_font(ctx) end
+    if rv2 then _provided_text = txt end
+
+    reaper.ImGui_SameLine(ctx, V5.LABEL_W)
+    if reaper.ImGui_SmallButton(ctx, 'Paste##prov') then
+      local t = reaper.ImGui_GetClipboardText(ctx)
+      if t and t:match("%S") then
+        _provided_text = t
+      else
+        ui_set_banner("warn", "The clipboard is empty — nothing to paste.")
+      end
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Clear##prov') then
+      _provided_text = ""
+    end
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+    reaper.ImGui_Text(ctx, string.format('%d paragraph(s), %d chars',
+      #split_paragraphs(_provided_text or ""), #(_provided_text or "")))
+    reaper.ImGui_PopStyleColor(ctx)
+    V5.hint(ctx, 'Separate paragraphs with one blank line — they are what ' ..
+                 'the matcher pairs against the transcript.')
+  end
 end
 
 -- ─── Setup phase ──────────────────────────────────────────
@@ -5432,114 +5495,11 @@ local function ui_phase_setup(ctx, on_start, on_cancel, busy)
     end
   end
 
-  reaper.ImGui_Dummy(ctx, 0, 4)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
-  reaper.ImGui_Text(ctx, string.format('%s   ·   %s   ·   %s',
-                                       LANGUAGE or '?',
-                                       EL_MODEL ~= '' and EL_MODEL or 'eleven_v3',
-                                       FULL_RUN and 'full run' or 'staged run'))
-  reaper.ImGui_PopStyleColor(ctx)
-
-  -- v0.5: Regen Audio and Track Voice moved to their own top-level tabs.
-  reaper.ImGui_Dummy(ctx, 0, 4)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
-  reaper.ImGui_TextWrapped(ctx,
-    'Fix single lines in the "Regen Audio" tab · re-voice a whole track in ' ..
-    'the "Track Voice" tab · sync dubbed clips in the "Auto Sync" tab.')
-  reaper.ImGui_PopStyleColor(ctx)
-
+  -- The run summary lives in the status bar now (v0.13) — nothing left to
+  -- repeat here.
   reaper.ImGui_PopStyleVar(ctx, 3)
 end
 
--- ─── Paste Translation tab (v0.5) ─────────────────────────
--- The old "I already have the translation" checkbox as a tab of its own:
--- pick the audio, paste the translated script, run. The engine skips the
--- LLM translation chain but still transcribes once (sync needs the
--- timings). The staged run still pauses so the pairing can be checked.
-function V5.ui_paste_tab(ctx, on_start)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(),  10.0, 10.0)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(),  8.0, 6.0)
-
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFFFFFFF)
-  local pushed = _push_font(ctx, 22)
-  reaper.ImGui_Text(ctx, 'Paste Translation')
-  if pushed then _pop_font(ctx) end
-  reaper.ImGui_PopStyleColor(ctx)
-
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-  reaper.ImGui_Text(ctx,
-    'Your script  →  Match  →  TTS  →  Synced import   (no LLM translation)')
-  reaper.ImGui_PopStyleColor(ctx)
-
-  reaper.ImGui_Dummy(ctx, 0, 6)
-  _ui_render_banner(ctx)
-
-  -- v0.7: same per-project history as the Full Pipeline tab.
-  V5.ui_history(ctx)
-
-  V5.ui_source_inputs(ctx)
-
-  reaper.ImGui_Dummy(ctx, 0, 4)
-  reaper.ImGui_Text(ctx, 'Translated script')
-  local pushedf = _push_font(ctx, 17)
-  local rv2, txt = reaper.ImGui_InputTextMultiline(
-    ctx, '##provided', _provided_text or '', -1, 180)
-  if pushedf then _pop_font(ctx) end
-  if rv2 then _provided_text = txt end
-  if reaper.ImGui_SmallButton(ctx, '📥 Paste from clipboard##prov') then
-    local t = reaper.ImGui_GetClipboardText(ctx)
-    if t and t:match("%S") then
-      _provided_text = t
-    else
-      ui_set_banner("warn", "The clipboard is empty — nothing to paste.")
-    end
-  end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_SmallButton(ctx, 'Clear##prov') then
-    _provided_text = ""
-  end
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-  reaper.ImGui_Text(ctx, string.format('%d paragraph(s), %d chars',
-    #split_paragraphs(_provided_text or ""), #(_provided_text or "")))
-  reaper.ImGui_PopStyleColor(ctx)
-  _grey_hint(ctx,
-    'Separate paragraphs with one blank line. The staged run still ' ..
-    'pauses so you can check the pairing against the English transcript. ' ..
-    'The audio is transcribed once — the sync stages need the timings.')
-
-  reaper.ImGui_Dummy(ctx, 0, 8)
-  reaper.ImGui_Separator(ctx)
-  reaper.ImGui_Dummy(ctx, 0, 4)
-
-  local missing = {}
-  if (LAST_AUDIO or '') == '' then
-    missing[#missing + 1] = 'English audio file'
-  end
-  if not (_provided_text or ''):match('%S') then
-    missing[#missing + 1] = 'translated script (paste it above)'
-  end
-
-  local disabled = (#missing > 0)
-  _ui_begin_disabled(ctx, disabled)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x2A9945FF)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x44CC55FF)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x119911FF)
-  if reaper.ImGui_Button(ctx, '▶  Dub with this script', 240, 40) then
-    on_start()
-  end
-  reaper.ImGui_PopStyleColor(ctx, 3)
-  _ui_end_disabled(ctx)
-
-  if disabled then
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
-    reaper.ImGui_TextWrapped(ctx, 'Missing: ' .. table.concat(missing, ', '))
-    reaper.ImGui_PopStyleColor(ctx)
-  end
-
-  reaper.ImGui_PopStyleVar(ctx, 3)
-end
 
 -- ─── Settings tab (v0.5) ──────────────────────────────────
 -- LLM + TTS keys (the old ⚙ collapsible), the Advanced python override,
@@ -6356,21 +6316,12 @@ local function main()
       -- independent of the dub run and of which tab is showing.
       if V5.SYNC then V5.SYNC.poll() end
 
-      -- v0.5: the tab a run starts from decides the script source — the
-      -- Full Pipeline tab always translates with the LLM, the Paste
-      -- Translation tab always uses the pasted script.
-      local function start_full_pipeline()
-        SCRIPT_MODE = "auto"
-        start_dub_run()
-      end
-      local function start_paste_run()
-        SCRIPT_MODE = "have"
-        start_dub_run()
-      end
-
+      -- v0.13: the Script control on the Dub tab decides where the translated
+      -- script comes from, so there is nothing left for the caller to
+      -- override — SCRIPT_MODE is already what the user picked.
       local function render_phase()
         if _ui_phase == "setup" then
-          ui_phase_setup(_ui_ctx, start_full_pipeline, close_window)
+          ui_phase_setup(_ui_ctx, start_dub_run, close_window)
         elseif _ui_phase == "running" then
           local elapsed = os.time() - _poll_start_time
           ui_phase_running(_ui_ctx, elapsed)
@@ -6398,32 +6349,7 @@ local function main()
       if reaper.ImGui_BeginTabBar
          and reaper.ImGui_BeginTabBar(_ui_ctx, '##tabs') then
         if reaper.ImGui_BeginTabItem(_ui_ctx, '  Dub  ') then
-          if _ui_phase == "setup" then
-            -- Where the translated script comes from decides which entrance
-            -- draws below — the two run paths themselves are unchanged.
-            reaper.ImGui_Dummy(_ui_ctx, 0, 4)
-            V5.label(_ui_ctx, 'Script')
-            local mode = V5.segmented(_ui_ctx, 'scriptmode', SCRIPT_MODE, {
-              { 'auto', 'AI translation',
-                'The pipeline transcribes the audio and translates it with ' ..
-                'the LLM — the full run.' },
-              { 'have', 'I have a script',
-                'Skip the LLM translation: paste the translated script and ' ..
-                'the run matches, synthesizes and syncs it.' },
-            })
-            if mode ~= SCRIPT_MODE then
-              SCRIPT_MODE = mode
-              save_settings()
-            end
-            reaper.ImGui_Dummy(_ui_ctx, 0, 2)
-            if SCRIPT_MODE == 'have' then
-              V5.ui_paste_tab(_ui_ctx, start_paste_run)
-            else
-              ui_phase_setup(_ui_ctx, start_full_pipeline, close_window)
-            end
-          else
-            render_phase()
-          end
+          render_phase()
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
         if reaper.ImGui_BeginTabItem(_ui_ctx, '  Sync  ') then
