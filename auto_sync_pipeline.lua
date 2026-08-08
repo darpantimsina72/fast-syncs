@@ -1177,26 +1177,31 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(),    8.0, 6.0)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_GrabRounding(),    6.0)
 
-  -- Hero header: gradient accent bar + title + tagline
-  reaper.ImGui_Dummy(ctx, 0, 4)
-  if reaper.ImGui_GetWindowDrawList and reaper.ImGui_DrawList_AddRectFilledMultiColor then
-    local dl = reaper.ImGui_GetWindowDrawList(ctx)
-    local cx, cy = reaper.ImGui_GetCursorScreenPos(ctx)
-    local cw = reaper.ImGui_GetContentRegionAvail(ctx)
-    pcall(reaper.ImGui_DrawList_AddRectFilledMultiColor, dl,
-      cx, cy, cx + cw, cy + 3,
-      0x55AAFFFF, 0x9966FFFF, 0x9966FFFF, 0x55AAFFFF)
-  end
-  reaper.ImGui_Dummy(ctx, 0, 6)
+  -- Hero header: gradient accent bar + title + tagline. Standalone only —
+  -- embedded in the dub panel (v0.10) the window already has a header row and
+  -- a tab saying "Sync", so a second 22px title just pushed the first control
+  -- below the fold.
+  if not EMBED then
+    reaper.ImGui_Dummy(ctx, 0, 4)
+    if reaper.ImGui_GetWindowDrawList and reaper.ImGui_DrawList_AddRectFilledMultiColor then
+      local dl = reaper.ImGui_GetWindowDrawList(ctx)
+      local cx, cy = reaper.ImGui_GetCursorScreenPos(ctx)
+      local cw = reaper.ImGui_GetContentRegionAvail(ctx)
+      pcall(reaper.ImGui_DrawList_AddRectFilledMultiColor, dl,
+        cx, cy, cx + cw, cy + 3,
+        0x55AAFFFF, 0x9966FFFF, 0x9966FFFF, 0x55AAFFFF)
+    end
+    reaper.ImGui_Dummy(ctx, 0, 6)
 
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFFFFFFF)
-  if _ui_font then pcall(reaper.ImGui_PushFont, ctx, _ui_font, 22) end
-  reaper.ImGui_Text(ctx, 'Auto Sync Pipeline')
-  if _ui_font then pcall(reaper.ImGui_PopFont, ctx) end
-  reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFFFFFFF)
+    if _ui_font then pcall(reaper.ImGui_PushFont, ctx, _ui_font, 22) end
+    reaper.ImGui_Text(ctx, 'Auto Sync Pipeline')
+    if _ui_font then pcall(reaper.ImGui_PopFont, ctx) end
+    reaper.ImGui_PopStyleColor(ctx)
+  end
 
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-  reaper.ImGui_Text(ctx, 'Collect  →  AI Match  →  Place items on the timeline')
+  reaper.ImGui_Text(ctx, 'Collect  →  AI match  →  Place items on the timeline')
   reaper.ImGui_PopStyleColor(ctx)
 
   reaper.ImGui_Dummy(ctx, 0, 8)
@@ -1246,16 +1251,30 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_HeaderHovered(), 0x3A4A66FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_HeaderActive(),  0x4A5A77FF)
 
-  -- ── Section: Tracks & Mode ────────────────────────────
+  -- ── Section: Tracks ───────────────────────────────────
+  -- v0.10: embedded, this is the ONLY section left, so it renders bare — a
+  -- collapsing header around the one thing a tab contains is just a lid.
   local tracks_filled = (TRACK_VO_NAME ~= '' and TRACK_DUB_NAME ~= '')
-  local tracks_open = reaper.ImGui_CollapsingHeader(ctx, '  Tracks & Mode')
-  _status_dot(tracks_filled, false)
+  local tracks_open = EMBED
+  if not EMBED then
+    tracks_open = reaper.ImGui_CollapsingHeader(ctx, '  Tracks & Mode')
+    _status_dot(tracks_filled, false)
+  end
   if tracks_open then
-    reaper.ImGui_Indent(ctx, 12)
+    if not EMBED then reaper.ImGui_Indent(ctx, 12) end
     local rv
-    rv, TRACK_VO_NAME  = reaper.ImGui_InputText(ctx, 'VO track',  TRACK_VO_NAME  or '')
-    rv, TRACK_DUB_NAME = reaper.ImGui_InputText(ctx, 'Dub track', TRACK_DUB_NAME or '')
-    _, DUB_LANGUAGE = _ui_combo(ctx, 'Language',   DUB_LANGUAGE,
+    reaper.ImGui_Text(ctx, 'VO track')
+    reaper.ImGui_SameLine(ctx, 104)
+    reaper.ImGui_SetNextItemWidth(ctx, 240)
+    rv, TRACK_VO_NAME  = reaper.ImGui_InputText(ctx, '##votrk', TRACK_VO_NAME  or '')
+    reaper.ImGui_Text(ctx, 'Dub track')
+    reaper.ImGui_SameLine(ctx, 104)
+    reaper.ImGui_SetNextItemWidth(ctx, 240)
+    rv, TRACK_DUB_NAME = reaper.ImGui_InputText(ctx, '##dubtrk', TRACK_DUB_NAME or '')
+    reaper.ImGui_Text(ctx, 'Language')
+    reaper.ImGui_SameLine(ctx, 104)
+    reaper.ImGui_SetNextItemWidth(ctx, 120)
+    _, DUB_LANGUAGE = _ui_combo(ctx, '##dublang', DUB_LANGUAGE,
         { 'hi','ne','ta','te','bn','mr','gu','kn','ml' })
     -- Both AI steps are locked by design:
     --   Transcription (audio → text) = ElevenLabs, always.
@@ -1263,10 +1282,12 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
     --   duration/hybrid fallback).
     MATCH_MODE   = "gemini"
     ASR_PROVIDER = "elevenlabs"
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-    reaper.ImGui_Text(ctx, 'Transcribe: ElevenLabs   ·   Match: Gemini (semantic, no fallback)')
-    reaper.ImGui_PopStyleColor(ctx)
-    reaper.ImGui_Unindent(ctx, 12)
+    if not EMBED then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+      reaper.ImGui_Text(ctx, 'Transcribe: ElevenLabs   ·   Match: Gemini (semantic, no fallback)')
+      reaper.ImGui_PopStyleColor(ctx)
+      reaper.ImGui_Unindent(ctx, 12)
+    end
     reaper.ImGui_Dummy(ctx, 0, 4)
   end
 
@@ -1296,49 +1317,27 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
     conn_ok = false
   end
 
-  -- Open this section by default the first time — it's the primary setup.
-  if reaper.ImGui_SetNextItemOpen then
-    reaper.ImGui_SetNextItemOpen(ctx, true,
-      reaper.ImGui_Cond_Once and reaper.ImGui_Cond_Once() or 0)
+  -- v0.10: embedded, there is NO connection section. The settings window owns
+  -- every credential and writes them into this script's settings file, so the
+  -- old read-only mirror was a whole collapsible section whose only content
+  -- was a copy of values plus a note saying they live somewhere else. The
+  -- mode is already applied by load_settings / reload_shared_credentials and
+  -- again before a run; all that stays here is the Start gate below, which now
+  -- names the settings window when something is missing.
+  local conn_open = false
+  if not EMBED then
+    -- Open by default the first time — standalone, it's the primary setup.
+    if reaper.ImGui_SetNextItemOpen then
+      reaper.ImGui_SetNextItemOpen(ctx, true,
+        reaper.ImGui_Cond_Once and reaper.ImGui_Cond_Once() or 0)
+    end
+    conn_open = reaper.ImGui_CollapsingHeader(ctx, '  Connection')
+    _status_dot(conn_ok, false)
   end
-  local conn_open = reaper.ImGui_CollapsingHeader(ctx, '  Connection')
-  _status_dot(conn_ok, false)
   if conn_open then
     reaper.ImGui_Indent(ctx, 12)
     local rv
 
-    -- Embedded in the dub panel, the Settings tab owns every credential: it
-    -- writes them into this script's settings file on save, and there is no
-    -- second copy to keep in step. Show what arrived, read-only, and point at
-    -- the one place to change it. Standalone (own action) keeps the fields.
-    if EMBED then
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-      reaper.ImGui_TextWrapped(ctx, 'Mode : ' .. CONN_LABELS[_conn_idx(CONN_MODE)])
-      local detail
-      if CONN_MODE == 'server' then
-        detail = 'server ' .. ((SERVER_URL ~= '') and SERVER_URL or '(not set)') ..
-                 '  ·  token ' .. ((API_TOKEN ~= '') and _mask_key(API_TOKEN) or '(not set)')
-      elseif CONN_MODE == 'studio' then
-        detail = 'gemini key ' .. ((GEMINI_KEY ~= '') and _mask_key(GEMINI_KEY) or '(not set)')
-      elseif CONN_MODE == 'vertex' then
-        detail = 'vertex json ' ..
-                 ((VERTEX_KEY_PATH ~= '') and VERTEX_KEY_PATH or
-                  (has_vertex_file and '(found next to the script)' or '(not set)'))
-      else
-        detail = 'gateway ' .. ((GEMINI_BASE_URL ~= '') and GEMINI_BASE_URL or '(not set)') ..
-                 '  ·  key ' .. ((GEMINI_KEY ~= '') and _mask_key(GEMINI_KEY) or '(not set)')
-      end
-      if CONN_MODE ~= 'server' then
-        detail = detail .. '\nmodel ' .. ((GEMINI_MODEL ~= '') and GEMINI_MODEL or '(not set)') ..
-                 '  ·  ElevenLabs key ' ..
-                 ((ELEVENLABS_KEY ~= '') and _mask_key(ELEVENLABS_KEY) or '(not set)')
-      end
-      reaper.ImGui_TextWrapped(ctx, detail)
-      reaper.ImGui_TextWrapped(ctx, 'Keys come from the Settings tab — change ' ..
-                                    'them there and they apply here too.')
-      reaper.ImGui_PopStyleColor(ctx)
-
-    else
     local cur_label = CONN_LABELS[_conn_idx(CONN_MODE)]
     local changed, new_label = _ui_combo(ctx, 'Mode', cur_label, CONN_LABELS)
     if changed then
@@ -1391,7 +1390,6 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
     end
 
     rv, _ui_show_keys = reaper.ImGui_Checkbox(ctx, 'Show keys', _ui_show_keys)
-    end   -- EMBED / standalone credential UI
 
     reaper.ImGui_Unindent(ctx, 12)
     reaper.ImGui_Dummy(ctx, 0, 4)
@@ -1410,7 +1408,7 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
     if SCRIPT_TEXT and SCRIPT_TEXT ~= '' then
       reaper.ImGui_Text(ctx, string.format('%d chars · paragraphs preserved', #SCRIPT_TEXT))
     else
-      reaper.ImGui_Text(ctx, 'Paste dubbing script here (improves Gemini matching).')
+      reaper.ImGui_Text(ctx, 'Paste the dubbing script here — it improves matching.')
     end
     reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_Unindent(ctx, 12)
@@ -1471,30 +1469,36 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
 
   if _disabled then
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
-    reaper.ImGui_TextWrapped(ctx, 'Missing: ' .. table.concat(missing, ', '))
+    -- v0.10: embedded, the credential half of this list is not editable here —
+    -- say where it IS editable instead of listing fields the user cannot find.
+    reaper.ImGui_TextWrapped(ctx, 'Missing: ' .. table.concat(missing, ', ')
+      .. (EMBED and '   (keys and model: ⚙ Settings)' or ''))
     reaper.ImGui_PopStyleColor(ctx)
   end
 
-  -- Footer summary chips
-  reaper.ImGui_Dummy(ctx, 0, 8)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
-  local sep = '   ·   '
-  local backend_label
-  if     CONN_MODE == 'server'  then backend_label = 'server: ' .. (SERVER_URL ~= '' and SERVER_URL or '?')
-  elseif CONN_MODE == 'studio'  then backend_label = 'AI Studio'
-  elseif CONN_MODE == 'vertex'  then backend_label = 'Vertex'
-  elseif CONN_MODE == 'gateway' then backend_label = 'gateway: ' .. (GEMINI_BASE_URL ~= '' and GEMINI_BASE_URL or '?')
-  else backend_label = '?' end
-  local chips = string.format('%s%s%s%s%s%s%s',
-    DUB_LANGUAGE or '?', sep, GEMINI_MODEL or '?', sep,
-    backend_label, sep, ASR_PROVIDER or '?')
-  reaper.ImGui_Text(ctx, chips)
-  reaper.ImGui_PopStyleColor(ctx)
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_SmallButton(ctx, 'Update...') then run_updater() end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx,
-      'Get the latest version (runs update.bat / update.sh in a terminal).')
+  -- Footer summary chips. Embedded, the dub panel's status bar carries the
+  -- summary for the whole window and its About pane owns the updater.
+  if not EMBED then
+    reaper.ImGui_Dummy(ctx, 0, 8)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
+    local sep = '   ·   '
+    local backend_label
+    if     CONN_MODE == 'server'  then backend_label = 'server: ' .. (SERVER_URL ~= '' and SERVER_URL or '?')
+    elseif CONN_MODE == 'studio'  then backend_label = 'AI Studio'
+    elseif CONN_MODE == 'vertex'  then backend_label = 'Vertex'
+    elseif CONN_MODE == 'gateway' then backend_label = 'gateway: ' .. (GEMINI_BASE_URL ~= '' and GEMINI_BASE_URL or '?')
+    else backend_label = '?' end
+    local chips = string.format('%s%s%s%s%s%s%s',
+      DUB_LANGUAGE or '?', sep, GEMINI_MODEL or '?', sep,
+      backend_label, sep, ASR_PROVIDER or '?')
+    reaper.ImGui_Text(ctx, chips)
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Update...') then run_updater() end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx,
+        'Get the latest version (runs update.bat / update.sh in a terminal).')
+    end
   end
 
   -- Bundled dubbing app (dubbing/): register its panel as an action on
