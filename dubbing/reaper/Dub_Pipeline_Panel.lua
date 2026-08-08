@@ -126,7 +126,15 @@ local DONE_JSON   = STATUS_DIR .. SEP .. "engine_done.json"
 -- paths it launched with).
 -- NOTE: every v0.5 addition lives in this ONE table — the file is close
 -- to Lua's 200-upvalue/local limit for the main chunk.
-local V5 = { STATUS_ROOT = STATUS_DIR, run_project = nil }
+local V5 = {
+  STATUS_ROOT = STATUS_DIR, run_project = nil,
+  -- v0.13 UI state. Declared here because load_settings() runs long before
+  -- the UI helpers are defined and must not have its values overwritten.
+  adv           = {},        -- "Show advanced" reveal key -> true
+  settings_open = false,     -- the settings window (own window, not a tab)
+  settings_pane = "connection",
+  tool          = "tts",     -- Tools tab: tts | regen | voice
+}
 
 function V5.project_status_slug()
   local _, projfn = reaper.EnumProjects(-1, "")
@@ -434,6 +442,16 @@ local function load_settings()
   if v == "auto" or v == "have" then SCRIPT_MODE = v end
   local b = json_field(content, "full_run")
   if type(b) == "boolean" then FULL_RUN = b end
+  -- v0.13 UI state: reveals stay open across launches, and the Tools/Settings
+  -- panes reopen where they were left. Purely cosmetic — an absent or
+  -- hand-mangled value just falls back to the defaults in the V5 table.
+  v = jval("advanced_open")
+  if v and v ~= "" then
+    for key in v:gmatch("[^,]+") do V5.adv[key] = true end
+  end
+  v = jval("tool")
+  if v == "tts" or v == "regen" or v == "voice" then V5.tool = v end
+  v = jval("settings_pane") if v and v ~= "" then V5.settings_pane = v end
 
   -- Coerce a legacy/hand-edited language back into the supported set.
   local ok = false
@@ -459,6 +477,17 @@ local function save_settings()
   f:write(string.format('  "full_run": %s,\n',     FULL_RUN and 'true' or 'false'))
   f:write(string.format('  "script_mode": "%s",\n', je(SCRIPT_MODE)))
   f:write(string.format('  "vc_voice_id": "%s",\n', je(VC_VOICE_ID)))
+  -- v0.13 UI state: reveals stay open across launches for power users, and
+  -- the Tools/Settings panes reopen where they were left.
+  local adv_keys = {}
+  for key, on in pairs(V5.adv) do
+    if on then adv_keys[#adv_keys + 1] = key end
+  end
+  table.sort(adv_keys)
+  f:write(string.format('  "advanced_open": "%s",\n',
+                        je(table.concat(adv_keys, ","))))
+  f:write(string.format('  "tool": "%s",\n',          je(V5.tool)))
+  f:write(string.format('  "settings_pane": "%s",\n', je(V5.settings_pane)))
   f:write(string.format('  "last_audio": "%s"\n',  je(LAST_AUDIO)))
   f:write('}\n')
   f:close()
@@ -1279,6 +1308,122 @@ local function _grey_hint(ctx, text)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
   reaper.ImGui_TextWrapped(ctx, text)
   reaper.ImGui_PopStyleColor(ctx)
+end
+
+-- ─── v0.13 form kit ─────────────────────────────────────────────────────────
+-- The drawing primitives the whole panel is built from. Explanatory prose
+-- moves into (?) tooltips so a form reads as a form; _grey_hint stays for the
+-- things that must be seen without hovering (errors, blocking warnings).
+--
+-- V5 fields, not locals: the main chunk is AT Lua's 200-local limit.
+-- ---------------------------------------------------------------------------
+
+V5.LABEL_W = 104          -- label column width, px (Indic labels are wide)
+
+-- ImGui_SetTooltip does not wrap, so wrap by hand at ~62 columns.
+function V5.wrap(text, cols)
+  cols = cols or 62
+  local out, line = {}, ""
+  for word in tostring(text or ""):gmatch("%S+") do
+    if line == "" then
+      line = word
+    elseif #line + #word + 1 <= cols then
+      line = line .. " " .. word
+    else
+      out[#out + 1] = line
+      line = word
+    end
+  end
+  if line ~= "" then out[#out + 1] = line end
+  return table.concat(out, "\n")
+end
+
+-- A dim (?) after the previous control, explaining it on hover. This replaces
+-- the bulk of the old _grey_hint calls — errors and blocking warnings stay
+-- inline, because a warning you have to hover to find is not a warning.
+function V5.hint(ctx, text)
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
+  reaper.ImGui_Text(ctx, '(?)')
+  reaper.ImGui_PopStyleColor(ctx)
+  if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+    reaper.ImGui_SetTooltip(ctx, V5.wrap(text))
+  end
+end
+
+-- Label in a fixed column. Everything after it on the row starts at the same
+-- x, which is what makes a stack of rows read as a form instead of as ImGui's
+-- default ragged right-hand labels.
+function V5.label(ctx, text)
+  reaper.ImGui_Text(ctx, text)
+  reaper.ImGui_SameLine(ctx, V5.LABEL_W)
+end
+
+-- V5.label plus a width for the next input. The widget itself is given a
+-- '##id' label so ImGui does not draw a second one to its right.
+function V5.field(ctx, label, width)
+  V5.label(ctx, label)
+  reaper.ImGui_SetNextItemWidth(ctx, width or 260)
+end
+
+-- The reveal toggles write immediately (they are one-click state, and losing
+-- them on a crash would be silently annoying).
+function V5.save_adv() save_settings() end
+
+-- One-line reveal for the fields most people never touch. Returns true when
+-- the group is open; the state persists (see save_settings).
+function V5.advanced(ctx, key, label)
+  local open = V5.adv[key] and true or false
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  if reaper.ImGui_SmallButton(ctx,
+      (open and '▾  ' or '▸  ') .. (label or 'Show advanced')
+      .. '##adv' .. key) then
+    open = not open
+    V5.adv[key] = open or nil
+    V5.save_adv()
+  end
+  reaper.ImGui_PopStyleColor(ctx)
+  return open
+end
+
+-- Segmented button row: the flat replacement for "one tab per mode" and for
+-- checkboxes whose two states both need a name. *opts* is
+-- { {value, label, tooltip}, … }; returns the (possibly new) value.
+function V5.segmented(ctx, key, cur, opts)
+  local new = cur
+  for i, o in ipairs(opts) do
+    if i > 1 then reaper.ImGui_SameLine(ctx, 0, 4) end
+    local on = (o[1] == cur)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),
+                               on and 0x3A5A8CFF or 0x2A2F38FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(),
+                               on and 0x4A6A9CFF or 0x3A4048FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),
+                               on and 0x2A4A7CFF or 0x22262CFF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(),
+                               on and 0xFFFFFFFF or 0x99A3B0FF)
+    if reaper.ImGui_Button(ctx, o[2] .. '##seg' .. key .. i) then new = o[1] end
+    reaper.ImGui_PopStyleColor(ctx, 4)
+    if o[3] and reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+      reaper.ImGui_SetTooltip(ctx, V5.wrap(o[3]))
+    end
+  end
+  return new
+end
+
+-- Section heading inside a settings pane or tab body.
+function V5.heading(ctx, text, sub)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xEEEEEEFF)
+  local pushed = _push_font(ctx, 17)
+  reaper.ImGui_Text(ctx, text)
+  if pushed then _pop_font(ctx) end
+  reaper.ImGui_PopStyleColor(ctx)
+  if sub then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+    reaper.ImGui_Text(ctx, sub)
+    reaper.ImGui_PopStyleColor(ctx)
+  end
+  reaper.ImGui_Dummy(ctx, 0, 6)
 end
 
 -- Language display name → Unicode script, to pick an Indic-capable font.
