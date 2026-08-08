@@ -162,11 +162,11 @@ V5.set_status_paths()
 -- llm.py::_model_for(). sync_match is the odd one out: Auto Sync reads its
 -- model from sync_pipeline_settings.json, so the panel mirrors it there.
 V5.MODEL_ROLES = {
-  { "translate",  "Translate",        "Full Pipeline steps 1-3" },
+  { "translate",  "Translate",        "Dub steps 1-3" },
   { "emotion",    "Emotion tags",     "step 4, before TTS" },
   { "match",      "Dub matching",     "script to English lines" },
   { "mapping",    "Legacy sync map",  "only in legacy sync mode" },
-  { "sync_match", "Auto Sync match",  "the Auto Sync tab" },
+  { "sync_match", "Auto Sync match",  "the Sync tab" },
 }
 V5.model_roles = { translate = "", emotion = "", match = "", mapping = "",
                    sync_match = "" }
@@ -2371,9 +2371,9 @@ function V5.autorun_setup_if_needed()
     "Automatic setup has started in a separate terminal window.\n\n" ..
     "It installs (or repairs) the dubbing engine's Python packages\n" ..
     "and ffmpeg automatically (takes a few minutes, one time only).\n\n" ..
-    "You can keep using this panel — the Auto Sync tab works right\n" ..
-    "away. When the terminal says 'Setup complete', the Dubbing tabs\n" ..
-    "are ready too.",
+    "You can keep using this panel — the Sync tab works right\n" ..
+    "away. When the terminal says 'Setup complete', the Dub tab\n" ..
+    "is ready too.",
     "Dub Pipeline — automatic setup", 0)
 end
 
@@ -2393,7 +2393,7 @@ function V5.load_sync()
   V5.sync_tried = true
   if not file_exists(V5.sync_path) then
     V5.sync_err = "auto_sync_pipeline.lua was not found at:\n" ..
-                  V5.sync_path .. "\n\nThe Auto Sync tab needs the fast-syncs " ..
+                  V5.sync_path .. "\n\nThe Sync tab needs the fast-syncs " ..
                   "install (this dubbing app lives in its dubbing/ subfolder). " ..
                   "If you installed dubbing standalone, run the Auto Sync tool " ..
                   "from its own action instead."
@@ -2443,7 +2443,8 @@ local function preflight_engine(need_llm)
       ui_set_banner("error",
         "This run needs the translation LLM, but its credentials are " ..
         "incomplete:\n" .. why ..
-        "\n\nFix it in the Settings tab, then press 'Test connection'.")
+        "\n\nFix it in the settings window (⚙ in the header), then press " ..
+        "'Test connection'.")
       return nil
     end
   end
@@ -3481,7 +3482,7 @@ local function _finish_run(exit_code)
         V5.voice_cache_save()
         ui_set_banner("info", string.format(
           "Fetched %d ElevenLabs voices for %s — pick one in any Voice list " ..
-          "(Regen Audio, Track Voice, Text to Speech, ⚙ Settings).",
+          "(the Tools tab, or ⚙ Settings → Voices).",
           #voices, LANGUAGE))
       else
         ui_set_banner("warn",
@@ -4635,8 +4636,8 @@ function V5.start_tts()
   local voice = ((V5.tts_voice or "") ~= "" and V5.tts_voice) or VOICE_ID
   if not (voice or ""):match("%S") then
     ui_set_banner("error",
-      "No voice selected. Bookmark one here, or fetch the catalogue in the " ..
-      "⚙ Settings tab.")
+      "No voice selected. Bookmark one here, or fetch the catalogue in " ..
+      "⚙ Settings → Voices.")
     return false
   end
   -- Audio lands next to the project, like DubSource/ and VoiceChange/ do.
