@@ -88,12 +88,21 @@ window — it runs the updater for you in a terminal. Or run it yourself:
 - **Windows:** double-click `update.bat`
 - **macOS:** `bash update.sh`
 
+**You now update to released versions, not to whatever was committed last.**
+The updater downloads the newest published
+[release](https://github.com/darpantimsina72/fast-syncs/releases) rather than
+the tip of the `main` branch, so you only ever move to a version that was
+deliberately shipped.
+
 The updater handles both install styles:
 
-- **git clone** → `git pull` the latest version.
-- **ZIP download** → downloads the latest ZIP from GitHub automatically and
-  copies it over the folder. Your settings (`sync_pipeline_settings.json`),
-  the `venv`, and the `.direct-mode` marker are untouched.
+- **ZIP download** → downloads the newest release's `fast-syncs.zip`
+  automatically and copies it over the folder. Your settings
+  (`sync_pipeline_settings.json`), the `venv`, and the `.direct-mode` marker
+  are untouched.
+- **git clone** → `git pull` on whatever branch your clone is on. If you
+  cloned before releases existed you are on `main` and will keep getting
+  development builds — switch once with `git checkout production`.
 
 Either way it then refreshes the Python dependencies in `venv` (including the
 direct-mode extras, if you installed with `--direct`) **and sets up the
@@ -106,6 +115,22 @@ button/action you always used now opens the merged one-window app.
 If the automatic ZIP download ever fails (offline / repo moved), fall back to
 manual: re-download the ZIP and unzip it **over** the old folder so your
 settings and `venv` carry over.
+
+### Going back to a previous version
+
+If an update breaks something, download the `fast-syncs.zip` of an earlier
+release from the
+[Releases page](https://github.com/darpantimsina72/fast-syncs/releases) and
+unzip it **over** your folder. Your settings and `venv` are preserved, exactly
+as with a normal update.
+
+To pin the updater itself to a specific release:
+
+```bash
+FAST_SYNCS_ZIP_URL=https://github.com/darpantimsina72/fast-syncs/releases/download/v0.13.0/fast-syncs.zip bash update.sh
+```
+
+(On Windows, `set FAST_SYNCS_ZIP_URL=…` before running `update.bat`.)
 
 **If the Update… button seems to do nothing** (reported on some Macs and
 Windows PCs): the button opens a terminal to run the updater. As of v0.5 it
@@ -262,3 +287,14 @@ to AI Studio returns HTTP 400 "API key not valid".
 - [ReaImGui](https://github.com/cfillion/reaimgui) extension (free, via ReaPack) — the UI runs on it
 - Python 3.9 or newer (3.11+ recommended)
 - For direct mode only: outbound HTTPS to your chosen AI provider
+
+---
+
+## For maintainers
+
+`main` is where development happens; **`production` is what users run.**
+Merging `main` into `production` is the act of shipping — it tags the commit
+and publishes a GitHub Release automatically.
+
+See **[RELEASING.md](RELEASING.md)** for how to cut a release, how to roll one
+back, and what adopting ReaPack would add.
