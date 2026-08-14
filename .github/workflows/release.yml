@@ -132,8 +132,65 @@ jobs:
             esac
           done
           [ "$missing" -eq 0 ] || exit 1
+
+          # ── The file manifest ──────────────────────────────────────────
+          # One repo-relative path per line: exactly what this release ships.
+          #
+          # A ZIP update overlays the new files onto the user's folder, which
+          # only ever ADDS and OVERWRITES. Without a record of what the last
+          # release contained, a file deleted or renamed upstream would stay on
+          # that user's disk forever — and a stale .py module can shadow new
+          # code, producing bugs that reproduce only for upgraded users and
+          # never on a fresh install. The updaters diff this manifest against
+          # the one the previous install left behind and delete the difference.
+          #
+          # Derived from the BUILT archive rather than from `git ls-files`, so
+          # it cannot drift from what the ZIP actually holds — the pathspec
+          # exclusions above and any .gitattributes export-ignore are already
+          # baked into the listing.
+          #
+          # Order matters. Directory entries (trailing "/") are dropped FIRST,
+          # which also disposes of the archive's own "fast-syncs-$version/"
+          # entry — strip the prefix before that and it would collapse into a
+          # blank line. A blank line is not cosmetic: Windows diffs the two
+          # manifests with `findstr /v /x /g:`, where an empty search string
+          # matches every line and would silently switch the whole cleanup off.
+          #
+          # Nothing here exits early on a pipe (unlike `grep -q`), so the
+          # SIGPIPE-under-pipefail trap described above does not apply.
+          manifest_dir="/tmp/manifest/fast-syncs-$version"
+          mkdir -p "$manifest_dir"
+          unzip -Z1 /tmp/fast-syncs.zip \
+            | sed '/\/$/d' \
+            | sed -n "s|^fast-syncs-$version/||p" \
+            | sed '/^[[:space:]]*$/d' \
+            | LC_ALL=C sort > "$manifest_dir/.fast-syncs-manifest"
+          entries="$(wc -l < "$manifest_dir/.fast-syncs-manifest" | tr -d ' ')"
+          # An empty manifest would tell every updater that this release ships
+          # nothing. The updaters refuse to act on one, but it must never get
+          # this far in the first place.
+          if [ "$entries" -eq 0 ]; then
+            echo "::error::Generated file manifest is empty — refusing to publish."
+            exit 1
+          fi
+          if grep -qE '^[[:space:]]*$' "$manifest_dir/.fast-syncs-manifest"; then
+            echo "::error::File manifest contains a blank line — refusing to publish."
+            exit 1
+          fi
+          # Added after the fact, so the manifest never has to list itself.
+          # The updaters treat its own name as undeletable.
+          ( cd /tmp/manifest && zip -q /tmp/fast-syncs.zip \
+              "fast-syncs-$version/.fast-syncs-manifest" )
+          listing="$(unzip -l /tmp/fast-syncs.zip)"
+          case "$listing" in
+            *"fast-syncs-$version/.fast-syncs-manifest"*) ;;
+            *) echo "::error::Manifest did not make it into the archive"; exit 1 ;;
+          esac
+
           count="$(printf '%s\n' "$listing" | tail -n 1 | awk '{print $2}')"
           echo "Archive: $(du -h /tmp/fast-syncs.zip | cut -f1), $count files" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "Manifest: $entries paths (drives update cleanup)" \
             >> "$GITHUB_STEP_SUMMARY"
 
       - name: Tag and publish
