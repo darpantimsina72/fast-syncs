@@ -2,8 +2,12 @@
 # Install into the project-local venv:  python3 -m venv venv && venv/bin/pip install -r requirements.txt
 # Nothing UI-related belongs here (no tkinter/matplotlib/sounddevice/opencv).
 numpy
-librosa
 pydub
+# NOTE: librosa was removed. It was used in exactly two places, both just
+# loading audio into an array, and pydub/ffmpeg (already required for the
+# ElevenLabs MP3 -> WAV step) does the same. It pulled in numba + llvmlite
+# + scipy: ~192 MB installed, and the reason the installers had to hunt for
+# a Python old enough to have prebuilt wheels for them.
 google-genai
 google-cloud-texttospeech
 google-auth
