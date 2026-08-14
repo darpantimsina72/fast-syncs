@@ -60,6 +60,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -75,13 +76,74 @@ STATUS_DIR = os.path.join(ENGINE_DIR, "status")
 LANGUAGES = ["Bengali", "Hindi", "Kannada", "Malayalam", "Tamil", "Telugu",
              "Gujarati", "Marathi", "Assamese", "Odia", "Nepali"]
 
+# Which hand-edited names are usable. custom_languages.json is read FOUR
+# times in total — here, in dub_engine.py, in pipeline/config.py, and by the
+# REAPER panel — each with its own stdlib-only reader so that argparse choices
+# exist before any heavy import. All four must agree on which names are valid,
+# or an entry accepted by one and dropped by another produces an "unknown
+# language" failure the user cannot explain.
+#
+# KEEP IN SYNC with:
+#     engine/dub_engine.py                 _LANG_NAME_OK
+#     engine/pipeline/config.py            _LANG_NAME_OK
+#     dubbing/reaper/Dub_Pipeline_Panel.lua  V5._is_safe_lang_name
+#
+# Letters, digits, space, - _ . ( ) and any non-ASCII character (so native
+# autonyms work). Shell metacharacters are all ASCII and all excluded; tabs
+# and newlines are excluded too. Names are validated, never rewritten — a
+# rewritten name would be a second spelling of the same entry.
+# NOTE the explicit \u0080 lower bound on the non-ASCII range: writing
+# "()-\U0010FFFF" makes ')' the START of a range running to the top of
+# Unicode, which quietly re-admits ';', '|' and other metacharacters.
+# Charset only -- length and edge-whitespace are checked in _lang_name_ok so
+# the rule stays readable and matches the Lua predicate exactly.
+_LANG_NAME_OK = re.compile("^[0-9A-Za-z \-_.()\u0080-\U0010FFFF]+$")
+
+
+# Unicode whitespace, rejected anywhere in a name. Mirrors
+# V5._has_unicode_space in Dub_Pipeline_Panel.lua, which matches the same
+# code points as UTF-8 byte sequences because Lua's %s is ASCII-only.
+_LANG_NAME_UNICODE_WS = re.compile(
+    "[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]")
+
+
+def _lang_name_ok(name: str) -> bool:
+    """True if *name* is usable EXACTLY as written. Never raises.
+
+    Mirrors V5._is_safe_lang_name in dubbing/reaper/Dub_Pipeline_Panel.lua.
+    The bound is 64 UTF-8 BYTES because that is what Lua's #s measures.
+
+    Edge whitespace is compared against ASCII whitespace ONLY -- the exact set
+    Lua's %s matches. Plain str.strip() would also strip U+00A0, U+2003 and
+    other Unicode spaces that Lua does not recognise, and the two sides would
+    then disagree about names starting with one.
+
+    Leading/trailing whitespace is rejected, not stripped: stripping is a
+    rewrite, and a rewritten name is a second spelling of the same entry.
+    """
+    if not isinstance(name, str) or not name:
+        return False
+    if name != name.strip(" \t\n\r\v\f"):
+        return False
+    if _LANG_NAME_UNICODE_WS.search(name):
+        return False
+    try:
+        if len(name.encode("utf-8")) > 64:
+            return False
+    except (UnicodeEncodeError, UnicodeError):
+        # Lone surrogate from a hand-edited "\udXXX" escape. json.load()
+        # hands these back happily; encoding them raises. Return False rather
+        # than propagating -- the caller in pipeline/config.py has no guard.
+        return False
+    return bool(_LANG_NAME_OK.match(name))
+
 try:
     with open(os.path.join(ENGINE_DIR, os.pardir, "config",
                            "custom_languages.json"), "r",
               encoding="utf-8") as _f:
         for _e in (json.load(_f).get("languages") or []):
-            _n = str((_e or {}).get("name") or "").strip()
-            if _n and _n not in LANGUAGES:
+            _n = str((_e or {}).get("name") or "")
+            if _lang_name_ok(_n) and _n not in LANGUAGES:
                 LANGUAGES.append(_n)
 except Exception:
     pass

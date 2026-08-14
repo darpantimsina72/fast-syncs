@@ -79,6 +79,7 @@ reported as a WARNING, not a failure.
 import argparse
 import json
 import os
+import re
 import sys
 import traceback
 import types
@@ -93,6 +94,52 @@ LANGUAGES = ["Bengali", "Hindi", "Kannada", "Malayalam", "Tamil", "Telugu",
              "Gujarati", "Marathi", "Assamese", "Odia", "Nepali"]
 
 
+# KEEP IN SYNC with run_dub.py, pipeline/config.py and
+# dubbing/reaper/Dub_Pipeline_Panel.lua (V5._is_safe_lang_name).
+# See run_dub.py for why all four readers carry the same rule.
+# Charset only -- length and edge-whitespace are checked in _lang_name_ok so
+# the rule stays readable and matches the Lua predicate exactly.
+_LANG_NAME_OK = re.compile("^[0-9A-Za-z \-_.()\u0080-\U0010FFFF]+$")
+
+
+# Unicode whitespace, rejected anywhere in a name. Mirrors
+# V5._has_unicode_space in Dub_Pipeline_Panel.lua, which matches the same
+# code points as UTF-8 byte sequences because Lua's %s is ASCII-only.
+_LANG_NAME_UNICODE_WS = re.compile(
+    "[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]")
+
+
+def _lang_name_ok(name: str) -> bool:
+    """True if *name* is usable EXACTLY as written. Never raises.
+
+    Mirrors V5._is_safe_lang_name in dubbing/reaper/Dub_Pipeline_Panel.lua.
+    The bound is 64 UTF-8 BYTES because that is what Lua's #s measures.
+
+    Edge whitespace is compared against ASCII whitespace ONLY -- the exact set
+    Lua's %s matches. Plain str.strip() would also strip U+00A0, U+2003 and
+    other Unicode spaces that Lua does not recognise, and the two sides would
+    then disagree about names starting with one.
+
+    Leading/trailing whitespace is rejected, not stripped: stripping is a
+    rewrite, and a rewritten name is a second spelling of the same entry.
+    """
+    if not isinstance(name, str) or not name:
+        return False
+    if name != name.strip(" \t\n\r\v\f"):
+        return False
+    if _LANG_NAME_UNICODE_WS.search(name):
+        return False
+    try:
+        if len(name.encode("utf-8")) > 64:
+            return False
+    except (UnicodeEncodeError, UnicodeError):
+        # Lone surrogate from a hand-edited "\udXXX" escape. json.load()
+        # hands these back happily; encoding them raises. Return False rather
+        # than propagating -- the caller in pipeline/config.py has no guard.
+        return False
+    return bool(_LANG_NAME_OK.match(name))
+
+
 def _custom_language_names():
     """Names from config/custom_languages.json (v0.7).
 
@@ -100,15 +147,24 @@ def _custom_language_names():
     choices before any heavy import, and a user-added language must be a
     valid choice or the run dies at the command line. pipeline/config.py
     reads the same file and merges the full entries into TTS_LANGUAGES.
+
+    Names that fail _LANG_NAME_OK are skipped, matching run_dub.py,
+    pipeline/config.py and the REAPER panel. See run_dub.py for why all four
+    readers carry the same rule.
     """
     path = os.path.join(ENGINE_DIR, os.pardir, "config",
                         "custom_languages.json")
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return [str(e.get("name") or "").strip()
-                for e in (data.get("languages") or [])
-                if isinstance(e, dict) and str(e.get("name") or "").strip()]
+        out = []
+        for e in (data.get("languages") or []):
+            if not isinstance(e, dict):
+                continue
+            name = str(e.get("name") or "")
+            if _lang_name_ok(name):
+                out.append(name)
+        return out
     except Exception:
         return []
 

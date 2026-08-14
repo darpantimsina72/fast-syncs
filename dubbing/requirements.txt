@@ -9,6 +9,15 @@ google-cloud-texttospeech
 google-auth
 pyphen
 
+# TLS roots for the engine's direct urllib calls (pipeline/config.py::
+# _ssl_context). The OS trust store is used first and is enough on a normal
+# machine; certifi adds an extra root source, which is what lets a corporate
+# TLS-inspection proxy validate properly instead of falling through to the
+# unverified last-resort path. The Auto Sync half already depends on it
+# (see ../requirements.txt). Import is guarded, so a venv without it still
+# works — just with one fewer root source.
+certifi
+
 # Optional: SpaCy enables meaningful-chunk splitting of the English sync SRT
 # (better subtitle boundaries). The pipeline runs fine without it — regions
 # are then used unsplit. To enable:

@@ -29,7 +29,7 @@ import urllib.request
 import wave
 from typing import Dict, List, Optional
 
-from .config import (_SSL_CTX, DATA_DIR, FFMPEG_PATH, IS_WINDOWS,
+from .config import (_urlopen, DATA_DIR, FFMPEG_PATH, IS_WINDOWS,
                      TTS_DEFAULT_LANGUAGE, TTS_SETTINGS_FILE, _lang_tokens,
                      load_tts_settings)
 
@@ -113,7 +113,7 @@ def _validate_api_key(api_key: str, timeout: float = 15.0) -> Dict[str, str]:
         headers={"xi-api-key": api_key, "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
+        with _urlopen(req, timeout=timeout) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as e:
         if e.code == 401:
@@ -226,7 +226,7 @@ def _fetch_voices_for_language(api_key: str,
         headers={"xi-api-key": api_key, "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
+        with _urlopen(req, timeout=timeout) as resp:
             payload = json.loads(resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as e:
         if e.code == 401:
@@ -675,8 +675,7 @@ def _transcribe_audio(audio_path, api_key, use_cache: bool = True):
         with _Heartbeat(f"waiting for Scribe (attempt {attempt}/"
                         f"{_STT_ATTEMPTS})") as beat:
             try:
-                with urllib.request.urlopen(req, timeout=timeout,
-                                            context=_SSL_CTX) as resp:
+                with _urlopen(req, timeout=timeout) as resp:
                     raw = resp.read()
                 result = json.loads(raw.decode("utf-8", errors="replace"))
                 if not isinstance(result, dict):
