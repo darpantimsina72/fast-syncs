@@ -78,3 +78,8 @@ Thumbs.db
 # Feedback system — token + offline outbox stay local
 github_token.txt
 feedback_outbox/
+
+# File list shipped inside each release archive; the updaters diff the previous
+# copy against the new one to delete files a release no longer ships. It only
+# appears in ZIP/release installs, never in a git checkout.
+.fast-syncs-manifest
