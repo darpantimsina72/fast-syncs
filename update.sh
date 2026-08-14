@@ -26,6 +26,12 @@ ZIP_URL="https://github.com/darpantimsina72/fast-syncs/releases/latest/download/
 #   FAST_SYNCS_ZIP_URL=https://github.com/.../download/v0.12.0/fast-syncs.zip bash update.sh
 ZIP_URL="${FAST_SYNCS_ZIP_URL:-$ZIP_URL}"
 
+# Fallback for the window BEFORE the first release exists: the releases/latest
+# URL 404s until something has actually been published, and an updater that
+# stops working the moment this lands would be worse than the problem it fixes.
+# Tried only if the release download fails, so a normal update never touches it.
+FALLBACK_ZIP_URL="https://codeload.github.com/darpantimsina72/fast-syncs/zip/refs/heads/main"
+
 # Set when the new files could NOT be fetched, so the final message never
 # claims an update that did not happen.
 NO_DL=0
@@ -38,12 +44,19 @@ zip_update() {
     local tmp="${TMPDIR:-/tmp}/fast-syncs-zip"
     rm -rf "$tmp" && mkdir -p "$tmp"
     if ! curl -fsSL -o "$tmp/repo.zip" "$ZIP_URL"; then
-        echo "[update] Could not download the update (offline, or the GitHub"
-        echo "         repository is private / moved). Update manually instead:"
-        echo "         re-download the ZIP and unzip it OVER this folder"
-        echo "         (your settings and venv are kept)."
-        NO_DL=1
-        return 0
+        # No release published yet (releases/latest 404s), or this machine
+        # cannot reach it. Fall back to the branch ZIP so the button keeps
+        # working; once the first release exists this branch is never taken.
+        if [ -n "${FAST_SYNCS_ZIP_URL:-}" ] \
+           || ! curl -fsSL -o "$tmp/repo.zip" "$FALLBACK_ZIP_URL"; then
+            echo "[update] Could not download the update (offline, or the GitHub"
+            echo "         repository is private / moved). Update manually instead:"
+            echo "         re-download the ZIP and unzip it OVER this folder"
+            echo "         (your settings and venv are kept)."
+            NO_DL=1
+            return 0
+        fi
+        echo "[update] No published release yet — used the latest code instead."
     fi
     if ! unzip -oq "$tmp/repo.zip" -d "$tmp"; then
         echo "[update] Could not unpack the update — update manually (re-download the ZIP)."

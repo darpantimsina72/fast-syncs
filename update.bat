@@ -42,6 +42,8 @@ rem over this folder - settings and venv are preserved either way.
 set "ZIP_URL=https://github.com/darpantimsina72/fast-syncs/releases/latest/download/fast-syncs.zip"
 rem Set FAST_SYNCS_ZIP_URL beforehand to override (e.g. to pin an older release).
 if defined FAST_SYNCS_ZIP_URL set "ZIP_URL=%FAST_SYNCS_ZIP_URL%"
+rem Used only if the release download fails - see :zip_update below.
+set "FALLBACK_ZIP_URL=https://codeload.github.com/darpantimsina72/fast-syncs/zip/refs/heads/main"
 rem NO_DL is set when the new files could NOT be fetched, so the final
 rem message never claims an update that did not happen.
 set "NO_DL="
@@ -82,11 +84,25 @@ set "ZIPTMP=%TEMP%\fast-syncs-zip"
 rmdir /s /q "%ZIPTMP%" 2>nul
 mkdir "%ZIPTMP%"
 curl -fsSL -o "%ZIPTMP%\repo.zip" "%ZIP_URL%"
+if not errorlevel 1 goto zip_got
+rem No release published yet (releases/latest 404s), or this machine cannot
+rem reach it. Fall back to the branch ZIP so the button keeps working; once
+rem the first release exists this path is never taken. Skipped when the user
+rem pinned a specific release with FAST_SYNCS_ZIP_URL - silently substituting
+rem a different version there would defeat the point of pinning.
+if defined FAST_SYNCS_ZIP_URL (
+  echo [update] Could not download the pinned release.
+  goto zip_manual
+)
+curl -fsSL -o "%ZIPTMP%\repo.zip" "%FALLBACK_ZIP_URL%"
 if errorlevel 1 (
   echo [update] Could not download the update ^(offline, or the GitHub
   echo          repository is private / moved^).
   goto zip_manual
 )
+echo [update] No published release yet - used the latest code instead.
+
+:zip_got
 tar -xf "%ZIPTMP%\repo.zip" -C "%ZIPTMP%"
 if errorlevel 1 goto zip_manual
 
