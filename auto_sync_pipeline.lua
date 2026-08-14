@@ -1,3 +1,20 @@
+-- @description Fast Syncs — AI dubbing sync for REAPER
+-- @author darpantimsina72
+-- @version 0.13.0
+-- @about
+--   Transcribes your Dialogue VO and Dub tracks, asks Gemini which dubbed clip
+--   means the same thing as which English clip, and moves each dubbed clip to
+--   its English clip's position. Also bundles the dubbing app (translate +
+--   text-to-speech + placement) in the same window.
+--
+--   After installing, run the script once — it will offer to create the Python
+--   environment it needs.
+--
+-- @changelog
+--   See the release notes for this version on GitHub.
+--
+-- NOTE: @version above is checked against the VERSION file by
+-- .github/workflows/release.yml. Bump both together or the release fails.
 -- ============================================================
 -- AUTO SYNC PIPELINE v1.1
 -- One-click: Collect → AI Match → Place items on timeline

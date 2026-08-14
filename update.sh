@@ -12,7 +12,19 @@
 # ──────────────────────────────────────────────────────────────
 set -e
 
-ZIP_URL="https://codeload.github.com/darpantimsina72/fast-syncs/zip/refs/heads/main"
+# The newest RELEASE, not the tip of main. This URL is stable: GitHub always
+# redirects it to the fast-syncs.zip asset of the latest published release
+# (see .github/workflows/release.yml), so users move between versions that
+# were deliberately shipped rather than whatever was committed last.
+#
+# To install a specific older version instead, download its fast-syncs.zip
+# from https://github.com/darpantimsina72/fast-syncs/releases and unzip it
+# over this folder — settings and venv are preserved either way.
+ZIP_URL="https://github.com/darpantimsina72/fast-syncs/releases/latest/download/fast-syncs.zip"
+
+# Set FAST_SYNCS_ZIP_URL to override (e.g. to pin an older release):
+#   FAST_SYNCS_ZIP_URL=https://github.com/.../download/v0.12.0/fast-syncs.zip bash update.sh
+ZIP_URL="${FAST_SYNCS_ZIP_URL:-$ZIP_URL}"
 
 # Set when the new files could NOT be fetched, so the final message never
 # claims an update that did not happen.

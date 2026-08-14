@@ -31,7 +31,17 @@ exit /b
 setlocal
 cd /d "%~2"
 
-set "ZIP_URL=https://codeload.github.com/darpantimsina72/fast-syncs/zip/refs/heads/main"
+rem The newest RELEASE, not the tip of main. This URL is stable: GitHub always
+rem redirects it to the fast-syncs.zip asset of the latest published release
+rem (see .github\workflows\release.yml), so users move between versions that
+rem were deliberately shipped rather than whatever was committed last.
+rem
+rem To install a specific older version instead, download its fast-syncs.zip
+rem from https://github.com/darpantimsina72/fast-syncs/releases and unzip it
+rem over this folder - settings and venv are preserved either way.
+set "ZIP_URL=https://github.com/darpantimsina72/fast-syncs/releases/latest/download/fast-syncs.zip"
+rem Set FAST_SYNCS_ZIP_URL beforehand to override (e.g. to pin an older release).
+if defined FAST_SYNCS_ZIP_URL set "ZIP_URL=%FAST_SYNCS_ZIP_URL%"
 rem NO_DL is set when the new files could NOT be fetched, so the final
 rem message never claims an update that did not happen.
 set "NO_DL="
