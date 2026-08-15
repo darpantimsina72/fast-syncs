@@ -1,23 +1,53 @@
 # Reaper Dubbing App — engine dependencies (contract v0.3).
 # Install into the project-local venv:  python3 -m venv venv && venv/bin/pip install -r requirements.txt
 # Nothing UI-related belongs here (no tkinter/matplotlib/sounddevice/opencv).
-numpy
-librosa
-pydub
-google-genai
-google-cloud-texttospeech
-google-auth
-pyphen
+#
+# ── Why these are pinned ─────────────────────────────────────────────
+# Unpinned, two people installing a week apart got different libraries, and
+# "it worked yesterday and I changed nothing" was unanswerable. It also meant
+# rolling a release back rolled the code back but not the environment, so the
+# rollback was only half real.
+#
+# Bump these deliberately, one at a time, and let the install matrix
+# (.github/workflows/install-matrix.yml) confirm both operating systems and
+# every supported Python before merging.
+#
+# Requires Python 3.11+, which is what setup_mac.command and
+# setup_windows.bat already enforce.
+
+# numpy drops old Pythons quickly, so it needs a marker: 2.4.6 is the last
+# release shipping cp311 wheels, and 2.5.x requires 3.12+. Without this split
+# a 3.11 machine would try to build numpy from source and fail.
+numpy==2.4.6 ; python_version < "3.12"
+numpy==2.5.2 ; python_version >= "3.12"
+
+pydub==0.25.1
+# pydub imports the stdlib `audioop` module, which PEP 594 REMOVED in Python
+# 3.13. Without this backport, `import pydub` raises ModuleNotFoundError on
+# 3.13+ — which breaks the whole TTS assembly path (tts.py has 8 export()
+# calls) as well as audio decoding.
+audioop-lts==0.2.2 ; python_version >= "3.13"
+
+google-genai==2.18.1
+google-cloud-texttospeech==2.37.0
+google-auth==2.56.3
+pyphen==0.18.0
 
 # TLS roots for the engine's direct urllib calls (pipeline/config.py::
 # _ssl_context). The OS trust store is used first and is enough on a normal
 # machine; certifi adds an extra root source, which is what lets a corporate
 # TLS-inspection proxy validate properly instead of falling through to the
-# unverified last-resort path. The Auto Sync half already depends on it
-# (see ../requirements.txt). Import is guarded, so a venv without it still
-# works — just with one fewer root source.
-certifi
+# unverified last-resort path. The import is guarded, so a venv without it
+# still works — just with one fewer root source.
+certifi==2026.7.22
 
+# librosa was REMOVED. It was used in exactly two places, both just loading
+# audio into an array, and pydub/ffmpeg (already required for the ElevenLabs
+# MP3 -> WAV step) does the same. It pulled in numba + llvmlite + scipy:
+# 164 MB installed, and the reason the installers had to hunt for a Python old
+# enough to have prebuilt wheels for them. Do not add it back without reading
+# dubbing/engine/tests/test_audio_decode.py first.
+#
 # Optional: SpaCy enables meaningful-chunk splitting of the English sync SRT
 # (better subtitle boundaries). The pipeline runs fine without it — regions
 # are then used unsplit. To enable:

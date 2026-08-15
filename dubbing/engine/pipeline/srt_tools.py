@@ -19,7 +19,6 @@ import re
 from typing import List, Optional, Set
 
 import numpy as np
-import librosa
 
 from .config import (PYDUB_AVAILABLE, TTS_DEFAULT_LANGUAGE, TTS_LANGUAGES,
                      _AudioSegment)
@@ -660,18 +659,22 @@ _VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpg", ".mpeg")
 
 def _load_audio_any(path: str):
     """Load mono float32 audio from an audio OR video file → (y, sr).
-    librosa handles audio; video containers go through pydub/ffmpeg."""
-    ext = os.path.splitext(path)[1].lower()
-    if ext not in _VIDEO_EXTS:
-        try:
-            y, sr = librosa.load(path, sr=None, mono=True)
-            return y.astype(np.float32), int(sr)
-        except Exception:
-            pass                      # fall through to pydub
+
+    Everything decodes through pydub/ffmpeg. There used to be a librosa
+    branch here for non-video files, with this pydub path as its fallback —
+    but the two produce the same thing (native sample rate, mono downmix,
+    float32 normalised to ±1), and librosa dragged in numba and llvmlite:
+    ~96 MB of wheels, and the reason the installers had to hunt for a Python
+    version old enough to have prebuilt wheels for them. ffmpeg was already a
+    hard requirement here, so removing librosa costs no capability.
+
+    Sample rate is left at the file's native rate, as before — the region
+    detector below derives its window from sr, so resampling would silently
+    move every detected boundary.
+    """
     if not PYDUB_AVAILABLE:
         raise ValueError(
-            f"Cannot decode {os.path.basename(path)} — pydub/ffmpeg needed "
-            "for video files.")
+            f"Cannot decode {os.path.basename(path)} — pydub/ffmpeg needed.")
     seg = _AudioSegment.from_file(path)
     seg = seg.set_channels(1)
     sr = seg.frame_rate

@@ -226,7 +226,6 @@ REQUIRED_FUNCTIONS = [
     "_split_script_into_units",      # v0.12 clause-level units
 ]
 REQUIRED_ATTRIBUTES = [
-    "librosa",                       # used to load TTS audio like the app does
     "GEMINI_DEFAULT_MODEL",
     "TTS_LANGUAGES",
     "PROMPTS_DIR", "LLM_SETTINGS_FILE", "TTS_SETTINGS_FILE",
@@ -517,8 +516,8 @@ def _note(msg):
 def _import_pipeline():
     """Import the local pipeline package and return a flat facade namespace.
 
-    All pipeline symbols (functions, constants, module attributes like
-    librosa) are aggregated onto one SimpleNamespace so the stage code can
+    All pipeline symbols (functions and constants) are aggregated onto one
+    SimpleNamespace so the stage code can
     keep addressing them the way it addressed the app module in v0.1/v0.2
     (pl.<symbol>). Name collisions across modules are shared imports of the
     same objects (e.g. TTS_LANGUAGES), so the aggregation order is safe.
@@ -1112,7 +1111,10 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
 
     # ── [S3b] Target-language SRT from the TTS audio ───────────────────────
     _say("S3b", "Loading TTS audio and detecting regions…")
-    te_y, te_sr = pl.librosa.load(tts_path, sr=None, mono=True)
+    # tts_path is a WAV this pipeline just wrote (tts.py exports format="wav"),
+    # so the shared loader handles it — same mono float32 at the native rate
+    # that librosa.load(sr=None, mono=True) returned here before.
+    te_y, te_sr = pl._load_audio_any(tts_path)
     te_regions = pl._detect_regions_from_audio(
         te_y, te_sr, pl.DEFAULT_BN_THR_DB, pl.DEFAULT_BN_HYS_DB,
         pl.DEFAULT_BN_MIN_MS)

@@ -46,10 +46,15 @@ echo
 
 find_python() {
   # Ordered by PREFERENCE, first match wins. 3.12/3.13/3.11 come BEFORE
-  # 3.14+: brand-new Python releases often have no prebuilt wheels for the
+  # 3.14+: brand-new Python releases often had no prebuilt wheels for the
   # audio deps (librosa/numba), so pip would try — and fail — to compile
   # them from source. The bleeding-edge versions are still probed last, so
   # a machine that ONLY has 3.14 keeps working.
+  #
+  # NOTE: librosa/numba/llvmlite/scipy are no longer dependencies, so that
+  # reason is gone. Kept for now only because it is known-good; collapse it
+  # to "first Python 3.11+ wins" once the cross-platform install matrix
+  # proves that is safe on both OSes.
   local candidates=()
   local d v
   for d in /opt/homebrew/bin /usr/local/bin; do

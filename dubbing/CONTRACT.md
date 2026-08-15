@@ -583,7 +583,7 @@ file + line ranges it was extracted from.
 
 - `git init` in project root. `.gitignore`: `config/`, `data/`, `venv/`,
   `__pycache__/`, `engine/status/`, `*.pyc`, `.DS_Store`, `dub_panel_settings.json`.
-- `requirements.txt` (engine deps only: numpy, librosa, pydub, google-genai,
+- `requirements.txt` (engine deps only: numpy, pydub, google-genai,
   google-cloud-texttospeech, google-auth, pyphen; spacy optional — document).
   NO tkinter/matplotlib/sounddevice/opencv — nothing UI-related.
 - `setup_mac.command` rewritten: creates LOCAL `venv/` in project root,
