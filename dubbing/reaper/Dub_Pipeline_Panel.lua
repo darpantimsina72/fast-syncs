@@ -257,8 +257,8 @@ local DEFAULT_APP_DIR = "/Users/ilp/Documents/Claude code/"
                         .. "Akash anna Translation and Syncing App_All"
 
 local LANGUAGES = { "Bengali", "Hindi", "Kannada", "Malayalam", "Tamil",
-                    "Telugu", "Gujarati", "Marathi", "Assamese", "Odia",
-                    "Nepali" }
+                    "Telugu", "Gujarati", "Marathi", "Punjabi", "Assamese",
+                    "Odia", "Nepali" }
 
 -- ---------------------------------------------------------------------------
 -- Small file helpers
@@ -1507,6 +1507,7 @@ local _LANG_TO_SCRIPT = {
   Bengali = "Bengali", Assamese = "Bengali",
   Tamil = "Tamil", Telugu = "Telugu", Kannada = "Kannada",
   Malayalam = "Malayalam", Gujarati = "Gujarati", Odia = "Oriya",
+  Punjabi = "Gurmukhi",
 }
 
 -- v0.4: one font PER SCRIPT, created+attached lazily and cached, so the
@@ -1529,6 +1530,8 @@ local _MAC_SCRIPT_FONTS = {
   Malayalam  = { 'Malayalam Sangam MN.ttc', 'Malayalam MN.ttc' },
   Gujarati   = { 'Gujarati Sangam MN.ttc', 'GujaratiMT.ttc' },
   Oriya      = { 'Oriya Sangam MN.ttc', 'Oriya MN.ttc' },
+  Gurmukhi   = { 'Gurmukhi Sangam MN.ttc', 'Gurmukhi MN.ttc',
+                 'GurmukhiMT.ttc' },
 }
 
 local function _font_candidates(script)
@@ -1537,7 +1540,7 @@ local function _font_candidates(script)
     local local_fonts = (os.getenv("LOCALAPPDATA") or "")
                          :gsub("\\", "/") .. "/Microsoft/Windows/Fonts"
     -- User-installed Noto fonts first (best coverage), then Nirmala UI —
-    -- ships with Windows 8.1+ and covers ALL 11 target languages' scripts.
+    -- ships with Windows 8.1+ and covers ALL 12 target languages' scripts.
     -- Noto comes under two names: the hinted "-Regular.ttf" build and the
     -- variable-font file that fonts.google.com serves by default — a
     -- per-user install ("Install for me") lands in LOCALAPPDATA, an

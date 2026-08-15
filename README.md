@@ -21,7 +21,7 @@ Works on **Windows** and **macOS**. The instructions below are Windows-first.
 | `setup.bat` / `setup.sh` | One-time installer (creates the Python virtualenv). |
 | `update.bat` / `update.sh` | Pull the latest version + refresh dependencies. |
 | `requirements*.txt` | Python dependencies (tiny for the default thin-client mode). |
-| `dubbing/` | **Bundled dubbing app**: translate + TTS + time-sync a voice recording into 11 Indian languages, driven from its own REAPER panel. See below. |
+| `dubbing/` | **Bundled dubbing app**: translate + TTS + time-sync a voice recording into 12 Indian languages, driven from its own REAPER panel. See below. |
 
 ---
 
@@ -148,7 +148,7 @@ failing the whole update.
 
 The repo also ships the **Reaper Dubbing App**: take an English voice
 recording and get a translated, voice-synthesized, time-synced dub in one of
-11 Indian languages, imported straight onto the timeline. It arrives (and
+12 Indian languages, imported straight onto the timeline. It arrives (and
 stays current) through the same **Update…** button as the sync tool.
 
 - **Open it**: run `auto_sync_pipeline.lua` — the same one script as the sync

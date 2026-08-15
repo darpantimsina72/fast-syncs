@@ -10,7 +10,7 @@ and do the boring parts of dubbing videos into Indian languages.
 
 Imagine you have a video of someone speaking **English**.
 Now you want the same video, but the person speaks **Hindi** (or Tamil, Telugu,
-Bengali… 11 languages total).
+Bengali… 12 languages total).
 
 Two problems:
 
@@ -332,7 +332,7 @@ fast-syncs/
     │       │                       your neighbour" before giving up
     │       └── tm.py             Translation memory (SQLite) — don't pay twice
     │                               for the same sentence
-    ├── prompts/                  55 plain text files: 5 stages × 11 languages.
+    ├── prompts/                  60 plain text files: 5 stages × 12 languages.
     │                               Edit them in Notepad. This is where the
     │                               translation *style* lives.
     ├── reaper/

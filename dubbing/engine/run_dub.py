@@ -69,12 +69,12 @@ import traceback
 ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATUS_DIR = os.path.join(ENGINE_DIR, "status")
 
-# The 11 target languages supported by the pipeline (display names), plus
+# The 12 target languages supported by the pipeline (display names), plus
 # any the user added in the panel (v0.7). This launcher validates --language
 # before spawning the worker, so the two lists must agree — dub_engine.py
 # extends its own copy from the same file, with the same stdlib-only read.
 LANGUAGES = ["Bengali", "Hindi", "Kannada", "Malayalam", "Tamil", "Telugu",
-             "Gujarati", "Marathi", "Assamese", "Odia", "Nepali"]
+             "Gujarati", "Marathi", "Punjabi", "Assamese", "Odia", "Nepali"]
 
 # Which hand-edited names are usable. custom_languages.json is read FOUR
 # times in total — here, in dub_engine.py, in pipeline/config.py, and by the

@@ -199,7 +199,7 @@ one-long-recording voice quality and without any re-transcription.
   before spawning the worker, so both lists must agree.
 - `--selfcheck` treats missing prompts for a user-added language as a
   WARNING naming the files, not a failure. A half-configured extra
-  language must never block setup for the eleven built-ins.
+  language must never block setup for the twelve built-ins.
 
 ### Prompt editing (panel)
 
@@ -450,7 +450,7 @@ python override + fast-syncs `Update…`; locked while a dub run is active).
   follow the language combo live. Candidates: user-installed Noto Sans/Serif
   per script, then macOS `/System/Library/Fonts/Supplemental/<Script> Sangam
   MN.ttc` (+ MT/Kohinoor variants, Arial Unicode fallback), Windows
-  `Nirmala.ttf` (covers all 11 languages) + segoeui fallback. Dear ImGui
+  `Nirmala.ttf` (covers all 12 languages) + segoeui fallback. Dear ImGui
   still has no complex shaping — documented as cosmetic; the clipboard
   round-trip below is the supported perfect-rendering path.
 - Review phase toolbar: 📋 Copy script (whole translation →clipboard via
@@ -738,7 +738,7 @@ Adapt proven patterns from `/Users/ilp/Documents/Claude code/fast syncs/auto_syn
 - Success phase: "Import to timeline" button → same import routine as
   `Import_Dub_Results.lua` (shared code duplicated is fine for v0.1).
 - Audio file picker: `reaper.GetUserFileNameForRead`. Language: Combo of the
-  11 languages. Voice id: plain text field (optional).
+  12 languages. Voice id: plain text field (optional).
 - Panel locates the engine via its own path: `reaper/` → sibling `engine/`.
   `app_dir` default from `engine/engine_settings.json`, fallback to the
   CONTRACT default above.

@@ -23,7 +23,7 @@ Summary (source = `Translation_and_Syncing_App.py` unless noted):
 | `pipeline/tm.py`      | `translation_memory.py` (226 lines, whole file) | SQLite proofed-translation memory (full docs + pairs), fail-open writes / fail-closed reads | 227 |
 
 `prompts/` was copied verbatim from the bulk app's `prompts/` directory
-(56 entries: 5 stages x 11 languages + the internal `_generate_drafts.py`).
+(61 entries: 5 stages x 12 languages + the internal `_generate_drafts.py`).
 
 Deliberately NOT ported (out of scope, see CONTRACT v0.3): all Tk/UI code,
 colour palette and fonts, matplotlib helpers (`_indic_matplotlib_font`),

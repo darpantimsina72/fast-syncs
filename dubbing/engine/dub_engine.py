@@ -91,7 +91,7 @@ STATUS_DIR = os.environ.get("DUB_STATUS_DIR") or os.path.join(ENGINE_DIR, "statu
 ENGINE_SETTINGS_FILE = os.path.join(ENGINE_DIR, "engine_settings.json")
 
 LANGUAGES = ["Bengali", "Hindi", "Kannada", "Malayalam", "Tamil", "Telugu",
-             "Gujarati", "Marathi", "Assamese", "Odia", "Nepali"]
+             "Gujarati", "Marathi", "Punjabi", "Assamese", "Odia", "Nepali"]
 
 
 # KEEP IN SYNC with run_dub.py, pipeline/config.py and
@@ -559,7 +559,7 @@ def _selfcheck(args) -> int:
     # prompts ship with the repo, so absence means a broken checkout). A
     # USER-ADDED language (v0.7) is different: its prompts are created by the
     # panel, so a gap there is a warning naming the files to write, never a
-    # failed selfcheck that blocks setup for the other eleven languages.
+    # failed selfcheck that blocks setup for the other twelve languages.
     custom = set(_custom_language_names())
     missing_prompts, missing_custom = [], []
     for lang in LANGUAGES:

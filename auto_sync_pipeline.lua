@@ -438,6 +438,7 @@ local _LANG_TO_SCRIPT = {
   hi = "Devanagari", ne = "Devanagari", mr = "Devanagari",
   bn = "Bengali", ta = "Tamil", te = "Telugu",
   kn = "Kannada", ml = "Malayalam", gu = "Gujarati",
+  pa = "Gurmukhi",
 }
 
 -- Attach a font that covers the configured DUB_LANGUAGE script so Indic log
@@ -1292,7 +1293,7 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
     reaper.ImGui_SameLine(ctx, 104)
     reaper.ImGui_SetNextItemWidth(ctx, 120)
     _, DUB_LANGUAGE = _ui_combo(ctx, '##dublang', DUB_LANGUAGE,
-        { 'hi','ne','ta','te','bn','mr','gu','kn','ml' })
+        { 'hi','ne','ta','te','bn','mr','gu','kn','ml','pa' })
     -- Both AI steps are locked by design:
     --   Transcription (audio → text) = ElevenLabs, always.
     --   Matching (align dub to English) = Gemini semantic, fails hard (no

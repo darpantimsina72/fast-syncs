@@ -308,6 +308,13 @@ TTS_LANGUAGES = {
         "WaveNet":  _wn_voices("mr-IN"),
         "Chirp3":   _c3_voices("mr-IN"),
     },
+    "Punjabi": {
+        "code": "pa-IN", "autonym": "ਪੰਜਾਬੀ", "tag": "PA", "display_name": "Punjabi",
+        "el_tokens": ("pa", "pan", "pnb", "punjabi", "panjabi", "ਪੰਜਾਬੀ", "pa-in"),
+        "Standard": _std_voices("pa-IN"),
+        "WaveNet":  _wn_voices("pa-IN"),
+        "Chirp3":   _c3_voices("pa-IN"),
+    },
     # Google Cloud TTS does not currently expose native voices for the
     # following languages — only ElevenLabs is available for synthesis.
     "Assamese": {
@@ -332,8 +339,8 @@ TTS_LANGUAGES = {
 
 # ─── User-added languages (v0.7) ────────────────────────────────────────────
 # config/custom_languages.json, written by the panel's Settings tab:
-#     {"languages": [{"name": "Punjabi", "code": "pa-IN", "tag": "PA",
-#                     "display_name": "Punjabi", "el_tokens": ["pa", "punjabi"]}]}
+#     {"languages": [{"name": "Konkani", "code": "kok-IN", "tag": "KOK",
+#                     "display_name": "Konkani", "el_tokens": ["kok", "konkani"]}]}
 # Entries are merged into TTS_LANGUAGES on import, so every downstream lookup
 # (voice matching, output naming, prompt loading) treats them like a built-in.
 # A name that collides with a built-in is IGNORED rather than overwriting it:

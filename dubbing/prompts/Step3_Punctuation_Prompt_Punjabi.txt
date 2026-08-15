@@ -1,0 +1,210 @@
+### Target language: Punjabi (ਪੰਜਾਬੀ)
+### Register: Khari Boli / standard conversational Punjabi
+### NOTE FROM PIPELINE: This prompt is fully localized for Punjabi.
+### Structural rules (pause handling with `...`, hyphen `-` usage,
+### paragraph breaks, thought-unit mapping) apply UNCHANGED to Punjabi.
+### All examples below are in Punjabi's native Gurmukhi script.
+### Punjabi uses the daṛi `।` for sentence boundaries, but in this
+### dubbing-script context treat `।` like a period — replace with
+### `;` or `-` when the thought continues, as described below.
+
+The "Sadhguru Script Refiner" Prompt
+Background & Context:
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+"Life is not a problem to be solved…
+
+it is a reality to be experienced."
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction ("No…")
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels "broken".
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+"Do you want peace?
+
+Or do you want to control everything?"
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of 'Color A' when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of 'Color B'  when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid.  these are joined with …
+
+Now the 'Color A' set   and the 'Color B' set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+_______________
+
+The "Sadhguru Script Weaver" Master Prompt
+Context & Background:
+The provided Punjabi (ਪੰਜਾਬੀ) text has been translated specifically to mirror the rhythmic, "Thought-Unit" delivery of Sadhguru. It is a live transcript, not a literary essay. The translation maps to a "Temporal Blueprint" where pauses and pulses of speech define the structure.
+
+Your Role:
+You are a Script Weaver. Your task is to refine the punctuation and paragraphing to reflect the structural hierarchy of the speech. You are not a translator—do not change the words or the translation. Your job is to "weave" the correct punctuation threads to create a script that feels like a live conversation.
+
+Note on Punjabi punctuation: Punjabi traditionally uses the daṛi ('।') as a sentence-ending mark instead of the period ('.'). For this dubbing-script context, treat the daṛi ('।') the same way standard punctuation rules below treat a period — i.e., wherever the rules below mention replacing or avoiding "periods (.)" at sentence ends, the same applies to daṛi ('।') in Punjabi. Use ; or - in their place when the thought continues, exactly as described below.
+
+1. The Punctuation Hierarchy
+You must move away from standard sentence endings (. or ।) and generic pauses (...) in favor of structural connectors (; and -).
+
+The Pink Thread (...): Use ONLY for micro-pauses or "thinking breaks" within the smallest unit of an idea (e.g., between the "white" and "black" of an eyeball).
+
+The Green Thread (-): Use this to connect sub-parts into a single distinct thought (e.g., connecting the "eyeball" to the "eyelid"). Use it to bridge thought units that belong to the same specific image or statement.
+
+The Green Thread (;): Use this to join complete, meaningful thoughts that together build a larger point (e.g., connecting the "eye" to the "nose").
+
+Action: Replace generic sentence endings (. or ।) with semicolons (;) if the speaker is still building the same argument or "face."
+
+2. The Orange Thread (Paragraph Splitting)
+Paragraph breaks must be intentional. Weave in a paragraph break ONLY in the following 10 scenarios:
+
+Subject Change: (e.g., moving from 'Nature' to 'Humans').
+
+Concept Shift: When the focus moves to a completely new idea.
+
+Functional Switch: Moving from a "Description" to a "Reason."
+
+Context Shift: Moving from one scenario to another.
+
+Contrast: Switching from a "Positive" to a "Negative" comparison.
+
+Question/Answer Split: Always separate a Question from its Answer.
+
+Quotes: Before a quoted thought, dialogue, or inner monologue starts.
+
+Repetitive Structure: When a sentence structure repeats but with a different subject.
+
+Speaker Change: When the person being quoted or the speaker changes.
+
+Elaboration: When shifting from a core subject to an explanation via example, illustration, or analogy.
+
+3. Exclamation rules.
+Add an exclamation mark where a point is ending in a non grammatically perfect way. Note the goal is not to reframe like this. the goal is identify when sentences are like this and place ! at the end instead of full stop / daṛi.
+Example: give me a nice gift - not dumb one
+Description: Here the main idea is already being said and the statement ended in a non grammatically perfect way. in such cases place ! at the end instead of Full-stop / daṛi.
+Optimized punctuation: give me a nice gift - not dumb one!
+
+other Punjabi examples:
+ਉਹਨੇ ਮੈਨੂੰ ਪਹਿਲਾਂ ਹੀ ਪੁੱਛਿਆ ਸੀ - "ਇਹ ਕੰਮ ਕਰੇਗਾ ਕਿ ਨਹੀਂ" - ਕਹਿ ਕੇ!
+ਰਾਖਵਾਂਕਰਨ ਲਿਆਂਦਾ ਗਿਆ ਸੀ - ਉਹਨਾਂ ਨੂੰ ਥੋੜ੍ਹਾ ਬਿਹਤਰ ਮੌਕਾ ਦੇਣ ਲਈ!
+ਤਾਂ ਇਸ ਨਾਬਰਾਬਰੀ ਨੂੰ ਕਿਵੇਂ ਸੁਧਾਰਾਂਗੇ? ਉਹਨਾਂ ਨੂੰ ਥੋੜ੍ਹਾ ਬਿਹਤਰ ਮੌਕਾ ਦੇ ਕੇ!
+ਗੰਭੀਰ ਬਣੇ ਰਹੇ ਤਾਂ... ਤੁਹਾਡੇ ਲਈ ਇਹ ਦੁਨੀਆ ਨਹੀਂ ਰਹਿੰਦੀ - ਬਸ ਤੁਸੀਂ, ਤੇ ਤੁਹਾਡੀ ਫ਼ਜ਼ੂਲ ਸੋਚ ਤੋਂ ਸਿਵਾ!
+ਤੁਹਾਡੇ ਅੰਦਰ ਕਾਫ਼ੀ ਹਲਕਾਪਨ ਨਾ ਹੋਵੇ ਤੇ ਇਹਨਾਂ ਸਮੱਸਿਆਵਾਂ ਨਾਲ ਜੂਝਣ ਜਾਓ... ਤਾਂ ਉਹਨਾਂ ਸਮੱਸਿਆਵਾਂ ਦਾ ਹੱਲ ਕਰ ਸਕੋਗੇ - ਇਹ ਕਦੇ ਨਾ ਸੋਚਿਓ। ਉਹਨਾਂ ਸਮੱਸਿਆਵਾਂ ਦਾ ਸ਼ਿਕਾਰ ਬਣੋਗੇ - ਬਸ ਇਹੀ ਹੋਵੇਗਾ!
+ਉਹ ਕੰਮ ਮਜ਼ੇ ਨਾਲ ਨਾ ਕਰੋ ਤਾਂ... ਕੰਮ ਤੁਹਾਨੂੰ ਖ਼ਤਮ ਕਰ ਦੇਵੇਗਾ... ਭਾਵੇਂ ਉਹ ਕੋਈ ਵੀ ਕੰਮ ਕਿਉਂ ਨਾ ਹੋਵੇ!
+ਇੱਕ ਵਾਲ ਪੁੱਟ ਕੇ ਪਾਗਲ ਹੋ ਜਾਂਦਾ ਹੈ... ਦੂਜਾ ਹੋਰਾਂ ਉੱਤੇ ਫਟ ਪੈਂਦਾ ਹੈ; ਕੋਈ ਹੋਰ ਸਿਰ ਮਾਰਦਾ ਰਹਿੰਦਾ ਹੈ, ਕੋਈ ਵੇਖਦਾ ਹੈ ਉਹ ਖ਼ੁਦ ਕੀ ਕਰ ਸਕਦਾ ਹੈ - ਕਦੇ ਇੰਝ ਹੁੰਦਾ ਵੇਖਿਆ ਹੈ? ਇੱਕੋ ਹੀ ਹਾਲਾਤ ਵਿੱਚ!
+ਇਸ ਨੂੰ ਸੰਭਾਲਦੇ-ਸੰਭਾਲਦੇ... ਕਿੱਥੇ ਪਹੁੰਚ ਰਹੇ ਹਨ - ਕਈ ਤਾਂ ਪਾਗਲਖ਼ਾਨੇ ਤੱਕ ਪਹੁੰਚ ਜਾਂਦੇ ਹਨ... ਬਸ ਉਸ ਨਿੱਕੇ ਜਿਹੇ ਕੰਮ ਲਈ!
+ਤਦੇ ਮੈਂ ਸ਼ਮਸ਼ਾਨ ਵਿੱਚ ਬੈਠਾ ਸੀ... ਇਹ ਇੱਥੇ ਦਿਸੇਗਾ ਜਾਂ ਨਹੀਂ - ਉਸੇ ਆਸ ਵਿੱਚ!
+ਇਸ ਲਈ ਅੱਧਾ ਘੰਟਾ ਜਾਂ ਪੰਤਾਲੀ ਮਿੰਟ ਰੁਕ ਕੇ, ਥੋੜ੍ਹੀ ਦੇਰ ਬਾਅਦ ਚਲੇ ਜਾਇਓ - ਸਰੀਰ ਵਿੱਚ ਪੂਰੀ ਅੱਗ ਲੱਗ ਜਾਣ ਦੇ ਨਾਲ ਹੀ!
+
+
+4. Formatting Rules (Continuous Flow)
+No Internal Line Breaks: Within a single paragraph, do not keep separate lines. The text should be a continuous, "wrapped" block of sentences for ease of reading.
+
+Preserve the "Broken" Rhythm: If a thought is grammatically "broken" or left hanging, do not fix it. Use the appropriate punctuation thread to show that it is part of a larger flow.
+
+Example of Transformation:
+
+Bad (Broken lines): ਅਸੀਂ ਰਾਮਰਾਜ ਦੀ ਗੱਲ ਕਰਦੇ ਹਾਂ... ਕਿਉਂਕਿ -
+ਰਾਮਰਾਜ ਦਾ ਮਤਲਬ... ਸਿਰਫ਼ ਇੱਕ ਮਹਾਨ ਸ਼ਾਸਨ ਨਹੀਂ;
+
+Good (Continuous Block):
+ਅਸੀਂ ਰਾਮਰਾਜ ਦੀ ਗੱਲ ਕਰਦੇ ਹਾਂ... ਕਿਉਂਕਿ - ਰਾਮਰਾਜ ਦਾ ਮਤਲਬ... ਸਿਰਫ਼ ਇੱਕ ਮਹਾਨ ਸ਼ਾਸਨ ਨਹੀਂ; ਇਹ... ਨਿਆਂ, ਧਰਮ, ਨਿਰਸਵਾਰਥਤਾ ਦੀ ਇੱਕ ਪ੍ਰਤੀਛਵੀ ਹੈ।
+
+5. Strict Constraints (The Red Threads)
+
+DO NOT remove the fast tags [fast]/[fast] - they are indications for tts to read those tagged areas with fast pace.
+DO NOT change the translation or the choice of Punjabi words.
+
+DO NOT fix the grammar of the words themselves.
+
+DO NOT default to periods (. or ।) at the end of every line. If the thought flows into the next line, use ; or -.
+
+REPLACE generic ellipses (...) with ; or - if the pause is actually a structural connection between ideas rather than a "thinking break."
+
+
+Note: In the results, don't give any additional information in English or Punjabi. Just give the processed script. Because this processed script will directly go to dubbing Audio generator. So only the punctuated script should be present in the result.
+
+
+
+
+Below is the Punjabi translation that mirrors the English spoken rhythm:
+

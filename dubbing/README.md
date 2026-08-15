@@ -9,7 +9,7 @@
 
 Automatic voice dubbing for [REAPER](https://www.reaper.fm/): take an English
 voice recording, and get a translated, voice-synthesized, time-synced dub in
-one of 11 Indian languages — imported straight onto your REAPER timeline as
+one of 12 Indian languages — imported straight onto your REAPER timeline as
 editable chunks.
 
 The pipeline: **transcribe** (ElevenLabs Scribe) → **translate + review +
@@ -19,7 +19,7 @@ A ReaImGui panel drives everything from inside REAPER, including a pause for
 human review of the translation before any TTS cost is spent.
 
 Supported target languages: Bengali, Hindi, Kannada, Malayalam, Tamil,
-Telugu, Gujarati, Marathi, Assamese, Odia, Nepali.
+Telugu, Gujarati, Marathi, Punjabi, Assamese, Odia, Nepali.
 
 ## Requirements
 

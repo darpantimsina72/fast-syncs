@@ -15,7 +15,7 @@ lives in `.claude/skills/` (loaded on demand) and in the existing
 ## What this is
 
 Two automation tools that live inside **REAPER** (an audio DAW) and do the
-manual parts of dubbing English video into 11 Indian languages.
+manual parts of dubbing English video into 12 Indian languages.
 
 - **Auto Sync** — you already have English clips and dubbed clips on two
   tracks. It transcribes every clip, asks Gemini which dubbed clip means the
@@ -112,7 +112,7 @@ fast-syncs/
     ├── CONTRACT.md          Changelog-shaped spec: file formats, CLI, stage tags, hard rules
     ├── setup_mac.command / setup_windows.bat   Dubbing-only installer (creates dubbing/venv)
     ├── requirements.txt     numpy, librosa, pydub, google-genai, google-cloud-texttospeech, …
-    ├── prompts/             55 text files = 5 stages × 11 languages. Translation STYLE lives here.
+    ├── prompts/             60 text files = 5 stages × 12 languages. Translation STYLE lives here.
     ├── reaper/
     │   ├── Dub_Pipeline_Panel.lua   The 4-tab window (Dub / Sync / Tools / Log) + Settings window
     │   └── Import_Dub_Results.lua   Fallback importer that works without ReaImGui

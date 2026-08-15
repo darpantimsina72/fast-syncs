@@ -1,0 +1,1210 @@
+### Target language: Punjabi (ਪੰਜਾਬੀ)
+### Register: modern spoken Punjabi (ਮਾਝੀ / Majhi register), not literary
+### NOTE FROM PIPELINE: This prompt is fully localized for Punjabi.
+### All examples below are in Punjabi's native Gurmukhi script.
+### Structural rules (pause handling with `...`, hyphen `-` usage,
+### paragraph breaks, thought-unit mapping) apply UNCHANGED to Punjabi.
+### Punjabi uses the daṛi `।` for sentence boundaries (Gurmukhi script).
+
+The goal is to generate a Punjabi (ਪੰਜਾਬੀ) dubbing script for the English talk given by Sadhguru (Including any other speakers who question or converse with him). The SRT file text will be given at the bottom.
+
+for ease, the srt file is formatted in the below format:
+[4.139s] A little pause... and we are back. [-0.033s]
+
+[4.139s] at the beginning of the subtitle denotes the duration of that subtitle "A little pause... and we are back."
+[-0.033s] at the beginning of the subtitle denotes the gap after that subtitle, before the next subtitle starts. if gap is zero or negative, that means there is no gap, the next subtitle is starting immediately.
+
+
+The SRT Temporal Blueprint: Mapping Threads to Pulses
+
+Instead of a plain transcript, you are receiving an SRT file. This file acts as the absolute structural blueprint for the dubbing script. Think of the SRT timestamps as the rigid framework of the loom.
+
+On-Signals (Spoken Pulses / Containers): The actual text block within a subtitle timestamp. This is continuous speech.
+
+Off-Signals (Silence Gaps / Spaces): The time gap between the end timestamp of one subtitle and the start timestamp of the next. This is a physical pause.
+
+CRITICAL RULE: The temporal blueprint overrides grammatical intuition. You must map the White Threads (thought units) onto these pulses and dictate the placement of your Green Threads (punctuation) strictly based on the On/Off signals, handling the mapping in the following ways:
+
+Before assessing case 1 or 2 or 3, first you must analyze and create the groups of subtitles, so that each group denotes one meaningful chunk or one thought unit of a complete thought.
+
+
+Case 1: One thought unit stretched across multiple pulses (e.g., 1 meaningful chunk or thought unit spoken over 3 subtitles):
+Do not smooth this out. You must weave a Green Thread (specifically the ... indicating a pause) exactly where the temporal gap occurs between the subtitles, even if it awkwardly breaks a Punjabi clause in half. The pause must reflect the speaker's hesitation or deliberate pacing.
+
+Note that, only in this case, you can re arrange the sequence of these non-meaningful words/phrases that are building blocks of the meaningful chunk or a thought unit that was spread across multiple pulses, so that the thought unit or the meaningful chunk is formed in a natural way. Here still the pulses are separated by ... but they are resequenced to form a natural flow to form the meaningful chunk or thought unit.
+
+This applies only inside of a meaningful chunk/thought unit. The sequence of the meaningful chunks and thought units that form a complete thought remains same.
+In short, The "Holistic Mapping" Rule for case 1:
+When one thought unit or meaningful chunk is stretched across multiple pulses (pulses separated by ...), do not translate pulse-by-pulse. Instead:
+
+Synthesize: First, translate the entire English thought unit into a natural, complete Punjabi sentence or clause.
+
+Distribute: Take that complete Punjabi translation and "pour" it into the available pulse containers (the SRT timestamps).
+
+Fragment Naturally: When distributing the Punjabi text across pulses, ensure that the text within each pulse forms a natural phonetic chunk (a phrase or sub-part) in Punjabi.
+
+Transposition: Since Punjabi is a Subject-Object-Verb (SOV) language and English is SVO, you must rearrange the words across the ... markers so the verb lands in the appropriate pulse for the Punjabi flow, while ensuring the overall meaning matches the duration of the total pulses used.
+
+The "Bridge" Principle: Each segment between the ... should feel like a natural "breath" or a logical sub-component of the thought, not a random collection of words.
+
+Example of how to handle the "broken" input:
+
+English Pulses: the worship of the ... divine ... in the feminine form ... was hugely prevalent
+
+Wrong (Literal): ਇਸ ਦੀ ਉਪਾਸਨਾ ... ਈਸ਼ਵਰ ਨੂੰ ... ਇਸਤਰੀ ਰੂਪ ਵਿੱਚ ... ਵਿਆਪਕ ਰੂਪ ਵਿੱਚ ਪ੍ਰਚਲਿਤ ਸੀ (This feels broken).
+
+Correct (Mapped): ਈਸ਼ਵਰ ਨੂੰ ... ਇਸਤਰੀ ਰੂਪ ਵਿੱਚ ... ਉਪਾਸਨਾ ਕਰਨਾ ... ਵਿਆਪਕ ਰੂਪ ਵਿੱਚ ਪ੍ਰਚਲਿਤ ਸੀ (Each pulse now contains a logical Punjabi phrase that builds toward the meaningful chunk/thought unit/conclusion).
+
+
+Case 2: Multiple thought units compressed into one pulse (e.g., 2-3 short sentences spoken rapidly in 1 subtitle):
+If the SRT shows continuous speech with no off-signal gaps, do not inject ... pauses just because the grammar suggests a new sentence. Translate the White Threads to flow rapidly together, using commas (,) in-between thought units and ; between different thoughts to maintain continuous structural phrasing to match the unbroken momentum of the speaker.
+
+Case 3: Overlapping boundaries (e.g., a pulse contains the end of thought A and the start of thought B):
+Translate the transition naturally with appropriate boundary punctuation, but reserve your heavy pause punctuation (... or -) only for where the actual SRT gap (Off-Signal) occurs.
+
+
+
+
+Now lets understand the requirement by an analogy.
+
+
+
+Its like weaving an art piece.
+
+
+
+The actual content itself is the white thread.
+
+The punctuation marks are the threads with green shades.
+
+… are the threads with pink shade.
+
+The paragraphs breaks are the threads with orange shades.
+
+The contextually perfect Punjabi word choice is the thread of blue shades.
+
+The things that are not to be done are the red threads.
+
+
+
+Now as you start weaving the dubbing script you should carefully weave these color threads at appropriate places as per the instructions given below.
+
+
+
+Below is the information regarding the White threads:
+
+
+
+How Sadhguru Delivers His Speech (Structurally)
+
+ A. Thought-by-thought delivery (NOT sentence-by-sentence)
+
+Sadhguru does not speak in grammatically complete sentences.
+
+He speaks in:
+
+thought units
+
+idea chunks
+
+pause-driven fragments
+
+Example (English original style):
+
+"Life is not a problem to be solved…
+
+it is a reality to be experienced."
+
+This is two thoughts, not one sentence.
+
+ Translation rule:
+
+ Translate by thought, not by grammar.
+
+
+
+ B. Pause is part of meaning
+
+Sadhguru uses silence as punctuation.
+
+He often pauses:
+
+before the punchline
+
+after a deep question
+
+before contradiction ("No…")
+
+ Translation rule:
+
+ Preserve pause points even if grammar feels "broken".
+
+
+
+ C. Question → Silence → Answer pattern
+
+He frequently does:
+
+Ask a simple question
+
+Pause
+
+Turn the question upside down
+
+Example:
+
+"Do you want peace?
+
+Or do you want to control everything?"
+
+ Translation rule:
+
+ Keep questions short and spoken, not literary.
+
+
+
+Analogy 1:
+
+Let me explain the target with an analogy.
+
+Let's take a human body.
+
+It is made of various body parts like - face, hands, torso, legs
+
+and now each body part is made of various subparts. Example: face has eyes, nose, mouth, ears.
+
+And each sub part has various internal parts. Example: eye has eyeball, eyelids.
+
+And each internal part has building parts. Example: eyeball has white eyeball and black eyeball.
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the building parts and the internal parts can be changed to create the sub part in a meaningful way. the subparts remain in the same order.
+
+
+Analogy 2:
+
+Lets say what we want to convey is a picture.
+
+And how sadhguru conveys is,
+
+
+
+puzzle pieces of 'Color A' when joined will picturize the eyeball. Here the puzzle pieces can be taken as the white and the black eyeballs. these are joined with …
+
+Similarly puzzle pieces of 'Color B' when combined will form the eye lid. Here the pieces can be taken as the skin of the eyelid and the hair of the eyelid. these are joined with …
+
+Now the 'Color A' set and the 'Color B' set are joined by using hyphen.
+
+thus it picturizes one part of the face (which is one para here). Similarly lets say the nose is made. Now we join the eye and the nose with semicolon. and again join the ear to these using a semicolon. Thus the face is completed (which is one paragraph here)
+
+
+
+In short: Each individual piece that can be identified as a separate part or sub part is the white thread.
+
+
+
+To the extent possible make sure these pieces occur in the same sequence especially the meaningful chunks (made up of sub parts and internal parts)
+
+
+very important:
+While the goal is to reflect the rhythm of pulses, by maintaining the sequence of the thought units in the same order, at the very basic level - the sequence of the coloured sections remain, the pieces of the same color that forms that colored section within can be rearranged.
+
+
+Below is the information regarding the green threads:
+
+now as we weave the white threads to form the sentences, we want to weave in the green threads (punctuation marks) as per the below rules.
+
+
+
+… indicates a pause in between the parts that makes a meaningful chunk or a clause.
+
+, indicates a pause between meaningful chunks that make up the sentence.
+
+; indicates connected sentences.
+
+Hyphen (-) indicates additional information related to the main idea of the sentence.
+
+
+
+
+we connect building parts with … to make up the internal part.
+
+we connect the internal parts with - to make up the subpart.
+
+we connect the subparts with ; to make up the body part.
+
+
+
+for example, the punctuation marks should be weaved like this:
+
+building part …  building part (one internal part)- another internal part - one more internal part; internal part - building part …  building part (another internal part);
+
+internal part -  building part …  building part (one internal part)
+
+subpart; subpart; internal part - internal part; building part…building part…building part; subpart
+
+
+
+
+Placing (-):
+
+  To Set Off Parenthetical Information:
+
+  Example: This is a very important point - one that you shouldn't forget.
+
+ Punjabi: ਇਹ ਇੱਕ ਬਹੁਤ ਹੀ ਅਹਿਮ ਗੱਲ ਹੈ - ਜੋ ਤੁਹਾਨੂੰ ਭੁੱਲਣੀ ਨਹੀਂ ਚਾਹੀਦੀ।
+
+
+
+  Example: The students - all 35 of them - were excited for the field trip.
+
+  Punjabi: ਵਿਦਿਆਰਥੀ - ਸਾਰੇ 35 - ਫੀਲਡ ਟ੍ਰਿਪ ਲਈ ਉਤਸ਼ਾਹਿਤ ਸਨ।
+
+
+
+ To Introduce a List:
+
+    Example: She bought many things - clothes, shoes, and accessories.
+
+Punjabi: ਉਹਨੇ ਕਈ ਚੀਜ਼ਾਂ ਖ਼ਰੀਦੀਆਂ - ਕੱਪੜੇ, ਜੁੱਤੇ, ਤੇ ਹੋਰ ਸਾਮਾਨ।
+
+
+
+
+   To Introduce an additional Explanation after completion of one thought:
+
+    Example: The reason for the delay - traffic congestion - was unavoidable.
+
+Punjabi: ਦੇਰੀ ਦਾ ਕਾਰਨ - ਟ੍ਰੈਫਿਕ ਜਾਮ - ਟਾਲਿਆ ਨਹੀਂ ਜਾ ਸਕਦਾ ਸੀ।
+
+
+
+    Example: He is my uncle - who is a 7 feet tall man.
+
+Punjabi: ਉਹ ਮੇਰੇ ਚਾਚਾ ਹਨ - ਸੱਤ ਫੁੱਟ ਲੰਮੇ ਬੰਦੇ।
+
+
+
+
+ Example: Today is Sunday - which is a holiday.
+
+Punjabi: ਅੱਜ ਐਤਵਾਰ ਹੈ - ਯਾਨੀ ਛੁੱਟੀ ਦਾ ਦਿਨ।
+
+
+
+    To Indicate an Abrupt Break or Change in Thought:
+
+    Example: I was about to leave - wait, there's someone at the door.
+
+Punjabi: ਮੈਂ ਨਿਕਲਣ ਹੀ ਵਾਲਾ ਸੀ - ਰੁਕੋ, ਦਰਵਾਜ਼ੇ ਉੱਤੇ ਕੋਈ ਹੈ।
+
+
+
+
+To separate inserted thoughts that need a new modulation.
+
+
+
+Pattern: Main sentence - inserted phrase - continuation of the main sentence.
+
+
+
+    Example: The most important thing - and I can't stress this enough - is to be yourself.
+
+Punjabi: ਸਭ ਤੋਂ ਅਹਿਮ ਗੱਲ - ਤੇ ਮੈਂ ਇਸਨੂੰ ਜਿੰਨਾ ਵੀ ਦੁਹਰਾਵਾਂ ਘੱਟ ਹੈ - ਖ਼ੁਦ ਰਹਿਣਾ ਹੈ।
+
+
+
+Example: After 100 years - only in 2010, I think - they figured it out... that this theorem describes the black holes... in the universe.
+
+Punjabi: 100 ਸਾਲ ਬਾਅਦ - ਸ਼ਾਇਦ 2010 ਵਿੱਚ, ਮੈਨੂੰ ਲੱਗਦਾ ਹੈ - ਉਹਨਾਂ ਨੇ ਇਹ ਲੱਭਿਆ... ਕਿ ਇਹ ਸਿਧਾਂਤ ਬ੍ਰਹਿਮੰਡ ਦੇ ਕ੍ਰਿਸ਼ਨ-ਵਿਵਰਾਂ ਦਾ ਵਰਣਨ ਕਰਦਾ ਹੈ।
+
+
+
+To separate totally different details within a sentence.
+
+Pattern: Main Sentence - detail 1 - detail 2 - continuation of main sentence.
+
+Example: I must tell you this -  two, about maybe three, four years ago - a young woman of 33 or 34 years of age - in a city called Hyderabad in Southern India -  she was a television anchor - one day she did this thing.
+
+Punjabi : ਮੈਨੂੰ ਤੁਹਾਨੂੰ ਇਹ ਦੱਸਣਾ ਹੀ ਹੈ - ਦੋ, ਸ਼ਾਇਦ ਤਿੰਨ, ਚਾਰ ਸਾਲ ਪਹਿਲਾਂ - 33 ਜਾਂ 34 ਸਾਲ ਦੀ ਇੱਕ ਮੁਟਿਆਰ - ਦੱਖਣ ਭਾਰਤ ਦੇ ਹੈਦਰਾਬਾਦ ਸ਼ਹਿਰ ਵਿੱਚ - ਉਹ ਇੱਕ ਟੈਲੀਵਿਜ਼ਨ ਐਂਕਰ ਸੀ - ਇੱਕ ਦਿਨ ਉਹਨੇ ਇਹ ਕੰਮ ਕੀਤਾ।
+
+In below situation:
+
+When a phrase completes, clarifies, justifies, or defines a key concept or item mentioned immediately before it, so that it indicates change in tone.
+
+replace the punctuation before that phrase with a hyphen ( - ).
+
+Example: so in urban areas it may not matter -  because you have insurance and this and that.
+
+Punjabi : ਤਾਂ ਸ਼ਹਿਰੀ ਇਲਾਕਿਆਂ ਵਿੱਚ ਸ਼ਾਇਦ ਇਹ ਕੋਈ ਵੱਡੀ ਗੱਲ ਨਹੀਂ - ਕਿਉਂਕਿ ਤੁਹਾਡੇ ਕੋਲ ਬੀਮਾ ਹੈ, ਇਹ-ਉਹ ਸਭ ਹੈ।
+
+
+
+Use ( - ) specifically when The phrase reveals the actual components of a previously stated category to ensure that the tone would land and conclude the meaning, not continue a list.
+
+Example: "two things — your body and your mind"
+
+Punjabi : ਦੋ ਚੀਜ਼ਾਂ - ਤੁਹਾਡਾ ਸਰੀਰ, ਤੁਹਾਡਾ ਮਨ।
+
+
+
+
+Below is the information regarding the Pink threads:
+
+
+… should not occur in the text that belong to one single pulse. Even though grammatically it makes sense. Even though there are multiple thought units/phrases/sentences in it. because each pulse is a continuous speech, we don't want the gap in between the continuous pulse.
+
+… only to be placed when there is a pause in between pulses that make up a single thought unit or clause or sentence.
+
+
+
+Below is the information regarding the orange threads:
+
+
+
+Each orange thread is the paragraph break that happens in the dubbing script.
+
+Below are the rules where to weave in the orange thread.
+
+
+
+
+When the subject changes (e.g., from speaking about 'Nature' to 'Humans')
+
+When the focus moves from one concept to a completely new idea.
+
+Switch from Description to Reason
+
+Switch from one Context to another.
+
+Switch from Positive to Negative contrast
+
+Split the Question from its Answer.
+
+Before a quoted thought or dialogue starts.
+
+When a sentence structure repeats with a different subject.
+
+When the speaker or the person being quoted changes.
+
+When it changes from a core subject to its explanation using an example, illustration, or analogy.
+
+
+
+
+And the sentences that occur within one para can be made into one continuous paragraph. no need to keep them as separate lines within the paragraph.
+
+Example:
+
+ਅਸੀਂ ਰਾਮਰਾਜ ਦੀ ਗੱਲ ਕਰਦੇ ਹਾਂ... ਕਿਉਂਕਿ -
+
+ਰਾਮਰਾਜ ਦਾ ਮਤਲਬ... ਸਿਰਫ਼ ਇੱਕ ਮਹਾਨ ਸ਼ਾਸਨ ਨਹੀਂ;
+
+ਇਹ... ਨਿਆਂ, ਧਰਮ, ਨਿਰਸਵਾਰਥਤਾ ਦੀ ਇੱਕ ਪ੍ਰਤੀਛਵੀ ਹੈ।
+
+
+
+in the above it is one paragraph, but it is three lines in a paragraph. the linebreaks within the paragraph can be removed and it can be made into continuous sentences for ease of reading as shown below:
+
+ਅਸੀਂ ਰਾਮਰਾਜ ਦੀ ਗੱਲ ਕਰਦੇ ਹਾਂ... ਕਿਉਂਕਿ - ਰਾਮਰਾਜ ਦਾ ਮਤਲਬ... ਸਿਰਫ਼ ਇੱਕ ਮਹਾਨ ਸ਼ਾਸਨ ਨਹੀਂ; ਇਹ... ਨਿਆਂ, ਧਰਮ, ਨਿਰਸਵਾਰਥਤਾ ਦੀ ਇੱਕ ਪ੍ਰਤੀਛਵੀ ਹੈ।
+
+
+
+
+CRITICAL FORMATTING RULE: Continuous Text Blocks
+
+
+
+No Soft Breaks: Do not use line breaks or newlines within a paragraph for visual formatting.
+
+
+
+Single Line Constraint: Each paragraph block must be rendered as one single, continuous line of text.
+
+
+
+Separation: Use a double line break only between different paragraphs.
+
+
+
+
+Below is the information regarding the blue threads:
+
+
+
+There are the points where you have to identify the actual contextually best Punjabi word or phrase; and identify the actual intention of sadhguru behind those words spoken by him. There are the places where literal word based translation fails. and you have to think deep and pick the appropriate Punjabi expression that conveys the actual contextual point and intention.
+
+
+
+
+Need 1: Polishing the Script into a day to day spoken style:
+
+
+
+    Scenario 1.
+
+    In Punjabi the translations for a, an and the are not needed - unless in specific cases.
+
+
+
+
+    Scenario 2.
+
+    In Punjabi in many cases, an explicit pronoun can be dropped when context makes it clear, since the verb form or topic continuity carries the subject.
+
+
+
+
+    Scenario 3: Preferred word pairs
+
+    Dimension - ਆਯਾਮ
+
+    You know - ਜਾਣਦੇ ਹੋ ਨਾ..
+
+    Life - ਜੀਵਨ
+
+    People - ਲੋਕ / ਜਨ
+
+    Intense - ਤੀਬਰਤਾ
+
+    Lifetime - ਜਨਮ / ਜੀਵਨਕਾਲ
+
+    essentially - ਮੂਲ ਰੂਪ ਵਿੱਚ
+
+    intense - ਤੀਬਰਤਾ (not ਪ੍ਰਚੰਡਤਾ in this context)
+
+    isn't it? - ਹੈ ਨਾ?
+
+
+
+
+Scenario 4:
+
+This applies only to the segments that are lengthy in Punjabi. In English, the segment is spoken with fewer words, but in Punjabi, the written style contains more words which will exceed the time of the English segment. Mainly in such cases, we try to make the segment short by combining the words like we combine while talking (colloquial style). And in some cases, even though the words are more, Sadhguru speaks them fast. In such cases also shortening is needed. By analyzing the audio, please shorten the segments as and when necessary.
+
+
+
+CRITICAL: Remember we are not removing any segment, example, or list - we are trying to make it short by expressing the exact same content in fewer words / shorter syllables.
+
+
+
+
+    Example 1:
+
+    Fast spoken English segment: I'm not saying these things are wrong.
+
+    Punjabi Lengthy sentence: ਮੈਂ ਇਹ ਨਹੀਂ ਕਹਿ ਰਿਹਾ ਕਿ ਇਹ ਗ਼ਲਤ ਹਨ।
+
+    Punjabi Shortened Sentence: ਇਹ ਗ਼ਲਤ ਹਨ, ਇੰਝ ਨਹੀਂ ਕਹਿ ਰਿਹਾ।
+
+
+
+
+    Example 2:
+
+    Fast spoken English segment: Not some fanciful thing that I want to do or you want to do.
+
+    Punjabi Lengthy sentence: ਕੋਈ ਕਾਲਪਨਿਕ ਚੀਜ਼ ਨਹੀਂ ਜੋ ਮੈਂ ਕਰਨਾ ਚਾਹਾਂ ਜਾਂ ਤੁਸੀਂ ਕਰਨਾ ਚਾਹੋ।
+
+    Punjabi Shortened Sentence: ਮੇਰੀ ਜਾਂ ਤੁਹਾਡੀ ਕੋਈ ਕਾਲਪਨਿਕ ਇੱਛਾ ਨਹੀਂ।
+
+
+
+
+    Example 3:
+
+    Fast spoken English segment: There are many others who would like to be you. 'Oh, I wish I was 20 and I wish I could think what to do.
+
+    Punjabi Lengthy sentence: 'ਕਾਸ਼, 20 ਸਾਲ ਦੀ ਉਮਰ ਵਿੱਚ ਕੀ ਕਰਾਂ ਇਹ ਸੋਚ ਸਕਦਾ ਤਾਂ ਕਿੰਨਾ ਚੰਗਾ ਹੁੰਦਾ। ਉਸ ਵੇਲੇ ਮੈਂ ਕੁਝ ਤਾਂ ਕਰ ਲੈਂਦਾ।' - ਇੰਝ ਸੋਚਣ ਵਾਲੇ ਇੱਥੇ ਬਹੁਤ ਹਨ।
+
+    Punjabi Shortened Sentence: 'ਕਾਸ਼, 20 ਵਿੱਚ ਕੀ ਕਰਾਂ ਸੋਚ ਸਕਦਾ। ਤਦ ਕੁਝ ਕਰ ਲੈਂਦਾ।' - ਇੰਝ ਸੋਚਣ ਵਾਲੇ ਇੱਥੇ ਬਹੁਤ ਹਨ।
+
+
+
+
+  Scenario 5:
+
+    Aspect: Missing Detail
+
+    English: So you must fix yourself, you must engineer yourself the way you think is the best way to be for a human being;
+
+    Basic Translation: ਤਾਂ - ਇਨਸਾਨ ਦੇ ਰੂਪ ਵਿੱਚ ਰਹਿਣ ਦਾ ਸਭ ਤੋਂ ਵਧੀਆ ਤਰੀਕਾ ਜੋ ਹੈ, ਉਸ ਤਰ੍ਹਾਂ ਖ਼ੁਦ ਨੂੰ ਠੀਕ ਕਰਕੇ ਘੜਨਾ ਹੋਵੇਗਾ;
+
+    Optimized Translation: ਤਾਂ - ਇਨਸਾਨ ਦੇ ਰੂਪ ਵਿੱਚ ਰਹਿਣ ਦਾ ਸਭ ਤੋਂ ਵਧੀਆ ਤਰੀਕਾ ਜੋ ਤੁਸੀਂ ਸੋਚਦੇ ਹੋ, ਉਸ ਤਰ੍ਹਾਂ ਖ਼ੁਦ ਨੂੰ ਘੜਨਾ ਹੋਵੇਗਾ;
+
+    Details of optimization: 'ਤੁਸੀਂ ਸੋਚਦੇ ਹੋ' is the detail for 'you think is'
+
+
+
+
+  Scenario 6:
+
+    Aspect: Thought Flow
+
+
+
+    English:
+
+    Living strong means your level of experience is intense and enormous.
+
+
+
+    Your level of experience will become enormous - only when your level of attention is absolute.
+
+    Basic Translation:
+
+     ਸ਼ਕਤੀਸ਼ਾਲੀ ਜੀਵਨ ਦਾ ਮਤਲਬ - ਤੁਹਾਡੇ ਅਨੁਭਵ ਦਾ ਪੱਧਰ ਤੀਬਰ ਤੇ ਵਿਸ਼ਾਲ ਹੋਣਾ।
+
+
+
+    ਜਦੋਂ ਵੀ ਤੁਹਾਡਾ ਧਿਆਨ ਪੂਰਨ ਹੋਵੇਗਾ, ਤਦੇ ਤੁਹਾਡੇ ਅਨੁਭਵ ਦਾ ਪੱਧਰ ਵੀ ਵਿਸ਼ਾਲ ਹੋਵੇਗਾ।
+
+
+
+    Optimized Translation:
+
+    ਸ਼ਕਤੀਸ਼ਾਲੀ ਜੀਵਨ ਦਾ ਮਤਲਬ - ਤੁਹਾਡੇ ਅਨੁਭਵ ਦਾ ਪੱਧਰ ਤਿੱਖਾ ਤੇ ਵਿਸ਼ਾਲ ਹੋਣਾ।
+
+
+
+    ਤੁਹਾਡੇ ਅਨੁਭਵ ਦਾ ਪੱਧਰ ਵਿਸ਼ਾਲ ਹੁੰਦਾ ਹੈ, ਤਦੇ - ਜਦੋਂ ਤੁਹਾਡਾ ਧਿਆਨ ਪੂਰਨ ਹੁੰਦਾ ਹੈ!
+
+    Details of optimization:
+
+    Let us take these two sentences as A and B.  'The enormity of experience' is in the ending portion of A  and is in the beginning portion of B. Thus ensuring a smooth flow of thoughts and connectivity.
+
+
+
+
+Scenario 7:
+
+   Aspect:  Exact detail without deviation
+
+
+
+    English:
+
+    Though I am known to be a yogi - very analytical and logical - essentially, I have always lived my life as a devotee.
+
+    Basic Translation:
+
+    ਸਾਰੇ ਮੈਨੂੰ ਬਹੁਤ ਵਿਸ਼ਲੇਸ਼ਣਾਤਮਕ, ਤਰਕਸ਼ੀਲ ਯੋਗੀ ਮੰਨਦੇ ਹਨ, ਪਰ ਸੱਚ ਕਹਾਂ ਤਾਂ ਮੈਂ ਹਮੇਸ਼ਾ ਇੱਕ ਭਗਤ ਦੇ ਰੂਪ ਵਿੱਚ ਜੀਵਨ ਜੀਵਿਆ ਹੈ।
+
+    Optimized Translation:
+
+    ਸਾਰੇ ਮੈਨੂੰ ਬਹੁਤ ਵਿਸ਼ਲੇਸ਼ਣਾਤਮਕ, ਤਰਕਸ਼ੀਲ ਯੋਗੀ ਦੇ ਰੂਪ ਵਿੱਚ ਵੇਖਦੇ ਹਨ, ਪਰ ਮੂਲ ਰੂਪ ਵਿੱਚ, ਮੈਂ ਹਮੇਸ਼ਾ ਇੱਕ ਭਗਤ ਦੇ ਰੂਪ ਵਿੱਚ ਜੀਵਨ ਜੀਵਿਆ ਹੈ।
+
+    Details of optimization:
+
+    'ਮੰਨਦੇ ਹਨ' is a slight deviation from what is said. 'ਵੇਖਦੇ ਹਨ' is closer to the actual detail 'known to be' in English.
+
+
+
+    'ਸੱਚ ਕਹਾਂ ਤਾਂ' conveys contradiction. 'ਮੂਲ ਰੂਪ ਵਿੱਚ' conveys different levels of things - this is for the word 'essentially'.
+
+
+
+
+Scenario 8:
+
+
+
+    Aspect:  Modulation Cues
+
+
+
+    English: I want you to understand... how difficult the spiritual process is going to be for you - is determined by you - not by nature and not by your guru.
+
+    Basic Translation:
+
+    ਤੁਸੀਂ ਇੱਕ ਗੱਲ ਸਮਝੋ... ਅਧਿਆਤਮਿਕ ਪ੍ਰਕਿਰਿਆ ਤੁਹਾਡੇ ਲਈ ਕਿੰਨੀ ਔਖੀ ਹੋਵੇਗੀ... ਉਹ ਤੁਹਾਡੇ ਵੱਲੋਂ ਹੀ ਤੈਅ ਹੁੰਦੀ ਹੈ, ਕੁਦਰਤ ਵੱਲੋਂ ਨਹੀਂ, ਤੁਹਾਡੇ ਗੁਰੂ ਵੱਲੋਂ ਵੀ ਨਹੀਂ।
+
+    Optimized Translation:
+
+    ਤੁਸੀਂ ਇੱਕ ਗੱਲ ਸਮਝੋ... ਅਧਿਆਤਮਿਕ ਪ੍ਰਕਿਰਿਆ ਤੁਹਾਡੇ ਲਈ ਕਿੰਨੀ ਔਖੀ ਹੋਵੇਗੀ... ਉਹ ਤੁਹਾਡੇ ਵੱਲੋਂ ਹੀ ਤੈਅ ਹੁੰਦੀ ਹੈ - ਕੁਦਰਤ ਵੱਲੋਂ ਨਹੀਂ, ਤੁਹਾਡੇ ਗੁਰੂ ਵੱਲੋਂ ਵੀ ਨਹੀਂ।
+
+    Details of optimization:
+
+    Once one thought is completed and next there is additional information, use - at the end of the main thought, so that the dubbing artist will complete that thought, and again add information after that - instead of reading the whole thing like a list of things.
+
+
+
+
+Scenario 9:
+
+
+
+Aspect: Modulation based ending
+
+Written: ਧਿਆਨ ਨਾ ਦੇਣਾ ਨਹੀਂ, <Refining>ਧਿਆਨ ਰੱਖਣਾ ਹੋਵੇਗਾ - ਕੌਣ ਕੀ ਕਹਿ ਰਿਹਾ ਹੈ।</Refining>
+
+
+
+Tuned for Dubbing: ਧਿਆਨ ਨਾ ਦੇਣਾ ਨਹੀਂ, <Refining>ਧਿਆਨ ਰੱਖਣਾ ਹੋਵੇਗਾ - ਕੌਣ ਕੀ ਕਹਿ ਰਿਹਾ ਹੈ!</Refining>
+
+
+
+
+scenario 10:
+
+Aspect: short notation while speaking
+
+
+
+Written: ਕੀ ਤੁਸੀਂ ਜਾਣਦੇ ਹੋ
+
+Tuned for Dubbing: ਜਾਣਦੇ ਹੋ ਨਾ
+
+
+
+
+Written: ਨਾ ਜਾਣਨ ਉੱਤੇ
+
+Tuned for Dubbing: ਨਾ ਜਾਣੋ ਤਾਂ / ਨਹੀਂ ਜਾਣਦੇ ਤਾਂ
+
+
+
+Written: ਕੀ ਇਹ
+
+Tuned for Dubbing: ਕੀ ਇਹ
+
+
+
+
+Written: ਪੁੱਛਦੇ ਹਨ
+
+Tuned for Dubbing: ਪੁੱਛਦੇ ਹਨ
+
+
+
+Written: <Refining>ਤੁਸੀਂ ਇੱਥੇ</Refining> ਆਏ ਹੋ ਬਿਨਾਂ ਕੁਝ ਲਏ
+
+Tuned for Dubbing: <Refining>ਇੱਥੇ ਆਏ ਹੋ</Refining> ਬਿਨਾਂ ਕੁਝ ਲਏ
+
+
+
+Written: ਖਾਣਾ ਤੁਹਾਡੇ ਮੂੰਹ ਵਿੱਚ ਜਿੰਨਾ <Refining>ਵੱਧ ਸਮਾਂ ਰਹੇਗਾ</Refining>, ਤੁਹਾਡਾ ਪਾਚਨ ਓਨਾ ਬਿਹਤਰ ਹੋਵੇਗਾ;
+
+Tuned for Dubbing: ਖਾਣਾ ਤੁਹਾਡੇ ਮੂੰਹ ਵਿੱਚ ਜਿੰਨਾ <Refining>ਦੇਰ ਰਹੇਗਾ</Refining>, ਪਾਚਨ ਓਨਾ ਬਿਹਤਰ ਹੋਵੇਗਾ;
+
+
+
+Written: ਅਧਿਆਤਮਿਕ ਰਾਹ ਉੱਤੇ ਹੋ ਮਤਲਬ, ਤੁਹਾਡੇ ਜੀਵਨ ਵਿੱਚ ਕੁਝ ਭਿਆਨਕ <Refining>ਹੁੰਦਾ ਹੀ ਰਹੇਗਾ</Refining> - ਇਹ ਉਹ ਪੱਕਾ ਮੰਨਦੇ ਹਨ।
+
+Tuned for Dubbing: ਅਧਿਆਤਮਿਕ ਰਾਹ ਉੱਤੇ ਹੋ ਮਤਲਬ, ਤੁਹਾਡੇ ਜੀਵਨ ਵਿੱਚ ਕੁਝ ਭਿਆਨਕ <Refining>ਹੋਵੇਗਾ ਹੀ</Refining> - ਇਹ ਉਹ ਪੱਕਾ ਮੰਨਦੇ ਹਨ।
+
+
+
+scenario 11:
+
+Aspect: Not explicitly mentioning the redundant subject
+
+
+
+Written:  "ਓਹ <Refining>ਤੁਸੀਂ ਆਸ਼ਰਮ ਵਿੱਚ ਰਹਿੰਦੇ ਹੋ</Refining>, ਤਾਂ, ਤੁਹਾਡੀ ਤਕਲੀਫ਼ ਕੀ?" ਇਹ ਕਹਿ ਕੇ ਪੁੱਛਦੇ ਹਨ।
+
+Tuned for Dubbing:  "ਓਹ <Refining>ਆਸ਼ਰਮ ਵਿੱਚ ਰਹਿੰਦੇ ਹੋ</Refining>, ਤਾਂ, ਤੁਹਾਡੀ ਤਕਲੀਫ਼ ਕੀ?" ਇਹ ਕਹਿ ਕੇ ਪੁੱਛਦੇ ਹਨ।
+
+
+
+
+Explanation: in English the subject must be there, but in Punjabi, when the verb form, the topic continuity, or context already conveys the subject, the explicit pronoun can be dropped in spoken style.
+
+
+
+Written:  <Refining>ਤੁਸੀਂ ਅਧਿਆਤਮਿਕ ਰਾਹ ਉੱਤੇ ਹੋ ਮਤਲਬ</Refining>, ਤੁਹਾਡੇ ਜੀਵਨ ਵਿੱਚ ਕੁਝ ਭਿਆਨਕ ਹੋਵੇਗਾ ਹੀ - ਇਹ ਉਹ ਪੱਕਾ ਮੰਨਦੇ ਹਨ।
+
+Tuned for Dubbing:  <Refining>ਅਧਿਆਤਮਿਕ ਰਾਹ ਉੱਤੇ ਹੋ ਮਤਲਬ</Refining>, ਤੁਹਾਡੇ ਜੀਵਨ ਵਿੱਚ ਕੁਝ ਭਿਆਨਕ ਹੋਵੇਗਾ ਹੀ - ਇਹ ਉਹ ਪੱਕਾ ਮੰਨਦੇ ਹਨ।
+
+
+
+
+Written:
+
+ ਇੰਝ ਕਰਨ ਨਾਲ... ਘੱਟੋ-ਘੱਟ 30 ਤੋਂ 40% ਪਾਚਨ ਮੂੰਹ ਵਿੱਚ ਹੀ ਹੋ ਜਾਂਦਾ ਹੈ - ਤਦੇ, ਉਹ ਤਿਆਰ ਹੁੰਦਾ ਹੈ; ਹੁਣ ਖਾਣਾ ਮੂੰਹ ਵਿੱਚ ਹੀ ਚੰਗੀ ਤਰ੍ਹਾਂ ਤਿਆਰ ਹੋ ਜਾਂਦਾ ਹੈ; <Refining>ਉਹ ਅੰਦਰ ਜਾਵੇ ਤਾਂ... ਪੇਟ ਉਹੀ ਚਾਹੁੰਦਾ ਹੈ - ਅੱਧ-ਪਚਿਆ ਖਾਣਾ!</Refining>
+
+Tuned for Dubbing:
+
+ ਇੰਝ ਕਰਨ ਨਾਲ... ਘੱਟੋ-ਘੱਟ 30 ਤੋਂ 40% ਪਾਚਨ ਮੂੰਹ ਵਿੱਚ ਹੀ ਹੋ ਜਾਂਦਾ ਹੈ - ਤਦੇ, ਉਹ ਤਿਆਰ ਹੁੰਦਾ ਹੈ; ਹੁਣ ਖਾਣਾ ਮੂੰਹ ਵਿੱਚ ਹੀ ਚੰਗੀ ਤਰ੍ਹਾਂ ਤਿਆਰ ਹੋ ਜਾਂਦਾ ਹੈ; <Refining>ਅੰਦਰ ਜਾਵੇ ਤਾਂ... ਪੇਟ ਉਹੀ ਚਾਹੁੰਦਾ ਹੈ - ਅੱਧ-ਪਚਿਆ ਖਾਣਾ!</Refining>
+
+
+
+Explanation: in English the subject must be there, but in Punjabi sentences can be formed without the subject. Here the tagged part is the continuation of the first part, the subject is already established in the first part. In the second part which is a follow-up, in Punjabi we can skip mentioning the subject again. In spoken style, the subject is implied here.
+
+
+
+Scenario 12:
+
+While quoting what someone spoke:
+
+Please place the quoted text in the double quotes and Bring the verb part to the end of the sentence while quoting someone's words or while expressing internal thought process.
+
+
+
+
+Examples:
+
+
+
+Example:
+
+
+
+Original : ਉਹ <T3>ਸੋਚਦੇ ਹਨ<T3> ਹੁਣ ਅਧਿਆਤਮਿਕਤਾ ਦਾ ਮਤਲਬ ਤੁਹਾਨੂੰ ਹਿਮਾਲਿਆ ਜਾਣਾ ਹੋਵੇਗਾ ਜਾਂ ਕਾਸ਼ੀ ਜਾਣਾ ਹੋਵੇਗਾ... ਜਾਂ ਸਭ ਛੱਡ ਦੇਣਾ ਹੋਵੇਗਾ
+
+
+
+optimized : ਉਹ "ਹੁਣ ਅਧਿਆਤਮਿਕਤਾ ਦਾ ਮਤਲਬ ਤੁਹਾਨੂੰ ਹਿਮਾਲਿਆ ਜਾਣਾ ਹੋਵੇਗਾ ਜਾਂ ਕਾਸ਼ੀ ਜਾਣਾ ਹੋਵੇਗਾ... ਜਾਂ ਸਭ ਛੱਡ ਦੇਣਾ ਹੋਵੇਗਾ" - ਇੰਝ ਕਹਿ ਕੇ <T3>ਸੋਚਦੇ ਹਨ<T3>
+
+
+
+description:
+
+Here the structure is subject then comma then the thought or the words spoken by the subject in quotes then the verb that conveys saying or thinking and then period or question mark or other punctuation as per the need. Remember the … and - and ; within the quoted portion are still preserved.
+
+
+
+Example:
+
+Original
+
+ਸਾਰੇ <T3>ਪੁੱਛ ਰਹੇ ਹਨ<T3>, "ਸਦਗੁਰੂ, ਤੁਸੀਂ ਇਸ ਲਈ ਇੰਨੀ ਮਿਹਨਤ ਕਿਉਂ ਕਰ ਰਹੇ ਹੋ?"
+
+
+
+optimized :
+
+ਸਾਰੇ, "ਸਦਗੁਰੂ, ਤੁਸੀਂ ਇਸ ਲਈ ਇੰਨੀ ਮਿਹਨਤ ਕਿਉਂ ਕਰ ਰਹੇ ਹੋ?" - ਇੰਝ ਕਹਿ ਕੇ <T3>ਪੁੱਛ ਰਹੇ ਹਨ<T3>।
+
+
+
+
+Example:
+
+Original
+
+<T3>ਮੈਂ ਕਿਹਾ<T3>, ਜੇ ਉਹਨਾਂ ਕੋਲ ਪੀਣ ਦਾ ਪਾਣੀ ਹੀ ਨਹੀਂ... ਤਾਂ ਮੈਂ ਉਹਨਾਂ ਨੂੰ ਧਿਆਨ ਕਰਨ ਲਈ ਕਿਵੇਂ ਕਹਾਂਗਾ?
+
+
+
+
+Optimized:
+
+<T3>ਮੈਂ<T3>, "ਜੇ ਉਹਨਾਂ ਕੋਲ ਪੀਣ ਦਾ ਪਾਣੀ ਹੀ ਨਹੀਂ... ਤਾਂ ਮੈਂ ਉਹਨਾਂ ਨੂੰ ਧਿਆਨ ਕਰਨ ਲਈ ਕਿਵੇਂ ਕਹਾਂਗਾ?" - <T3>ਕਿਹਾ<T3>
+
+
+
+description:
+
+Here the subject who spoke and the verb that conveys the speaking are in one word. we have separated them, and placed the subject before the quoted part and the verb after the quoted part.
+
+
+
+
+Original:
+
+ਲੋਕ ਮੈਨੂੰ <T3>ਪੁੱਛਦੇ ਹੀ ਰਹਿੰਦੇ ਹਨ<T3>, "ਸਦਗੁਰੂ, ਇਸ ਦੇਸ਼ ਵਿੱਚ ਅਧਿਆਤਮਿਕ ਪ੍ਰਕਿਰਿਆ ਨੂੰ ਮੁੜ ਸਥਾਪਿਤ ਕਰਨ ਦਾ ਰਾਹ ਕੀ ਹੈ?"
+
+
+
+Optimized:
+
+ਲੋਕ ਮੈਨੂੰ <T3>ਇਸ ਤਰ੍ਹਾਂ<T3> ਪੁੱਛਦੇ ਰਹਿੰਦੇ ਹਨ, "ਸਦਗੁਰੂ, ਇਸ ਦੇਸ਼ ਵਿੱਚ ਅਧਿਆਤਮਿਕ ਪ੍ਰਕਿਰਿਆ ਨੂੰ ਮੁੜ ਸਥਾਪਿਤ ਕਰਨ ਦਾ ਰਾਹ ਕੀ ਹੈ?" <T3>ਕਹਿੰਦੇ ਹਨ।<T3>
+
+
+
+ description:
+
+Here the subject part is long, bringing the whole long phrase to the end may make sync loss while dubbing. So what we did is, we added the verb that conveys asking again at the end to make it end in a natural way of spoken Punjabi. also note that we have added the word ਇਸ ਤਰ੍ਹਾਂ as a cataphoric adverb / discourse-bridging adverb.
+
+
+
+
+In Short below is the instruction in summary:
+
+Primary Directive: Create a Dubbing Performance Script
+
+Your goal is not just to translate, but to create a performance script for a dubbing artist. This means capturing the speaker's exact timing, rhythm, and pauses is your highest priority, even if it occasionally makes the sentence structure feel less conventional than written text.
+
+CRITICAL RULE: Meticulous Pause Transcription
+
+Non-Negotiable Pauses: You must use ... to mark every noticeable pause or hesitation in the speaker's delivery. This is the single most important rule.
+
+Priority Over Flow: If a choice must be made between a perfectly natural sentence flow and accurately placing a ... to match the speaker's timing, always prioritize matching the pause. It is better to have a slightly unusual sentence structure that syncs perfectly than a smooth sentence that doesn't.
+
+Review for Pauses: Before finalizing your output, perform a final mental check specifically for this rule: "Have I captured all the short, rhythmic pauses, or have I smoothed them over?"
+
+
+
+
+Below is the information regarding Red threads:
+
+Do not hallucinate.
+
+Do not remove or summarize the units.
+
+Do not add information that is not actually spoken.
+
+Do not re arrange the sentences or clauses just to prioritize the flow within the sentence. this will break the flow between the sentences.
+
+Do not skip the portions that are not spoken by sadhguru. Should include other speakers translation also.
+
+Do not skip the promo part.
+
+Do not explicitly create promo part if it is not there in english. if it's not there in english, in Punjabi also it should not be there.
+
+Do not skip the part in the main talk just because it has already come in the promo part/previous parts.
+
+Do not skip English sentences or phrases thinking they are redundant or irrelevant or secondary details. Every thing said in English should be reflected in Punjabi.
+
+THIS IS NOT A SUMMARY, THIS IS A DUBBING SCRIPT WHERE DIALOGUES ARE DUBBED AND ATTACHED TO THE ORIGINAL VIDEO. SO NO SKIPPING PARTS OR PHRASES OR DETAILS.
+
+
+
+
+Below are the must do:
+
+Keep every redundant phrase.
+
+Keep every repetition.
+
+keep every redundant detail.
+
+keep every insignificant detail.
+
+in the middle of a sentence, if he adds additional sentence or a secondary information, do not skip it, reflect every minute detail spoken just place a - before those parts.
+
+
+
+
+Below are example Punjabi scripts weaved using all the color threads:
+
+
+
+1. ਮੈਂ ਪਹਿਲਾਂ ਕਦੇ ਧਿਆਨ ਨਹੀਂ ਕੀਤਾ...
+
+
+
+ਸਦਗੁਰੂ:
+
+"ਓਹ ਮੈਂ ਪਹਿਲਾਂ ਕਦੇ ਧਿਆਨ ਨਹੀਂ ਕੀਤਾ; ਧਿਆਨ ਕਿਵੇਂ ਕਰਾਂ!" - ਇਹ ਚੰਗੀ ਗੱਲ ਹੀ ਹੈ, ਜੇ ਪਹਿਲਾਂ ਕਦੇ ਧਿਆਨ ਨਹੀਂ ਕੀਤਾ!
+
+
+
+ਧਿਆਨ ਲਈ ਕੋਈ ਪ੍ਰਤਿਭਾ ਨਹੀਂ ਚਾਹੀਦੀ; ਕੋਈ ਅਭਿਆਸ ਨਹੀਂ ਚਾਹੀਦਾ; ਕੋਈ ਸੀਨੀਅਰਤਾ ਨਹੀਂ ਚਾਹੀਦੀ; ਕੋਈ ਤਜਰਬਾ ਵੀ ਨਹੀਂ ਚਾਹੀਦਾ; ਚਾਹੀਦੀ ਹੈ ਬਸ 'ਇੱਛਾ' … ਬਸ ਇੰਨਾ ਹੀ!
+
+
+
+'ਪੂਰੀ ਤਰ੍ਹਾਂ ਤਿਆਰ ਰਹਿਣਾ' - ਧਿਆਨ ਲਈ ਇਹੀ ਚਾਹੀਦਾ ਹੈ!
+
+
+
+ਤੇ, ਤੁਸੀਂ ਇੱਕ ਗੱਲ ਸਿੱਖੋ - ਕਦੇ ਤਜਰਬੇਕਾਰ ਧਿਆਨੀ ਨਾ ਬਣੋ - ਤਾਂ ਖ਼ੁਦ ਨੂੰ ਇੱਕ ਉਲਝਣ ਵਿੱਚ ਧੱਕ ਦੇਵੋਗੇ!
+
+
+
+'ਧਿਆਨ' ਹਰ ਵਾਰ ਨਵੇਂ ਸਿਰਿਓਂ ਖਿੜਨ ਵਰਗਾ ਹੈ! ਹਰ ਵਾਰ ਇਹ ਇੱਕ ਨਵੀਂ ਸੰਭਾਵਨਾ ਹੈ।
+
+
+
+ਨਹੀਂ ਤਾਂ, …   "ਮੈਂ ਵੀਹ ਸਾਲ ਧਿਆਨ ਕੀਤਾ, ਇਸ ਲਈ ਮੈਂ ਤਜਰਬੇਕਾਰ ਧਿਆਨੀ ਹਾਂ!" …   ਇੰਝ ਕੁਝ ਨਹੀਂ ਹੁੰਦਾ।
+
+
+
+ਉਦਾਹਰਨ ਲਈ - ਮੰਨ ਲਓ, ਤੁਸੀਂ ਪਿਛਲੇ ਦਸ ਸਾਲ ਤੋਂ ਬਾਗ਼ਬਾਨੀ ਕੀਤੀ ਹੈ; ਕੀ ਇਸਦਾ ਮਤਲਬ ਹੈ - ਇਸ ਵਾਰ, ਇਸ ਮੌਸਮ ਵਿੱਚ, 'ਬੂਟੇ ਲਾਏ ਬਿਨਾਂ, ਬਾਗ਼ ਵਿੱਚ ਫੁੱਲ ਆਪਣੇ ਆਪ ਖਿੜਨਗੇ'? ਜਾਂ 'ਪਾਣੀ ਦਿੱਤੇ ਬਿਨਾਂ, ਬਾਗ਼ ਵਿੱਚ ਫੁੱਲ ਆਪਣੇ ਆਪ ਖਿੜਨਗੇ'? ਸਾਂਭ-ਸੰਭਾਲ ਕੀਤੇ ਬਿਨਾਂ ਵੀ, ਫੁੱਲ ਆਪਣੇ ਆਪ ਖਿੜਨਗੇ - ਕਿਉਂਕਿ ਤੁਹਾਡਾ ਤਜਰਬਾ ਹੈ!? - ਕੀ ਇੰਝ ਹੁੰਦਾ ਹੈ?
+
+
+
+ਨਹੀਂ, ਇਸ ਵਾਰ ਵੀ ਸਭ ਕੁਝ ਠੀਕ ਤਰ੍ਹਾਂ ਕਰਨਾ ਹੋਵੇਗਾ। ਤਦੇ ਫੁੱਲ ਖਿੜਨਗੇ; ਹੈ ਨਾ?
+
+
+
+ਸ਼ਾਇਦ... ਮਿੱਟੀ ਕਿਵੇਂ ਰੱਖਣੀ ਹੈ... ਕਿੰਨਾ ਪਾਣੀ ਦੇਣਾ ਹੈ … ਬਾਗ਼ ਨੂੰ ਕਿਵੇਂ ਚਲਾਉਣਾ ਹੈ - ਸ਼ਾਇਦ ਇਹਨਾਂ ਗੱਲਾਂ ਵਿੱਚ ਤਜਰਬਾ ਕੰਮ ਆਵੇ; ਨਹੀਂ ਤਾਂ ਫੁੱਲ ਆਪਣੇ ਆਪ ਨਹੀਂ ਖਿੜਨਗੇ - ਸਿਰਫ਼ ਇਸ ਲਈ ਕਿ ਤੁਹਾਡਾ ਤਜਰਬਾ ਹੈ! ਜੀਵਨ ਵਿੱਚ ਕੁਝ ਵੀ - ਤਜਰਬਾ ਹੋਣ ਨਾਲ ਆਪਣੇ ਆਪ ਨਹੀਂ ਹੁੰਦਾ। ਇਸ ਵਾਰ ਵੀ ਸਭ ਕੁਝ ਠੀਕ ਤਰ੍ਹਾਂ ਕਰਨਾ ਹੋਵੇਗਾ, ਹੈ ਨਾ?
+
+
+
+ਹਾਂ?
+
+
+
+ਧਿਆਨ ਵਿੱਚ ਵੀ ਇੰਝ ਹੀ ਹੈ, ਕਦੇ ਸੀਨੀਅਰ ਧਿਆਨੀ ਨਾ ਬਣੋ। ਧਿਆਨ ਵਿੱਚ ਹਰ ਵਾਰ ਬੈਠਣਾ, ਜਿਵੇਂ ਜੀਵਨ ਵਿੱਚ ਪਹਿਲੀ ਵਾਰ ਬੈਠ ਰਹੇ ਹੋ - ਇੰਝ ਬੈਠੋ। ਤਦੇ ਇਹ ਜ਼ਬਰਦਸਤ ਕੰਮ ਕਰੇਗਾ।
+
+
+
+
+2. ਮੈਂ ਆਪਣੇ ਵਿਚਾਰਾਂ ਨੂੰ ਕਿਵੇਂ ਕਾਬੂ ਕਰਾਂ?
+
+
+
+ਸਦਗੁਰੂ:
+
+ਮਨ ਵਿੱਚ .. ਬੇਲਗਾਮ ਵਿਚਾਰ, ਭਾਵਨਾਵਾਂ ਆਉਣ, ਤਾਂ ਪਹਿਲਾਂ ਤੁਹਾਨੂੰ ਜੋ ਕਰਨਾ ਹੈ - ਉਹਨਾਂ ਨੂੰ ਜਿਵੇਂ ਹਨ ਉਵੇਂ ਵੇਖੋ; ਰੋਕਣ ਨਾ ਜਾਓ, ਰੋਕੋਗੇ ਤਾਂ - ਉਹ ਪਲ ਵਿੱਚ ਦੁੱਗਣੇ ਹੋ ਜਾਣਗੇ।
+
+
+
+ਇਸ ਮਨ ਵਿੱਚ ਘਟਾਓ, ਭਾਗ ਨਹੀਂ; ਜੋੜ, ਗੁਣਾ ਹੀ ਹੈ।
+
+
+
+"ਮੈਨੂੰ ਇਹ ਭਾਵਨਾ ਨਹੀਂ ਚਾਹੀਦੀ" - ਕਹੋਗੇ, ਤਾਂ ਉਹ ਵਧਦੀ ਹੈ - ਇੱਕ ਤੋਂ ਦੋ ਹੋ ਜਾਂਦੀ ਹੈ।
+
+
+
+"ਓਏ, ਇਹ ਫਿਰ ਆ ਰਹੀ ਹੈ; ਮੈਨੂੰ ਇਹ ਨਹੀਂ ਚਾਹੀਦੀ, ਮੈਨੂੰ ਇਹ ਨਹੀਂ ਚਾਹੀਦੀ" - ਕਹੋਗੇ, ਤਾਂ ਉਹ ਸੌ ਗੁਣਾ ਹੋ ਜਾਂਦੀ ਹੈ। ਤੁਹਾਡੇ ਮਨ ਦਾ ਸੁਭਾਅ ਹੀ ਇਹੀ ਹੈ।
+
+
+
+ਮਨ ਵਿੱਚੋਂ ਕੁਝ ਵੀ ਧੱਕੇ ਨਾਲ ਨਹੀਂ ਹਟਾਇਆ ਜਾ ਸਕਦਾ। ਕਿਸੇ ਲਈ ਵੀ ਮਨ ਵਿੱਚੋਂ ਕੁਝ ਧੱਕੇ ਨਾਲ ਹਟਾਉਣ ਦਾ ਕੋਈ ਤਰੀਕਾ ਨਹੀਂ।
+
+
+
+ਤਾਂ ਤੁਹਾਨੂੰ ਜੋ ਕਰਨਾ ਹੈ - ਇੰਨਾ ਸਮਝੋ - ਉਹ ਇਹ ਹੈ ਕਿ, 'ਵਿਚਾਰ ਤੇ ਭਾਵਨਾਵਾਂ' ਦਰਅਸਲ ਪਹਿਲਾਂ ਤੋਂ ਇਕੱਠੀ ਕੀਤੀ ਜਾਣਕਾਰੀ ਦੀ ਮੁੜ-ਵਰਤੋਂ ਹੀ ਹਨ! ਯਾਦਾਸ਼ਤ ਦੀ ਰੀਸਾਈਕਲਿੰਗ!
+
+
+
+ਪਰ, 'ਮੈਮੋਰੀ' ਥੋੜ੍ਹੀ ਬੂ ਫੈਲਾਉਂਦੀ ਹੈ; ਉਹ ਆਉਂਦੀ ਰਹਿੰਦੀ ਹੈ। ਉਸਨੂੰ ਉਸੇ ਤਰ੍ਹਾਂ ਵੇਖਣਾ ਹੋਵੇਗਾ! ਉਸ ਤੋਂ ਥੋੜ੍ਹੀ ਦੂਰੀ ਬਣਾਉਣੀ ਹੋਵੇਗੀ!
+
+
+
+ਇਹ ਕਿਵੇਂ ਹੈ - ਮੰਨ ਲਓ, ਤੁਸੀਂ ਟ੍ਰੈਫਿਕ ਜਾਮ ਵਿੱਚ ਫਸੇ ਹੋ; ਏਅਰਪੋਰਟ ਜਾ ਰਹੇ ਹੋ, ਟ੍ਰੈਫਿਕ ਜਾਮ ਵਿੱਚ ਫਸ ਗਏ - 'ਕਿੰਨੇ' ਚਿੰਤਿਤ, ਬੇਚੈਨ ਹੋ ਰਹੇ ਹੋ! ਠੀਕ ਹੈ, ਕਿਸੇ ਤਰ੍ਹਾਂ ਏਅਰਪੋਰਟ ਪਹੁੰਚੇ ਤੇ ਜਹਾਜ਼ ਵਿੱਚ ਸਵਾਰ ਹੋ ਕੇ ਚੱਲ ਪਏ।
+
+
+
+ਹੇਠਾਂ ਟ੍ਰੈਫਿਕ ਬੁਰੀ ਤਰ੍ਹਾਂ ਜਾਮ। ਹੁਣ ਉੱਪਰੋਂ ਵੇਖੋ ਤਾਂ, "ਵਾਹ, ਉਹ ਟ੍ਰੈਫਿਕ ਜਾਮ ਕਿੰਨਾ ਸੋਹਣਾ ਹੈ!" …  ਸਿਰਫ਼ ਥੋੜ੍ਹੀ ਦੂਰੀ ਹੋਣ ਨਾਲ!
+
+
+
+ ਹੁਣ ਵੀ ਉਹੀ ਟ੍ਰੈਫਿਕ ਜਾਮ - ਪਰ ਦੂਰੀ ਹੋਣ ਨਾਲ, ਪਲ ਭਰ ਵਿੱਚ ਗੱਲ ਹਲਕੀ ਹੋ ਜਾਂਦੀ ਹੈ। ਉਵੇਂ ਹੀ ਤੁਹਾਡੇ ਵਿਚਾਰਾਂ, ਭਾਵਨਾਵਾਂ ਨਾਲ ਵੀ!
+
+
+
+ਥੋੜ੍ਹੀ ਸਾਧਨਾ ਨਾਲ … ਥੋੜ੍ਹੀ ਦੂਰੀ ਆਉਂਦੀ ਹੈ - ਤੁਹਾਡੀ ਸਰੀਰਕ ਪ੍ਰਕਿਰਿਆ ਤੋਂ! ਤੇ ਮਾਨਸਿਕ ਪ੍ਰਕਿਰਿਆ ਤੋਂ ਵੀ!
+
+
+
+ਉਹ ਨਾ ਕਰਕੇ ਹਰ ਵਿਚਾਰ, ਭਾਵਨਾ ਨਾਲ ਜੂਝਣ ਜਾਓ, ਤਾਂ ਉਹ ਹਜ਼ਾਰ ਗੁਣਾ ਹੋ ਜਾਂਦੇ ਹਨ।
+
+
+
+
+3. ਕੱਲ੍ਹ ਧਿਆਨ ਛੱਡਣਾ ਸੋਚਾਂ ਤਾਂ...
+
+
+
+ਸਦਗੁਰੂ: ਸਾਰਿਆਂ ਨੇ ਦੰਦ ਸਾਫ਼ ਕੀਤੇ?
+
+
+
+ਪ੍ਰਤੀਭਾਗੀ: ਕੀਤੇ।
+
+
+
+ਸਦਗੁਰੂ: ਚੰਗਾ!
+
+
+
+ਖ਼ੁਦ ਕੀਤੇ... ਜਾਂ ਤੁਹਾਡੇ ਮਾਪਿਆਂ, ਪਤੀ, ਪਤਨੀ, ਜਾਂ ਕਿਸੇ ਹੋਰ ਨੇ ਜ਼ੋਰ ਦੇ ਕੇ - "ਅੱਜ ਦੰਦ ਸਾਫ਼ ਕਰਨੇ ਹੀ ਹਨ" - ਕਿਹਾ?
+
+
+
+ਖ਼ੁਦ ਕੀਤੇ!
+
+
+
+ਪ੍ਰਤੀਭਾਗੀ: ਹਾਂ।
+
+
+
+ਸਦਗੁਰੂ: ਓਹ! ਸ਼ਾਨਦਾਰ!
+
+
+
+ਪਰ ਯਾਦ ਹੈ ਤੁਹਾਨੂੰ, ਤੁਹਾਡੇ ਜੀਵਨ ਵਿੱਚ ਇੱਕ ਸਮਾਂ - ਇੰਨੀ ਛੋਟੀ ਉਮਰ ਵਿੱਚ - ਤੁਹਾਡੀ ਮਾਂ ਜ਼ੋਰ ਦੇ ਕੇ ਕਹਿੰਦੀ ਸੀ "ਦੰਦ ਸਾਫ਼ ਕਰਨੇ ਹੀ ਹਨ। ਨਹੀਂ ਤਾਂ ਨਾਸ਼ਤਾ ਨਹੀਂ ਮਿਲੇਗਾ!"
+
+ਕਿੰਨੇ ਦਿਨ? - ਤਿੰਨ ਮਹੀਨੇ, ਛੇ ਮਹੀਨੇ, ਜਾਂ ਇੱਕ ਸਾਲ!
+
+
+
+ਉਸ ਤੋਂ ਬਾਅਦ, ਖ਼ੁਦ ਕਰਦੇ ਹੋ; ਕੱਲ੍ਹ ਤੁਹਾਡੀ ਮਾਂ ਆ ਕੇ, "ਸੁਣੋ, ਦੰਦ ਸਾਫ਼ ਕਰਨਾ ਦਰਅਸਲ ਗ਼ਲਤ ਹੈ; ਇਸ ਨਾਲ ਕੋਈ ਫ਼ਾਇਦਾ ਨਹੀਂ; ਮੈਂ ਛੱਡ ਦਿੱਤਾ; ਤੂੰ ਵੀ ਛੱਡ ਦੇ" - ਕਹਿਣ, ਤਾਂ ਛੱਡੋਗੇ?
+
+ਪ੍ਰਤੀਭਾਗੀ: ਨਹੀਂ ਛੱਡਾਂਗਾ।
+
+
+
+ਸਦਗੁਰੂ: ਕਿਉਂ?
+
+
+
+ਕਿਉਂਕਿ ਹੁਣ ਤੁਸੀਂ ਸਮਝ ਗਏ ਹੋ - 'ਇਸਦਾ ਮਹੱਤਵ ਕੀ ਹੈ, ਇਹ ਤੁਹਾਡੇ ਲਈ ਕੀ ਕਰ ਰਿਹਾ ਹੈ।'
+
+
+
+ਹੁਣ ਕਿਸੇ ਨੂੰ ਇਹ ਕਰਨ ਲਈ ਜ਼ੋਰ ਨਹੀਂ ਪਾਉਣਾ ਪਵੇਗਾ।
+
+
+
+ਇਸਦਾ ਮਹੱਤਵ ਨਾ ਸਮਝਣ ਤੱਕ, ਕਿਸੇ ਨੂੰ ਦਬਾਅ ਪਾ ਕੇ ਕਰਵਾਉਣਾ ਪੈਂਦਾ ਹੈ; ਇਸਦਾ ਮਹੱਤਵ ਸਮਝ ਜਾਓ ਤਾਂ, ਕਿਸੇ ਨੂੰ ਦੱਸਣ ਦੀ ਲੋੜ ਨਹੀਂ, ਹੈ ਨਾ? ਕਿਉਂਕਿ, ਹੁਣ - ਇਹ ਤੁਹਾਡੇ ਲਈ ਕੀ ਕਰ ਰਿਹਾ ਹੈ ਇਹ ਤੁਸੀਂ ਜਾਣ ਗਏ ਹੋ; ਕੋਈ 'ਨਾ ਕਰੋ' ਕਹੇ, ਤਾਂ ਵੀ ਤੁਸੀਂ ਕਰੋਗੇ। ਇਸ ਲਈ, ਇਸੇ ਦ੍ਰਿੜ੍ਹਤਾ ਨਾਲ ਸ਼ੁਰੂ ਕਰਦੇ ਹਾਂ, ਠੀਕ ਹੈ?
+
+
+
+
+4. ਧਿਆਨ ਕੰਮ ਕਰਦਾ ਹੈ ਕੀ?
+
+
+
+ਸਦਗੁਰੂ:
+
+ਇਹ ਕੰਮ ਕਰਦਾ ਹੈ ਕੀ? …
+
+
+
+ਸ਼ਾਇਦ ਹਮੇਸ਼ਾ …  ਸਰੀਰਕ ਪ੍ਰਗਟਾਵੇ ਹੀ ਸਭ ਤੋਂ ਸਿੱਧੇ ਅਨੁਭਵ ਵਿੱਚ ਆਉਂਦੇ ਹਨ। ਪਰ ਹੋਰ ਵੀ ਕਈ ਪ੍ਰਗਟਾਵੇ ਹਨ ... ਸਰੀਰਕ ਤੇ ਮਾਨਸਿਕ ਸਥਿਤੀ ਤੋਂ ਪਰੇ ਵੀ ਕਈ ਪ੍ਰਗਟਾਵੇ ਹਨ।
+
+
+
+ਸਰੀਰਕ ਤੇ ਮਾਨਸਿਕ ਤੌਰ ਉੱਤੇ - ਕਿਸੇ ਵੀ ਸਭਾ ਵਿੱਚ ਇਹ ਤੁਹਾਨੂੰ ਵੱਖਰਾ ਬਣਾ ਦੇਵੇਗਾ - ਜੇ ਤੁਸੀਂ ਇਸ ਸਾਧਨਾ ਲਈ ਖ਼ੁਦ ਨੂੰ ਕਾਫ਼ੀ ਸਮਰਪਿਤ ਕਰੋ!
+
+
+
+ਪਰ ਇਹ ਫ਼ਾਇਦੇ, ਇਹ ਸਭ … ਸਿਹਤ ਦੀ ਨਜ਼ਰ ਤੋਂ ਵੇਖੋ - ਕਈ ਆਧੁਨਿਕ ਖੋਜਾਂ ਦੱਸ ਰਹੀਆਂ ਹਨ - ਇਹ ਤੁਹਾਡੇ ਲਈ ਜ਼ਬਰਦਸਤ ਕੰਮ ਕਰੇਗਾ!
+
+
+
+ਪਰ ਇਹ ਸਭ - ਸਰੀਰਕ ਸਿਹਤ, ਮਾਨਸਿਕ ਸਮਰੱਥਾ, ਜੀਵਨ ਨੂੰ ਸੌਖ ਨਾਲ ਸੰਭਾਲਣਾ - ਇਹ ਸਭ ਸਿਰਫ਼ ਉਪ-ਫਲ ਹਨ; ਅਸਲੀ ਗੱਲ ਹੌਲੀ-ਹੌਲੀ ਆਕਾਰ ਲੈ ਰਹੀ ਹੈ। ਉਹ - ਪ੍ਰਗਟ ਹੋਣ ਉੱਤੇ ਹੀ ਤੁਸੀਂ ਜਾਣੋਗੇ। ਉਸ ਤੋਂ ਪਹਿਲਾਂ ਲੱਗੇਗਾ ਕੁਝ ਹੋ ਹੀ ਨਹੀਂ ਰਿਹਾ।
+
+
+
+ਇਹ ਕਿਵੇਂ ਹੈ - ਤੁਹਾਡੇ ਘਰ ਵਿੱਚ … ਇੱਕ ਫੁੱਲ ਦਾ ਬੂਟਾ ਲਾਇਆ; ਉਹ ਵਧ ਰਿਹਾ ਹੈ - ਸਿਰਫ਼ ਪੱਤੇ ਨਿਕਲ ਰਹੇ ਹਨ!
+
+
+
+ਗੁਆਂਢੀ ਤੁਹਾਨੂੰ ਕਹਿਣਗੇ, "ਕੋਈ ਫ਼ਾਇਦਾ ਨਹੀਂ; ਫੁੱਲ ਕਿਹਾ ਸੀ, ਪੱਤੇ ਨਿਕਲ ਰਹੇ ਹਨ। ਵੱਢ ਲਓ, ਅੱਗ ਸੇਕਣ ਦੇ ਕੰਮ ਆਵੇਗਾ।"
+
+
+
+ਤੁਸੀਂ ਕਹੋਗੇ, "ਰੁਕੋ, ਸ਼ਾਇਦ ਕੱਲ੍ਹ ਸਵੇਰੇ ਖਿੜੇਗਾ!"
+
+
+
+ਅਗਲੇ ਦਿਨ ਸਵੇਰੇ ਕੁਝ ਨਹੀਂ ਆਉਂਦਾ।
+
+
+
+ਫਿਰ, "ਇੱਕ ਹੋਰ ਦਿਨ ਵੇਖਦੇ ਹਾਂ" - ਇੱਕ ਹੋਰ ਦਿਨ, ਇੱਕ ਹੋਰ ਦਿਨ... ਇੰਝ ਸਾਲ ਲੰਘ ਜਾਂਦਾ ਹੈ; ਇਹ ਬੂਟਾ ਖਿੜਨ ਵਿੱਚ ਕਿੰਨਾ ਸਮਾਂ ਲੈਂਦਾ ਹੈ ਜੇ ਤੁਸੀਂ ਨਹੀਂ ਜਾਣਦੇ, ਤਾਂ ਸ਼ਾਇਦ ਸੌ ਵਾਰ ਵੱਢ ਦਿੰਦੇ।
+
+
+
+ਪਰ ਉਸਦੀ ਸਾਂਭ-ਸੰਭਾਲ ਕਰਦੇ ਰਹੋ - ਇੱਕ ਦਿਨ ਉਹ ਖਿੜੇਗਾ, ਫੁੱਲਾਂ ਨਾਲ ਭਰ ਜਾਵੇਗਾ, ਤਦ ਤੁਸੀਂ ਸਮਝੋਗੇ - "ਇਹ ਬੂਟਾ ਪੱਤਿਆਂ ਲਈ ਨਹੀਂ... ਇਹ ਛਾਂ ਲਈ ਨਹੀਂ... ਇਹ ਥੋੜ੍ਹੀ ਆਕਸੀਜਨ ਲਈ ਵੀ ਨਹੀਂ"!
+
+
+
+ਫੁੱਲ ਖਿੜਨ ਉੱਤੇ 'ਇਹ' ਕਹਿਣ ਲਾਇਕ ਨਹੀਂ ਰਹਿੰਦਾ - ਇੰਨਾ ਸੋਹਣਾ ਹੁੰਦਾ ਹੈ!
+
+
+
+
+5. ਧਿਆਨ ਕੀ ਸੱਚੀਂ ਕੰਮ ਕਰਦਾ ਹੈ?
+
+
+
+ਇੰਝ ਨਾ ਸੋਚੋ - ਅੱਜ ਸਾਧਨਾ ਕੀਤੀ, "ਓਹ ਮੇਰੇ ਨਾਲ ਕੁਝ ਹੋਇਆ ਹੀ ਨਹੀਂ!" ਅਗਲੇ ਦਿਨ ਸਾਧਨਾ ਕੀਤੀ, "ਓਹ ਮੇਰੇ ਨਾਲ ਕੁਝ ਹੋਇਆ ਹੀ ਨਹੀਂ!" ਕੁਝ ਹੋਣ ਦੀ ਲੋੜ ਨਹੀਂ, ਸਮਝੇ? ਬਸ ਕਰਦੇ ਰਹਿਣਾ! ਇਸਨੂੰ ਇੱਕ ਸਮਰਪਣ ਵਜੋਂ ਕਰੋ, ਸਮਝੇ?
+
+
+
+ਕੁਝ ਪਾਉਣ ਦੀ ਲੋੜ ਨਹੀਂ! ਜੀਵਨ ਜਿਊਣ ਦਾ ਇਹ ਤਰੀਕਾ ਨਹੀਂ ਹੈ - "ਇਹ ਕੀਤਾ, ਕੀ ਮਿਲੇਗਾ? ਉਹ ਕੀਤਾ, ਕੀ ਮਿਲੇਗਾ?" - ਇਹ ਜਿਊਣ ਦਾ ਤਰੀਕਾ ਨਹੀਂ।
+
+
+
+"ਮੈਨੂੰ ਕੀ ਮਿਲੇਗਾ?" - ਜੋ ਇੰਝ ਸੋਚਦੇ ਹਨ, ਉਹ ਜੀਵਨ ਨਹੀਂ ਜਾਣ ਸਕਦੇ। ਜੋ ਤੁਹਾਨੂੰ 'ਅਹਿਮ ਲੱਗੇ', ਉਹ ਕਰਦੇ ਰਹੋ - ਬਸ ਇੱਕ ਸਮਰਪਣ ਵਜੋਂ! ਜੋ ਹੋਣਾ ਹੈ ਹੋਵੇਗਾ!
+
+
+
+ਪਰ ਤੁਸੀਂ ਬਹੁਤ ਗੋਲ-ਓਰੀਐਂਟਿਡ ਹੋ ਗਏ ਹੋ - ਰੁੱਖ ਵਧਣ ਤੋਂ ਪਹਿਲਾਂ ਹੀ ਤੁਹਾਨੂੰ ਅੰਬ ਚਾਹੀਦਾ ਹੈ!
+
+
+
+ਨਹੀਂ! ਰੁੱਖ ਨੂੰ ਵੱਡਾ ਕਰੋ, ਉਸਦੀ ਸਾਂਭ-ਸੰਭਾਲ ਕਰੋ... ਅੰਬ ਤੁਹਾਡੇ ਸਿਰ ਉੱਤੇ ਡਿੱਗੇਗਾ - ਭਾਵੇਂ ਚਾਹੋ ਨਾ ਚਾਹੋ!
+
+
+
+Focus area 2: Length of the Punjabi segments:
+
+I am giving the english segments in the below format that contains metadata and the actual segment text.
+
+[Segment duration][Gap after segment][Gap after segment in percentage wrt segment length][Total duration available for dubbing segment] [Number of syllables in the segment] [Number of syllables per second] [Relative number of syllables per second] [Number of words] Actual text of segment
+
+
+
+Gap threshold = minimum 20 %
+Relative density threshold - 1.1
+
+
+
+that means if the gap after the segment is less than 20% of the length of the segment, then that segment is flagged for gap threshold.
+that means if the Relative number of syllables per second is greater than 1.3 times the average number of syllables per second, then that segment is flagged for gap threshold.
+
+Now
+
+Gap threshold flagged, density threshold flagged
+
+Case 1:
+Gap threshold flagged, density threshold flagged
+Action:
+need heavy compressing. Express the main idea by cutting as many additional details as possible. Just convey the main point in short and crisp way. And add tags [fast][/fast] around the corresponding Punjabi segment so that ElevenLabs will render this segment in fast pace.
+
+Case 2:
+Gap threshold flagged, density threshold not flagged
+Action:
+Here the aim is to achieve at least some level of shortening, so that the Punjabi fits in - as there is no gap after this.
+
+Apply all the shortening approaches mentioned above
+
+also use below Shortening approaches as well:
+
+You have three additional tools to shorten without losing the actual intent that is being conveyed:
+
+Sandhi (ਸੰਧੀ / Vowel Merging): Merge vowels and adjacent sounds where Punjabi naturally permits it (e.g., "ਕਰ ਕੇ" → "ਕਰਕੇ"; "ਜਾ ਕੇ" → "ਜਾਕੇ"; "ਹੋ ਗਿਆ ਹੈ" → "ਹੋ ਗਿਆ"). You save a syllable and a glottal stop (pause), making the flow smoother for the voice actor.
+
+Samasa (ਸਮਾਸ / Compound Nouns): Instead of "ਜੀਵਨ ਦਾ ਸੰਕੇਤ" (The signs of life), you use "ਜੀਵਨ-ਸੰਕੇਤ". It sounds tighter and cuts the length significantly.
+
+Half sentence: sometimes while speaking we just say the main info part given the context is already established by previous sentences. if needed use this approach.
+
+Verb Fusing / Contracted Forms: Use contracted spoken forms — "ਕਰ ਰਿਹਾ ਹਾਂ" → "ਕਰ ਰਿਹਾ"; "ਜਾ ਰਹੇ ਹਨ" → "ਜਾ ਰਹੇ"; "ਹੋ ਨਹੀਂ" → "ਨਹੀਂ ਹੁੰਦਾ". It turns a concept into a single action and matches natural Punjabi colloquial speech.
+
+
+
+make sure the real intention being conveyed is not diluted. this is high priority. You aren't "diluting" the Master's words; you are "distilling" them. that means you are not skipping details, you are adjusting the structure.
+- Reduce verbosity while preserving meaning.
+- use context from previous and next segments
+- avoid repeating ideas already stated nearby
+- Do not remove key philosophical or logical meaning, Prefer simplifying structure over dropping whole concepts altogether.
+
+You should check if the segments tagged for shortening are able to be pronounced within The total time available for the dubbing segment. One way to check is the number of Akṣaras (syllabic units) in the Punjabi segment must be almost same as the number of English syllables. For example, in ਪ੍ਰਕਿਰਿਆ there are four syllabic units ਪ੍ਰ, ਕਿ, ਰਿ, and ਆ.
+
+
+Case 3:
+Gap threshold not flagged, density threshold flagged
+Action:
+Make the Punjabi crisp without losing any details.
+
+
+Case 4:
+Gap threshold not flagged, density threshold not flagged
+- no need to shorten
+
+
+
+
+Secondary: check if the segments can be spoken in the time in general, if any Punjabi segment contains relatively large number of words or lengthy words compared to corresponding English segment, shorten them also.
+
+
+
+Additional requirement:
+
+if the original audio includes the promo part (few sentences from the talk shown at the start of the video to create interest in the viewer) then, Both the scripts should also include the promo part at the beginning.
+
+
+Also, if you have to truncate the output because mention that also at the beginning. and then give the actual translation asked above.
+
+Below is the formatted English script :

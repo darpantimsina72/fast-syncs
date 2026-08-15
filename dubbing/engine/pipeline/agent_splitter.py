@@ -18,6 +18,7 @@ LANG_CHARS_PER_SEC = {
     "Telugu": 11.5,
     "Kannada": 11.5,
     "Malayalam": 12.0,
+    "Punjabi": 10.5,
     "Sanskrit": 10.0,
     "English": 14.0,
 }
