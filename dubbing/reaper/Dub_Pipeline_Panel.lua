@@ -136,9 +136,69 @@ local V5 = {
   tool          = "tts",     -- Tools tab: tts | regen | voice
 }
 
+-- An UNSAVED project has no filename to hash, and every one of them used to
+-- return the literal slug "unsaved". run_dub.py rmtree's the per-project
+-- status dir on launch, so a second unsaved project — the exact "run two
+-- REAPER instances" workflow the README recommends — deleted the first run's
+-- live engine_log/engine_pid out from under it mid-run.
+--
+-- Mint a token per project instead. It is kept in NON-persistent global ext
+-- state (per running REAPER instance, memory only), keyed by the project
+-- pointer:
+--   * not project ext state, which would mark an untouched project dirty and
+--     trigger a spurious "save changes?" prompt on close;
+--   * not the pointer alone, which is only unique within one process and so
+--     could collide between two instances.
+-- Stable for the life of the project, so a poll started before the token
+-- existed keeps resolving to the same directory.
+-- On V5, not a file-level `local`: this chunk sits at Lua's 200-locals-per-
+-- function limit, and two more would fail to compile ("too many local
+-- variables in main function").
+V5.STATUS_EXT_SECTION = "FastSyncsDub"
+
+-- Windows argument quoting, per the CommandLineToArgvW rules that every
+-- MSVCRT-linked program (python.exe included) uses to split its command line.
+-- Wrapping a value in bare double quotes — what this file did before — is NOT
+-- escaping: any value containing a quote escapes its own argument. VOICE_ID
+-- and the ElevenLabs model name are both editable in Settings and both flow
+-- into the launch command, so this has to be correct rather than approximate.
+--
+-- Rules: backslashes are literal EXCEPT before a quote. A run of N
+-- backslashes before a `"` becomes 2N backslashes plus an escaped quote; a
+-- run at the very end becomes 2N so it cannot escape our closing quote.
+-- Windows paths therefore round-trip unchanged ("C:\dir\file.py" stays as
+-- typed, "C:\dir\" becomes "C:\dir\\" and parses back correctly).
+function V5.winquote(s)
+  s = tostring(s or "")
+  s = s:gsub('(\\*)"', function(b) return b .. b .. '\\"' end)
+  s = s:gsub('(\\+)$', function(b) return b .. b end)
+  return '"' .. s .. '"'
+end
+
+function V5._unsaved_project_token(proj)
+  local key = "status_token_" .. (tostring(proj):gsub("[^%w]", ""))
+  local tok = reaper.GetExtState(V5.STATUS_EXT_SECTION, key) or ""
+  tok = tok:gsub("[^%x]", "")
+  if tok == "" then
+    local h = 5381
+    local seed = table.concat({
+      tostring(proj),
+      string.format("%.6f", reaper.time_precise and reaper.time_precise() or 0),
+      tostring(os.time()),
+      tostring(math.random(0, 0xFFFFFF)),   -- Lua 5.4 auto-seeds per instance
+    }, "|")
+    for i = 1, #seed do h = (h * 33 + seed:byte(i)) % 4294967296 end
+    tok = string.format("%08x", h)
+    reaper.SetExtState(V5.STATUS_EXT_SECTION, key, tok, false)
+  end
+  return tok
+end
+
 function V5.project_status_slug()
-  local _, projfn = reaper.EnumProjects(-1, "")
-  if not projfn or projfn == "" then return "unsaved" end
+  local proj, projfn = reaper.EnumProjects(-1, "")
+  if not projfn or projfn == "" then
+    return "unsaved_" .. V5._unsaved_project_token(proj)
+  end
   local h = 5381
   for i = 1, #projfn do h = (h * 33 + projfn:byte(i)) % 4294967296 end
   local base = projfn:match("([^/\\]+)%.[Rr][Pp][Pp]$")
@@ -253,9 +313,24 @@ local function _mask_key(key)
 end
 
 -- Open a file/URL with the OS default handler.
+-- On Windows the `start` route goes through cmd.exe, which expands %VAR% and
+-- acts on & | < > ^ before anything else sees the string, and a path holding
+-- a double quote ends the quoting outright. Values here are built from the
+-- script directory and the user's own settings, so they are not guaranteed
+-- quote-free. Refuse rather than guess: CF_ShellExecute (SWS) takes the path
+-- as a value and is the safe route when it exists.
 local function open_path(path)
+  path = tostring(path or "")
   if reaper.CF_ShellExecute then reaper.CF_ShellExecute(path)
-  elseif reaper.GetOS():match('Win') then os.execute('start "" "' .. path .. '"')
+  elseif reaper.GetOS():match('Win') then
+    if path:find('["%%&|<>^]') then
+      reaper.MB("Cannot open this path safely because it contains a "
+                .. "character cmd.exe would interpret:\n\n" .. path
+                .. "\n\nInstall the SWS extension (which adds CF_ShellExecute) "
+                .. "or open it manually.", "Cannot open path", 0)
+      return
+    end
+    os.execute('start "" "' .. path .. '"')
   elseif reaper.GetOS():match('OSX') or reaper.GetOS():match('macOS') then
     os.execute('open ' .. shellquote(path))
   else os.execute('xdg-open ' .. shellquote(path)) end
@@ -2153,9 +2228,13 @@ end
 -- Launch + poll
 -- ---------------------------------------------------------------------------
 
--- Every path is quoted — this project's paths all contain spaces.
--- Language names never contain spaces (argparse choices), voice/model are
--- quoted anyway in case of stray whitespace.
+-- EVERY interpolated value is quoted — no exceptions. Paths in this project
+-- all contain spaces, and language names are NOT the fixed argparse choices
+-- they once were: config/custom_languages.json is user-editable and its
+-- entries are appended to LANGUAGES (V5.custom_langs_load), so a name with a
+-- space used to break the launch and a name with shell metacharacters used to
+-- run as a command. Names are now filtered on load as well — quoting here is
+-- the second layer, not the only one.
 -- opts: audio, language, steps, script, provided_script, regen (bool),
 -- text_file, out_wav, test_llm (bool), list_voices (bool),
 -- voice_change (bool), in_wav, voice_id (overrides the Settings voice) —
@@ -2168,9 +2247,7 @@ local function build_engine_cmd(py, opts)
   -- quotes are the correct escaping. macOS/Linux: os.execute goes through
   -- /bin/sh, where double quotes still expand $, backtick and backslash and
   -- an embedded " breaks the whole line — use POSIX single-quoting there.
-  local q = _is_windows()
-            and function(s) return '"' .. s .. '"' end
-            or  shellquote
+  local q = _is_windows() and V5.winquote or shellquote
   local parts = {
     q(py),
     q(RUN_DUB_PY),
@@ -2188,7 +2265,7 @@ local function build_engine_cmd(py, opts)
     -- Voice catalogue for the current language; no audio/voice flags.
     parts[#parts + 1] = '--list-voices'
     parts[#parts + 1] = '--language'
-    parts[#parts + 1] = opts.language or LANGUAGE
+    parts[#parts + 1] = q(opts.language or LANGUAGE)
     return table.concat(parts, ' ')
   end
   if opts.regen then
@@ -2206,7 +2283,7 @@ local function build_engine_cmd(py, opts)
     parts[#parts + 1] = q(opts.audio)
   end
   parts[#parts + 1] = '--language'
-  parts[#parts + 1] = opts.language or LANGUAGE
+  parts[#parts + 1] = q(opts.language or LANGUAGE)
   -- opts.voice_id overrides the Settings voice (used by voice change).
   local vid = opts.voice_id or VOICE_ID
   if vid and vid:match("%S") then
@@ -2219,7 +2296,7 @@ local function build_engine_cmd(py, opts)
   end
   if opts.steps then
     parts[#parts + 1] = '--steps'
-    parts[#parts + 1] = opts.steps
+    parts[#parts + 1] = q(opts.steps)
   end
   if opts.script then
     parts[#parts + 1] = '--script'
@@ -2265,9 +2342,23 @@ end
 --          up (our .bat scripts end with `pause`). Empty title so a path
 --          with spaces (…/fast syncs/…) is the program, not the title.
 -- Returns the shell command run (shown to the user as a manual fallback).
+-- Every interpolation below is escaped. `path` is the install directory plus
+-- a script name, so it is only as trustworthy as wherever the user unzipped
+-- the project: double quotes do not escape $ or backticks for /bin/sh, and on
+-- Windows the `start` route hands the whole string to cmd.exe. The generated
+-- wrapper is a bash script, so its `cd` and `bash` lines need single-quote
+-- escaping for exactly the same reason the caller does.
 function V5.run_in_terminal(path, extra_args)
   extra_args = (extra_args and extra_args ~= "") and (" " .. extra_args) or ""
+  path = tostring(path or "")
   if _is_windows() then
+    if path:find('["%%&|<>^]') then
+      reaper.MB("Cannot open a terminal for this path because it contains a "
+                .. "character cmd.exe would interpret:\n\n" .. path
+                .. "\n\nMove the project to a simpler path and try again.",
+                "Cannot run script", 0)
+      return nil
+    end
     local cmd = 'start "" "' .. path .. '"' .. extra_args
     os.execute(cmd)
     return cmd
@@ -2279,7 +2370,7 @@ function V5.run_in_terminal(path, extra_args)
   -- arguments to it, so any call WITH extra_args must go through the
   -- wrapper below (which bakes the args into its bash line).
   if path:match("%.command$") and extra_args == "" then
-    local cmd = opener .. ' "' .. path .. '"'
+    local cmd = opener .. ' ' .. shellquote(path)
     os.execute(cmd)
     return cmd
   end
@@ -2290,17 +2381,17 @@ function V5.run_in_terminal(path, extra_args)
   local f = io.open(wrapper, "wb")
   if f then
     f:write("#!/bin/bash\n")
-    f:write('cd "' .. dir .. '"\n')
-    f:write('bash "' .. path .. '"' .. extra_args .. "\n")
+    f:write('cd ' .. shellquote(dir) .. "\n")
+    f:write('bash ' .. shellquote(path) .. extra_args .. "\n")
     f:write('status=$?\n')
     f:write('echo; echo "[Finished (exit $status) — press Return to close.]"; read _\n')
     f:close()
-    os.execute('chmod +x "' .. wrapper .. '"')
-    local cmd = opener .. ' "' .. wrapper .. '"'
+    os.execute('chmod +x ' .. shellquote(wrapper))
+    local cmd = opener .. ' ' .. shellquote(wrapper)
     os.execute(cmd)
     return cmd
   end
-  local cmd = opener .. ' "' .. path .. '"'
+  local cmd = opener .. ' ' .. shellquote(path)
   os.execute(cmd)
   return cmd
 end
@@ -2318,6 +2409,8 @@ function V5.run_updater()
     return
   end
   local cmd = V5.run_in_terminal(p)
+  -- nil = run_in_terminal refused the path and has already explained why.
+  if not cmd then return end
   reaper.MB("The updater is opening in a separate terminal window.\n\n" ..
             "When it says 'Update complete', close it and run the script " ..
             "again to load the new version.\n\nIf no window appeared, run " ..
@@ -2337,6 +2430,8 @@ function V5.offer_run_setup(reason)
     "Dub Pipeline — setup needed", 4)
   if ret == 6 then
     local cmd = V5.run_in_terminal(script)
+    -- nil = refused; run_in_terminal has already shown the reason.
+    if not cmd then return false end
     reaper.MB("Setup is opening in a terminal window.\n\nIf no window " ..
               "appeared, run this manually:\n  " .. cmd, "Setup running", 0)
     return true
@@ -2366,7 +2461,11 @@ function V5.autorun_setup_if_needed()
   local script = BASE_DIR .. SEP .. SETUP_SCRIPT
   if not file_exists(script) then return end
   reaper.SetExtState("dub_pipeline", "setup_autorun", "1", false)
-  V5.run_in_terminal(script, "--auto")
+  -- nil = run_in_terminal refused the path (Windows, cmd.exe metacharacter)
+  -- and has already said so. Claiming setup "has started" on top of that
+  -- would be a straight lie, and the user would wait for a terminal that is
+  -- never going to appear.
+  if not V5.run_in_terminal(script, "--auto") then return end
   reaper.MB(
     "Automatic setup has started in a separate terminal window.\n\n" ..
     "It installs (or repairs) the dubbing engine's Python packages\n" ..
@@ -2575,7 +2674,16 @@ local function launch_engine(cmd, mode, header_lines)
         return false
       end
     else
-      os.execute('start "" /b ' .. cmd)
+      -- No cmd.exe fallback. The old `start "" /b <cmd>` route sent the whole
+      -- command line through cmd.exe, which re-interprets &, |, <, >, ^ and
+      -- %VAR% BEFORE the child ever parses its arguments — so a value from
+      -- Settings could run as a command no matter how carefully it was quoted
+      -- for argv. ExecProcess calls CreateProcess directly and has shipped in
+      -- REAPER since v5, which the README already requires.
+      ui_set_banner("error",
+        "This REAPER is too old to launch the engine safely " ..
+        "(no ExecProcess API). Please update REAPER.")
+      return false
     end
   else
     os.execute(cmd .. ' >/dev/null 2>&1 &')
@@ -4070,11 +4178,84 @@ function V5.json_object_array(text, key)
   return out
 end
 
+-- config/custom_languages.json is hand-editable, and whatever `name` it
+-- carries ends up on the engine command line via build_engine_cmd.
+--
+-- VALIDATE AND REJECT — never rewrite. This file is read independently by the
+-- panel and by three Python readers (run_dub.py, dub_engine.py and
+-- pipeline/config.py), none of which normalise the name. Silently cleaning a
+-- name here would give the same entry two different spellings: a hand-edited
+-- "C++" would show in the panel as "C" and launch as --language "C", while
+-- the engine registered only "C++" and rejected the run as an unknown
+-- language. Dropping the entry outright is honest and debuggable; rewriting
+-- it is neither. Same policy as _sanitize_voice_id() in pipeline/stt.py,
+-- which documents the identical reasoning for voice IDs.
+--
+-- Every shell metacharacter is ASCII, so allowing all bytes >= 0x80 keeps
+-- non-Latin autonyms (हिन्दी, বাংলা) valid. Rejected names are recorded in
+-- V5.custom_langs_rejected and shown in the Settings > Languages section, so
+-- a dropped entry is diagnosable instead of silently vanishing.
+--
+-- KEEP IN SYNC — the same rule is enforced by the three Python readers of
+-- this file, which each carry their own stdlib-only copy (the file is read
+-- four times in total, by design, so argparse choices exist before any heavy
+-- import):
+--     engine/run_dub.py            _LANG_NAME_OK
+--     engine/dub_engine.py         _LANG_NAME_OK
+--     engine/pipeline/config.py    _LANG_NAME_OK
+-- A literal space is allowed but %s is NOT used: tabs and newlines are never
+-- part of a real language name and must not survive into an argument.
+-- On V5 rather than a file-level `local` — see V5.STATUS_EXT_SECTION for why
+-- this chunk cannot afford another top-level local.
+-- The length bound is 64 UTF-8 BYTES, not characters, and the Python copies
+-- measure len(name.encode("utf-8")) so the two agree exactly. Measuring Lua's
+-- #s against Python's len() would not: 33 accented letters are 33 code points
+-- but 66 bytes, and the two sides would disagree about that name.
+--
+-- The value is validated EXACTLY as it appears in the file — callers must not
+-- trim first. Trimming is a rewrite: " Hindi " would validate as "Hindi" and
+-- then be used under a name the JSON does not contain, which is the same
+-- two-spellings bug this whole rule exists to prevent. A name that starts or
+-- ends with a space is therefore rejected and reported, not quietly cleaned.
+-- Unicode whitespace is rejected ANYWHERE in the name, as UTF-8 byte
+-- sequences. Lua's %s only knows ASCII whitespace, so without this a
+-- non-breaking space would sail through the \128-\255 range here while
+-- Python's str.strip() treats it as whitespace — the two sides would then
+-- disagree about "<NBSP>Hindi", and a name made entirely of non-breaking
+-- spaces would be a valid, invisible language. Covers U+00A0, U+1680,
+-- U+2000..U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF.
+function V5._has_unicode_space(s)
+  return s:find("\194\160") ~= nil                      -- U+00A0
+      or s:find("\225\154\128") ~= nil                  -- U+1680
+      or s:find("\226\128[\128-\138\168\169\175]") ~= nil  -- U+2000-200A/2028/2029/202F
+      or s:find("\226\129\159") ~= nil                  -- U+205F
+      or s:find("\227\128\128") ~= nil                  -- U+3000
+      or s:find("\239\187\191") ~= nil                  -- U+FEFF
+end
+
+function V5._is_safe_lang_name(s)
+  if type(s) ~= "string" or s == "" or #s > 64 then return false end
+  if s:find("^%s") or s:find("%s$") then return false end
+  if V5._has_unicode_space(s) then return false end
+  return s:find("^[%w %-_.()\128-\255]+$") ~= nil
+end
+
 function V5.custom_langs_load()
   V5.custom_langs = {}
+  V5.custom_langs_rejected = {}
   for _, e in ipairs(V5.json_object_array(read_all(V5.CUSTOM_LANGS_PATH),
                                           "languages")) do
-    local name = (e.name or ""):match("^%s*(.-)%s*$")
+    -- Validated verbatim — no trim. See V5._is_safe_lang_name.
+    local raw  = tostring(e.name or "")
+    local name = raw
+    if not V5._is_safe_lang_name(name) then
+      -- Record the original string so the warning shows the actual offending
+      -- value, including any stray whitespace that caused the rejection.
+      if raw ~= "" then
+        V5.custom_langs_rejected[#V5.custom_langs_rejected + 1] = raw
+      end
+      name = ""
+    end
     if name ~= "" then
       V5.custom_langs[#V5.custom_langs + 1] =
         { name = name, code = e.code or "", tag = e.tag or "" }
@@ -5544,6 +5725,20 @@ function V5.ui_languages_section(ctx, bare)
   _grey_hint(ctx, #V5.custom_langs .. ' added by you, ' ..
                   (#LANGUAGES - #V5.custom_langs) .. ' built in.')
 
+  -- Entries custom_langs_load() refused. Without this they would just be
+  -- missing from the list with no explanation, and the engine would report
+  -- an unknown language for a name the user can plainly see in the JSON.
+  if V5.custom_langs_rejected and #V5.custom_langs_rejected > 0 then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+    reaper.ImGui_TextWrapped(ctx, string.format(
+      '%d entry/entries in custom_languages.json were ignored: %s\n' ..
+      'A language name may contain letters, digits, spaces, - _ . ( ) and ' ..
+      'non-Latin characters. Rename them in the file and reopen this panel.',
+      #V5.custom_langs_rejected,
+      table.concat(V5.custom_langs_rejected, ', '):gsub("%s", " ")))
+    reaper.ImGui_PopStyleColor(ctx)
+  end
+
   for i, l in ipairs(V5.custom_langs) do
     reaper.ImGui_Text(ctx, string.format('%s   (%s)', l.name,
                                          (l.code or '') ~= '' and l.code or '—'))
@@ -5575,10 +5770,16 @@ function V5.ui_languages_section(ctx, bare)
                               LANGUAGES)
   V5.newlang_src = picked
 
+  -- Trimming the TYPED value is fine: the trimmed string is what gets stored,
+  -- so the file never ends up holding a spelling this panel did not validate.
+  -- (Reading back from the file must NOT trim — see V5._is_safe_lang_name.)
+  -- Validate with the canonical predicate rather than a private character
+  -- class; the old '^[%w%-_ ]+$' here rejected '.', parentheses and every
+  -- non-Latin name that the loader and all three Python readers accept.
   local name = (V5.newlang_name or ''):match('^%s*(.-)%s*$')
   local dup = false
   for _, l in ipairs(LANGUAGES) do if l == name then dup = true end end
-  local can = name ~= '' and not dup and name:match('^[%w%-_ ]+$') ~= nil
+  local can = not dup and V5._is_safe_lang_name(name)
   _ui_begin_disabled(ctx, not can)
   if reaper.ImGui_Button(ctx, 'Add language', 150, 26) and can then
     V5.custom_langs[#V5.custom_langs + 1] = {

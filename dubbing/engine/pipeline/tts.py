@@ -30,7 +30,7 @@ import urllib.request
 import uuid
 from typing import Dict, List
 
-from .config import (_SSL_CTX, ELEVENLABS_CHUNK_CHARS, ELEVENLABS_TTS_MODEL,
+from .config import (_urlopen, ELEVENLABS_CHUNK_CHARS, ELEVENLABS_TTS_MODEL,
                      ELEVENLABS_TTS_VOICE_ID, CONFIG_DIR, PYDUB_AVAILABLE,
                      TTS_DEFAULT_LANGUAGE, TTS_DEFAULT_VOICE, TTS_LANGUAGES,
                      TTS_MAX_BYTES, _AudioSegment, _strip_emotion_tags,
@@ -512,7 +512,7 @@ def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=180, context=_SSL_CTX) as resp:
+        with _urlopen(req, timeout=180) as resp:
             return resp.read()
     except urllib.error.HTTPError as e:
         err_body = ""
@@ -927,7 +927,7 @@ def _elevenlabs_tts_post_ts(chunk: str, api_key: str, voice_id: str,
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=300, context=_SSL_CTX) as resp:
+        with _urlopen(req, timeout=300) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         err_body = ""
@@ -1252,7 +1252,7 @@ def _elevenlabs_sts_post(audio_bytes: bytes, api_key: str, voice_id: str,
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=600, context=_SSL_CTX) as resp:
+        with _urlopen(req, timeout=600) as resp:
             return resp.read()
     except urllib.error.HTTPError as e:
         err_body = ""

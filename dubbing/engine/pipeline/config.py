@@ -3,7 +3,8 @@ Pipeline configuration: paths, constants, language table, ffmpeg discovery
 and settings-file loaders.
 
 Extracted from Translation_and_Syncing_App.py (bulk app, v1.8.0):
-    lines 144-146   SSL context (unverified — matches the app's behaviour)
+    lines 144-146   SSL context (was unverified; replaced here with the
+                    verified-first strategy from sync_matcher.py — see below)
     lines 150-198   platform flags + ffmpeg discovery (Tk font selection skipped)
     lines 446-481   _prepare_output_dir (per-file output folder helper)
     lines 696-990   TTS language/voice catalogue, ElevenLabs model table,
@@ -26,6 +27,10 @@ import re
 import shutil
 import ssl
 import sys
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Dict, List, Optional
 
 # ─── Repo paths ──────────────────────────────────────────────────────────────
@@ -88,11 +93,134 @@ except ImportError:
 if FFMPEG_PATH and PYDUB_AVAILABLE:
     _AudioSegment.converter = FFMPEG_PATH
 
-# Unverified SSL context, matching the app (some installs sit behind
-# TLS-intercepting proxies that break certificate verification).
-_SSL_CTX = ssl.create_default_context()
-_SSL_CTX.check_hostname = False
-_SSL_CTX.verify_mode    = ssl.CERT_NONE
+# ─── TLS: verified first, insecure only as a proven last resort ──────────────
+# This engine used to build ONE unverified context (check_hostname=False,
+# verify_mode=CERT_NONE) and pass it to every provider call. That silently
+# disabled certificate checking for requests carrying the user's ElevenLabs
+# and Google API keys, on every network — so anything on the path could
+# present any certificate and read them.
+#
+# The Auto Sync half of this repo already solved the same corporate-proxy
+# problem safely (sync_matcher.py). This is that strategy, ported verbatim in
+# spirit so the repo has ONE TLS policy:
+#   1. Verify against the OS trust store (+ certifi), with Python 3.13's
+#      VERIFY_X509_STRICT relaxed so certs lacking an Authority Key Identifier
+#      still validate. This succeeds whenever the inspection proxy's root is
+#      installed — which is the normal corporate case.
+#   2. ONLY after a genuine certificate-VERIFY failure, print a one-time
+#      warning and retry that HOST with verification disabled.
+# Non-certificate errors (HTTP 4xx/5xx, timeouts, DNS) always propagate.
+#
+# The downgrade is scoped PER HOST, not process-wide: one endpoint sitting
+# behind an untrusted inspection root must not silently disable verification
+# for every other endpoint the run touches afterwards.
+_SSL_CTX: Optional[ssl.SSLContext] = None
+_SSL_INSECURE_CTX: Optional[ssl.SSLContext] = None
+_SSL_LOCK = threading.Lock()
+_SSL_INSECURE_HOSTS: set = set()
+_SSL_INSECURE_WARNED = False
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """Cached verified context, tolerant of TLS-inspecting corporate proxies."""
+    global _SSL_CTX
+    if _SSL_CTX is not None:
+        return _SSL_CTX
+    ctx = ssl.create_default_context()
+    if hasattr(ssl, "VERIFY_X509_STRICT"):
+        ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    try:
+        import certifi
+        ctx.load_verify_locations(certifi.where())
+    except (ImportError, ssl.SSLError, OSError):
+        pass
+    _SSL_CTX = ctx
+    return ctx
+
+
+def _insecure_ssl_context() -> ssl.SSLContext:
+    """Last-resort unverified context. Only reached after a real cert-verify
+    failure — i.e. an inspection root that is not in the trust store."""
+    global _SSL_INSECURE_CTX
+    if _SSL_INSECURE_CTX is None:
+        c = ssl.create_default_context()
+        c.check_hostname = False
+        c.verify_mode = ssl.CERT_NONE
+        _SSL_INSECURE_CTX = c
+    return _SSL_INSECURE_CTX
+
+
+def _is_cert_verify_error(err: BaseException) -> bool:
+    """True ONLY for TLS certificate-VERIFICATION failures.
+
+    Deliberately strict: it walks the exception chain and accepts nothing but
+    typed ssl errors carrying a verification result. It does NOT substring-match
+    free text, because `URLError.reason` can be an arbitrary server-supplied
+    string — an HTTP reason phrase containing "self signed certificate" must
+    never be able to talk this client out of verifying certificates.
+    """
+    # HTTPError subclasses URLError, but reaching an HTTP status means the TLS
+    # handshake already succeeded. Never a certificate problem.
+    if isinstance(err, urllib.error.HTTPError):
+        return False
+    cur: Optional[BaseException] = err
+    for _ in range(10):                       # bounded: chains can be cyclic
+        if cur is None:
+            break
+        if isinstance(cur, ssl.SSLCertVerificationError):
+            return True
+        if isinstance(cur, ssl.SSLError):
+            # verify_code is set by OpenSSL only for verification failures.
+            if getattr(cur, "verify_code", None) is not None:
+                return True
+            if getattr(cur, "reason", None) == "CERTIFICATE_VERIFY_FAILED":
+                return True
+        nxt = getattr(cur, "reason", None)
+        if not isinstance(nxt, BaseException):
+            nxt = cur.__cause__ or cur.__context__
+        cur = nxt if isinstance(nxt, BaseException) else None
+    return False
+
+
+def _request_host(req) -> str:
+    """Host[:port] a Request targets — the key the insecure downgrade is
+    scoped by. Falls back to the whole value if it cannot be parsed, which
+    only ever makes the scope narrower."""
+    try:
+        return urllib.parse.urlsplit(req.full_url).netloc.lower()
+    except Exception:
+        return str(getattr(req, "host", "") or "").lower()
+
+
+def _urlopen(req, timeout: int = 120):
+    """urlopen with a verified-first, per-host insecure-fallback TLS strategy.
+
+    Drop-in for `urllib.request.urlopen(req, timeout=..., context=_SSL_CTX)`,
+    which is what every call site here used to do unconditionally.
+    """
+    host = _request_host(req)
+    with _SSL_LOCK:
+        already_insecure = host in _SSL_INSECURE_HOSTS
+    if already_insecure:
+        return urllib.request.urlopen(req, timeout=timeout,
+                                      context=_insecure_ssl_context())
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
+    except urllib.error.URLError as e:
+        if not _is_cert_verify_error(e):
+            raise
+        global _SSL_INSECURE_WARNED
+        with _SSL_LOCK:
+            _SSL_INSECURE_HOSTS.add(host)
+            warn = not _SSL_INSECURE_WARNED
+            _SSL_INSECURE_WARNED = True
+        if warn:
+            print("    [SSL] Certificate verification failed - a TLS-inspection "
+                  "proxy/antivirus is likely intercepting HTTPS. Retrying with "
+                  "verification DISABLED for the affected host(s) this run.",
+                  flush=True)
+        return urllib.request.urlopen(req, timeout=timeout,
+                                      context=_insecure_ssl_context())
 
 
 # ─── TTS Language / Voice catalogue ─────────────────────────────────────────
@@ -215,6 +343,54 @@ TTS_LANGUAGES = {
 CUSTOM_LANGUAGES_FILE = os.path.join(CONFIG_DIR, "custom_languages.json")
 
 
+# Which hand-edited custom_languages.json names are usable.
+# KEEP IN SYNC with engine/run_dub.py, engine/dub_engine.py and
+# dubbing/reaper/Dub_Pipeline_Panel.lua (V5._is_safe_lang_name).
+# See run_dub.py for why all four readers carry the same rule, and for
+# why the non-ASCII range must start at an explicit \u0080.
+# Charset only -- length and edge-whitespace are checked in _lang_name_ok so
+# the rule stays readable and matches the Lua predicate exactly.
+_LANG_NAME_OK = re.compile("^[0-9A-Za-z \-_.()\u0080-\U0010FFFF]+$")
+
+
+# Unicode whitespace, rejected anywhere in a name. Mirrors
+# V5._has_unicode_space in Dub_Pipeline_Panel.lua, which matches the same
+# code points as UTF-8 byte sequences because Lua's %s is ASCII-only.
+_LANG_NAME_UNICODE_WS = re.compile(
+    "[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]")
+
+
+def _lang_name_ok(name: str) -> bool:
+    """True if *name* is usable EXACTLY as written. Never raises.
+
+    Mirrors V5._is_safe_lang_name in dubbing/reaper/Dub_Pipeline_Panel.lua.
+    The bound is 64 UTF-8 BYTES because that is what Lua's #s measures.
+
+    Edge whitespace is compared against ASCII whitespace ONLY -- the exact set
+    Lua's %s matches. Plain str.strip() would also strip U+00A0, U+2003 and
+    other Unicode spaces that Lua does not recognise, and the two sides would
+    then disagree about names starting with one.
+
+    Leading/trailing whitespace is rejected, not stripped: stripping is a
+    rewrite, and a rewritten name is a second spelling of the same entry.
+    """
+    if not isinstance(name, str) or not name:
+        return False
+    if name != name.strip(" \t\n\r\v\f"):
+        return False
+    if _LANG_NAME_UNICODE_WS.search(name):
+        return False
+    try:
+        if len(name.encode("utf-8")) > 64:
+            return False
+    except (UnicodeEncodeError, UnicodeError):
+        # Lone surrogate from a hand-edited "\udXXX" escape. json.load()
+        # hands these back happily; encoding them raises. Return False rather
+        # than propagating -- the caller in pipeline/config.py has no guard.
+        return False
+    return bool(_LANG_NAME_OK.match(name))
+
+
 def _load_custom_languages() -> list:
     """Names of the user-added languages, after merging them into the table."""
     added = []
@@ -233,8 +409,16 @@ def _load_custom_languages() -> list:
     for e in entries:
         if not isinstance(e, dict):
             continue
-        name = str(e.get("name") or "").strip()
+        name = str(e.get("name") or "")
         if not name:
+            continue
+        if not _lang_name_ok(name):
+            # Same rule as run_dub.py, dub_engine.py and the REAPER panel —
+            # see run_dub.py for why all four readers carry their own copy.
+            # Rejected, never rewritten: a cleaned-up name would be a second
+            # spelling the other readers know nothing about.
+            print(f"[config] Custom language {name!r} has characters that are "
+                  "not allowed in a language name — entry ignored.")
             continue
         if name in TTS_LANGUAGES:
             print(f"[config] Custom language {name!r} shadows a built-in — "
