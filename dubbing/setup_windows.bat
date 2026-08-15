@@ -263,9 +263,16 @@ rem ---------------------------------------------------------------------------
 
 :find_python
 rem 3.12/3.13/3.11 BEFORE 3.14+ and the generic "py -3" (which picks the
-rem newest install): brand-new Python releases often have no prebuilt
-rem wheels for the audio deps (librosa/numba), so pip would try - and
-rem fail - to compile them from source.
+rem newest install): brand-new Python releases often had no prebuilt wheels
+rem for the audio deps (librosa/numba), so pip would try - and fail - to
+rem compile them from source.
+rem
+rem NOTE: librosa/numba/llvmlite/scipy are no longer dependencies, so that
+rem reason is gone and every remaining package ships pure-Python or broad
+rem wheels. This ordering is kept for now only because it is known-good and
+rem cannot be tested on Windows from a Mac. Once the cross-platform install
+rem matrix runs green on 3.11-3.14, collapse this to a simple "first Python
+rem 3.11+ wins" probe.
 for %%P in ("py -3.12" "py -3.13" "py -3.11" "py -3.14" "py -3" "python" "python3") do (
   if not defined PY_CMD (
     %%~P -c "import sys; assert sys.version_info[0]==3 and sys.version_info[1]>=11" >nul 2>&1

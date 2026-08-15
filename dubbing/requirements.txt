@@ -2,8 +2,18 @@
 # Install into the project-local venv:  python3 -m venv venv && venv/bin/pip install -r requirements.txt
 # Nothing UI-related belongs here (no tkinter/matplotlib/sounddevice/opencv).
 numpy
-librosa
 pydub
+# pydub imports the stdlib `audioop` module, which PEP 594 REMOVED in Python
+# 3.13. Without this backport, `import pydub` raises ModuleNotFoundError on
+# 3.13+ — which breaks the whole TTS assembly path (tts.py has 8 export()
+# calls) as well as audio decoding. That was already true before librosa was
+# removed; removing librosa just means nothing else masks it.
+audioop-lts ; python_version >= "3.13"
+# NOTE: librosa was removed. It was used in exactly two places, both just
+# loading audio into an array, and pydub/ffmpeg (already required for the
+# ElevenLabs MP3 -> WAV step) does the same. It pulled in numba + llvmlite
+# + scipy: ~192 MB installed, and the reason the installers had to hunt for
+# a Python old enough to have prebuilt wheels for them.
 google-genai
 google-cloud-texttospeech
 google-auth
