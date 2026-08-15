@@ -1,0 +1,220 @@
+name: Release
+
+# Everything a user receives comes from the `production` branch.
+#
+#   main        development. Pull requests merge here. Users never see it.
+#   production  what people actually run. Merging main -> production IS the
+#               act of shipping, and it is the only thing that fires this.
+#
+# On each push to production this reads the VERSION file, tags that commit
+# v<VERSION>, and publishes a GitHub Release carrying a fast-syncs.zip asset.
+# The updater downloads that asset from the stable
+# /releases/latest/download/fast-syncs.zip URL, so users move between
+# *released versions* instead of tracking whatever was last committed.
+#
+# No VERSION bump means no new tag: the job then skips instead of failing, so
+# a docs-only push to production is not an error. The summary says so plainly.
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out production with full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # tags + history; reapack-index needs both
+          fetch-tags: true
+
+      - name: Read VERSION
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ ! -f VERSION ]; then
+            echo "::error file=VERSION::VERSION file is missing"
+            exit 1
+          fi
+          version="$(tr -d ' \t\r\n' < VERSION)"
+          if [ -z "$version" ]; then
+            echo "::error file=VERSION::VERSION file is empty"
+            exit 1
+          fi
+          # Guard against a stray edit turning the version into something that
+          # is not a version. ReaPack requires at least one digit.
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+)*([A-Za-z0-9._-]*)$'; then
+            echo "::error file=VERSION::VERSION is not a valid version string: '$version'"
+            exit 1
+          fi
+          echo "version=$version"   >> "$GITHUB_OUTPUT"
+          echo "tag=v$version"      >> "$GITHUB_OUTPUT"
+          echo "Version: $version"  >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the script header agrees with VERSION
+        run: |
+          set -euo pipefail
+          version='${{ steps.ver.outputs.version }}'
+          # ReaPack reads @version from the script header; the panel reads the
+          # VERSION file. They must not drift, or ReaPack would advertise a
+          # different version than the one the UI shows.
+          # [[:space:]][[:space:]]* rather than [[:space:]]\+ : \+ is a GNU
+          # extension, so the portable form is the one that can also be tested
+          # on a macOS shell before it ever reaches the runner.
+          header="$(sed -n 's/^--[[:space:]]*@version[[:space:]][[:space:]]*\(.*\)$/\1/p' \
+                    auto_sync_pipeline.lua | head -n 1 | tr -d ' \t\r')"
+          if [ -z "$header" ]; then
+            echo "::error file=auto_sync_pipeline.lua::No '-- @version' header found."
+            exit 1
+          fi
+          if [ "$header" != "$version" ]; then
+            echo "::error file=auto_sync_pipeline.lua::@version is '$header' but VERSION says '$version'. Update both."
+            exit 1
+          fi
+          echo "Header @version matches VERSION ($version)."
+
+      - name: Skip if this version was already released
+        id: gate
+        run: |
+          set -euo pipefail
+          tag='${{ steps.ver.outputs.tag }}'
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### No release cut"
+              echo ""
+              echo "Tag \`$tag\` already exists, so this push changed something"
+              echo "other than the version. That is fine — nothing was published."
+              echo ""
+              echo "To ship a new version: bump \`VERSION\` (and the \`-- @version\`"
+              echo "header in \`auto_sync_pipeline.lua\`) on \`main\`, then merge to"
+              echo "\`production\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Tag $tag already exists — skipping release."
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the release archive
+        if: steps.gate.outputs.proceed == 'true'
+        run: |
+          set -euo pipefail
+          version='${{ steps.ver.outputs.version }}'
+          # Ship what a user needs and nothing else. server/ is the operator's
+          # own proxy, .github/ and .claude/ are repo infrastructure, and the
+          # agent-onboarding docs are not part of the product.
+          # git archive takes pathspecs, so the exclusions happen in one pass.
+          git archive --format=zip --prefix="fast-syncs-$version/" HEAD \
+            -o /tmp/fast-syncs.zip \
+            ':!server' ':!.github' ':!.claude' ':!AGENTS.md' ':!CLAUDE.md'
+          # Fail loudly rather than shipping an archive missing the entrypoint.
+          #
+          # The listing is captured ONCE into a variable rather than piped into
+          # `grep -q`: under `set -o pipefail`, grep -q exits at the first match
+          # and unzip then dies of SIGPIPE, which fails the pipeline and makes a
+          # perfectly good archive look broken.
+          listing="$(unzip -l /tmp/fast-syncs.zip)"
+          missing=0
+          for required in auto_sync_pipeline.lua run_sync.py sync_matcher.py \
+                          VERSION dubbing/engine/run_dub.py; do
+            case "$listing" in
+              *"fast-syncs-$version/$required"*) ;;
+              *) echo "::error::Release archive is missing $required"; missing=1 ;;
+            esac
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+          # ── The file manifest ──────────────────────────────────────────
+          # One repo-relative path per line: exactly what this release ships.
+          #
+          # A ZIP update overlays the new files onto the user's folder, which
+          # only ever ADDS and OVERWRITES. Without a record of what the last
+          # release contained, a file deleted or renamed upstream would stay on
+          # that user's disk forever — and a stale .py module can shadow new
+          # code, producing bugs that reproduce only for upgraded users and
+          # never on a fresh install. The updaters diff this manifest against
+          # the one the previous install left behind and delete the difference.
+          #
+          # Derived from the BUILT archive rather than from `git ls-files`, so
+          # it cannot drift from what the ZIP actually holds — the pathspec
+          # exclusions above and any .gitattributes export-ignore are already
+          # baked into the listing.
+          #
+          # Order matters. Directory entries (trailing "/") are dropped FIRST,
+          # which also disposes of the archive's own "fast-syncs-$version/"
+          # entry — strip the prefix before that and it would collapse into a
+          # blank line. A blank line is not cosmetic: Windows diffs the two
+          # manifests with `findstr /v /x /g:`, where an empty search string
+          # matches every line and would silently switch the whole cleanup off.
+          #
+          # Nothing here exits early on a pipe (unlike `grep -q`), so the
+          # SIGPIPE-under-pipefail trap described above does not apply.
+          manifest_dir="/tmp/manifest/fast-syncs-$version"
+          mkdir -p "$manifest_dir"
+          unzip -Z1 /tmp/fast-syncs.zip \
+            | sed '/\/$/d' \
+            | sed -n "s|^fast-syncs-$version/||p" \
+            | sed '/^[[:space:]]*$/d' \
+            | LC_ALL=C sort > "$manifest_dir/.fast-syncs-manifest"
+          entries="$(wc -l < "$manifest_dir/.fast-syncs-manifest" | tr -d ' ')"
+          # An empty manifest would tell every updater that this release ships
+          # nothing. The updaters refuse to act on one, but it must never get
+          # this far in the first place.
+          if [ "$entries" -eq 0 ]; then
+            echo "::error::Generated file manifest is empty — refusing to publish."
+            exit 1
+          fi
+          if grep -qE '^[[:space:]]*$' "$manifest_dir/.fast-syncs-manifest"; then
+            echo "::error::File manifest contains a blank line — refusing to publish."
+            exit 1
+          fi
+          # Added after the fact, so the manifest never has to list itself.
+          # The updaters treat its own name as undeletable.
+          ( cd /tmp/manifest && zip -q /tmp/fast-syncs.zip \
+              "fast-syncs-$version/.fast-syncs-manifest" )
+          listing="$(unzip -l /tmp/fast-syncs.zip)"
+          case "$listing" in
+            *"fast-syncs-$version/.fast-syncs-manifest"*) ;;
+            *) echo "::error::Manifest did not make it into the archive"; exit 1 ;;
+          esac
+
+          count="$(printf '%s\n' "$listing" | tail -n 1 | awk '{print $2}')"
+          echo "Archive: $(du -h /tmp/fast-syncs.zip | cut -f1), $count files" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "Manifest: $entries paths (drives update cleanup)" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tag and publish
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ steps.ver.outputs.tag }}'
+          version='${{ steps.ver.outputs.version }}'
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "fast-syncs $version"
+          git push origin "$tag"
+          # --generate-notes builds the changelog from merged PRs since the
+          # previous tag, so no CHANGELOG file has to be maintained by hand.
+          gh release create "$tag" \
+            --title "fast-syncs $version" \
+            --generate-notes \
+            /tmp/fast-syncs.zip
+          {
+            echo "### Released $tag"
+            echo ""
+            echo "- <https://github.com/${{ github.repository }}/releases/tag/$tag>"
+            echo "- Updater URL (always newest release):"
+            echo "  \`https://github.com/${{ github.repository }}/releases/latest/download/fast-syncs.zip\`"
+          } >> "$GITHUB_STEP_SUMMARY"
