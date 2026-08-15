@@ -2,11 +2,21 @@
 # Only needed when sync_matcher.py calls the AI providers itself instead of
 # routing through your server. Install on top of the thin requirements:
 #     pip install -r requirements.txt -r requirements-direct.txt
+#
+# Pinned deliberately — see requirements.txt for why. Verified by
+# .github/workflows/install-matrix.yml on both operating systems.
+#
+# Requires Python 3.11+. google-genai itself dropped 3.9, and modern numpy
+# has no 3.10 wheels. Thin-client mode (requirements.txt) still runs on 3.9,
+# so sharing the tool does not force anyone to upgrade Python.
 
 # Gemini via Vertex AI service account (preferred direct backend).
-google-genai>=0.3.0
+google-genai==2.18.1
 
 # Audio slicing for any format + mono downmix. Without it the client falls
 # back to the stdlib `wave` module (PCM .wav only) — fine for Reaper renders.
-soundfile>=0.12
-numpy>=1.24
+soundfile==0.13.1
+
+# 2.4.6 is the last numpy shipping cp311 wheels; 2.5.x requires 3.12+.
+numpy==2.4.6 ; python_version < "3.12"
+numpy==2.5.2 ; python_version >= "3.12"

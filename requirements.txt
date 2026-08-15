@@ -6,8 +6,16 @@
 # The two packages below are OPTIONAL quality-of-life helpers for TLS on
 # locked-down corporate machines (SSL-inspection proxies). The script works
 # without them, but they make HTTPS "just work" behind Zscaler/Netskope/etc.
-truststore>=0.9 ; python_version >= "3.10"
-certifi
+#
+# Pinned so that two people installing a week apart get the same thing, and
+# so that rolling back a release rolls back the environment too. Bump them
+# deliberately and let .github/workflows/install-matrix.yml confirm it.
+#
+# This file is the ONLY one that still supports Python 3.9 — thin-client mode
+# needs nothing but the standard library, so people you share the tool with
+# are not forced to upgrade Python.
+truststore==0.10.4 ; python_version >= "3.10"
+certifi==2026.7.22
 
 # ── Running WITHOUT a server (direct mode)? ──────────────────────────
 # If you call the AI providers directly from this machine (no server URL
