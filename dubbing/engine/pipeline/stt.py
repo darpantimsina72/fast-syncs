@@ -25,6 +25,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import wave
 from typing import Dict, List, Optional
@@ -107,24 +108,49 @@ def _validate_api_key(api_key: str, timeout: float = 15.0) -> Dict[str, str]:
     if not api_key or not api_key.strip():
         raise ValueError("API key is empty.")
     api_key = api_key.strip()
-    req = urllib.request.Request(
-        "https://api.elevenlabs.io/v1/user",
-        method="GET",
-        headers={"xi-api-key": api_key, "Accept": "application/json"},
-    )
-    try:
-        with _urlopen(req, timeout=timeout) as resp:
-            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            raise ValueError("Invalid or expired ElevenLabs API key (401).") from None
-        if e.code == 429:
-            raise ValueError("ElevenLabs API rate limit hit (429). Try again shortly.") from None
-        raise ValueError(f"ElevenLabs API error: HTTP {e.code}.") from None
-    except urllib.error.URLError as e:
-        raise ValueError(f"Network error reaching ElevenLabs: {e.reason}") from None
-    except Exception as e:
-        raise ValueError(f"Could not validate ElevenLabs key: {e}") from None
+
+    # v0.15.0: retried like the voice pages. A single dropped connection used
+    # to report the key itself as bad, which sends people off rotating a key
+    # that was never the problem.
+    last: Optional[BaseException] = None
+    payload = None
+    for attempt in range(1, _EL_PAGE_ATTEMPTS + 1):
+        req = urllib.request.Request(
+            "https://api.elevenlabs.io/v1/user",
+            method="GET",
+            headers={"xi-api-key": api_key, "Accept": "application/json"},
+        )
+        try:
+            with _urlopen(req, timeout=timeout) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            break
+        except urllib.error.HTTPError as e:
+            # A verdict on the key is the same on every attempt — don't wait
+            # three times to deliver it.
+            if e.code == 401:
+                raise ValueError("Invalid or expired ElevenLabs API key (401).") from None
+            if e.code == 429:
+                raise ValueError("ElevenLabs API rate limit hit (429). Try again shortly.") from None
+            if e.code < 500:
+                raise ValueError(f"ElevenLabs API error: HTTP {e.code}.") from None
+            last = e
+        # OSError covers URLError, socket.timeout and ssl.SSLError alike —
+        # every way a connection can die mid-read. HTTPError is handled above
+        # and never reaches here, which is what keeps a 4xx from being retried.
+        except (OSError, http.client.HTTPException,
+                json.JSONDecodeError) as e:
+            last = e
+        except Exception as e:
+            raise ValueError(f"Could not validate ElevenLabs key: {e}") from None
+        if attempt == _EL_PAGE_ATTEMPTS:
+            break
+        time.sleep(_EL_PAGE_BACKOFF[min(attempt - 1,
+                                        len(_EL_PAGE_BACKOFF) - 1)])
+
+    if payload is None:
+        raise ValueError(
+            f"Network error reaching ElevenLabs after {_EL_PAGE_ATTEMPTS} "
+            f"attempts: {_voice_err_detail(last)}") from None
 
     sub = payload.get("subscription") or {}
     return {
@@ -194,10 +220,105 @@ def _voice_supports_language(voice: dict, lang_tokens: tuple) -> bool:
     return False
 
 
+# ── Voice catalogue paging ──────────────────────────────────────────────────
+# v0.15.0: the catalogue is fetched from /v2/voices, ONE PAGE AT A TIME.
+#
+# This used to be a single unpaginated GET /v1/voices. That endpoint returns
+# every voice the account can see in one response, with the complete record
+# for each (samples[], fine_tuning, sharing, verified_languages...). On an
+# account with a shared workspace and library access that is not a small
+# thing: measured at 4,288 voices / 28 MB / 91 seconds against a 30 s
+# timeout. It had been creeping up for months and finally crossed the line
+# when two more clones were added — at which point the voice picker stopped
+# working on every machine at once, because the size is decided server-side
+# and has nothing to do with the client.
+#
+# The point of paging is NOT that it is faster (the full walk is ~2 min).
+# It is that the largest single request is now a fixed 100 voices — measured
+# 6.1 s worst case, well inside the per-page timeout — and adding voices only
+# ever adds pages. The old shape had one request that grew without limit, so
+# it was always going to fail eventually; this one cannot.
+#
+# The caller still gets one merged list, and the panel still caches it to
+# voice_cache.json (Dub_Pipeline_Panel.lua V5.voice_cache_save), so the walk
+# is a one-off — not something the user pays on every launch.
+_EL_VOICES_URL      = "https://api.elevenlabs.io/v2/voices"
+_EL_PAGE_SIZE       = 100      # ElevenLabs' maximum; 200 and 1000 both 400.
+_EL_PAGE_ATTEMPTS   = 3
+_EL_PAGE_BACKOFF    = (2.0, 5.0)
+_EL_MAX_PAGES       = 200      # 20,000 voices. A runaway guard, not a policy.
+
+
+def _fetch_voice_page(api_key: str, page_token: Optional[str],
+                      timeout: float) -> dict:
+    """One page of /v2/voices, retried on transient failures.
+
+    Retries only what is worth retrying: timeouts, dropped connections and
+    5xx. A 401 or a 400 is the same on every attempt, so it is raised at once
+    rather than after three identical waits.
+    """
+    url = f"{_EL_VOICES_URL}?page_size={_EL_PAGE_SIZE}"
+    if page_token:
+        url += f"&next_page_token={urllib.parse.quote(page_token, safe='')}"
+
+    last: Optional[BaseException] = None
+    for attempt in range(1, _EL_PAGE_ATTEMPTS + 1):
+        req = urllib.request.Request(
+            url, method="GET",
+            headers={"xi-api-key": api_key, "Accept": "application/json"},
+        )
+        try:
+            with _urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8", errors="replace"))
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise ValueError(
+                    "Invalid or expired ElevenLabs API key (401).") from None
+            if e.code == 429:
+                # Honour Retry-After when the server sends one.
+                last = e
+                if attempt == _EL_PAGE_ATTEMPTS:
+                    raise ValueError("ElevenLabs API rate limit hit (429). "
+                                     "Try again shortly.") from None
+                try:
+                    delay = float(e.headers.get("Retry-After") or 0)
+                except (TypeError, ValueError):
+                    delay = 0.0
+                time.sleep(max(delay, _EL_PAGE_BACKOFF[
+                    min(attempt - 1, len(_EL_PAGE_BACKOFF) - 1)]))
+                continue
+            if e.code < 500:
+                raise ValueError(
+                    f"Could not fetch voices (HTTP {e.code}).") from None
+            last = e
+        # OSError covers URLError, socket.timeout and ssl.SSLError alike —
+        # every way a connection can die mid-read. HTTPError is handled above
+        # and never reaches here, which is what keeps a 4xx from being retried.
+        except (OSError, http.client.HTTPException,
+                json.JSONDecodeError) as e:
+            last = e
+        if attempt == _EL_PAGE_ATTEMPTS:
+            break
+        time.sleep(_EL_PAGE_BACKOFF[min(attempt - 1,
+                                        len(_EL_PAGE_BACKOFF) - 1)])
+    raise ValueError(f"Could not fetch voices: {_voice_err_detail(last)}")
+
+
+def _voice_err_detail(err: Optional[BaseException]) -> str:
+    """Short, specific description of why a page failed."""
+    if err is None:
+        return "unknown error"
+    if isinstance(err, urllib.error.HTTPError):
+        return f"HTTP {err.code}"
+    if isinstance(err, urllib.error.URLError):
+        return f"{type(err).__name__}: {err.reason}"
+    return f"{type(err).__name__}: {err}"
+
+
 def _fetch_voices_for_language(api_key: str,
                                language: str = TTS_DEFAULT_LANGUAGE,
                                force_refresh: bool = False,
-                               timeout: float = 30.0) -> List[Dict[str, str]]:
+                               timeout: float = 45.0) -> List[Dict[str, str]]:
     """
     Pull the user's full voice catalogue from ElevenLabs and return EVERY
     voice on the account.
@@ -210,6 +331,8 @@ def _fetch_voices_for_language(api_key: str,
     Each entry is a small dict: {"voice_id", "name", "label"}.
     Result is cached per (API-key fingerprint, language) to avoid repeated
     API calls.
+
+    *timeout* is PER PAGE, not for the whole walk.
     """
     api_key = (api_key or "").strip()
     if not api_key:
@@ -220,28 +343,63 @@ def _fetch_voices_for_language(api_key: str,
     if not force_refresh and cache_key in _EL_VOICE_CACHE:
         return _EL_VOICE_CACHE[cache_key]
 
-    req = urllib.request.Request(
-        "https://api.elevenlabs.io/v1/voices",
-        method="GET",
-        headers={"xi-api-key": api_key, "Accept": "application/json"},
-    )
-    try:
-        with _urlopen(req, timeout=timeout) as resp:
-            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            raise ValueError("Invalid or expired ElevenLabs API key (401).") from None
-        if e.code == 429:
-            raise ValueError("ElevenLabs API rate limit hit (429). Try again shortly.") from None
-        raise ValueError(f"Could not fetch voices (HTTP {e.code}).") from None
-    except urllib.error.URLError as e:
-        raise ValueError(f"Network error fetching voices: {e.reason}") from None
-    except Exception as e:
-        raise ValueError(f"Could not fetch voices: {e}") from None
+    voices:   List[dict] = []
+    seen_ids: set        = set()
+    token: Optional[str] = None
+    pages   = 0
+    total   = None
+    partial = ""
+    started = time.time()
 
-    voices = payload.get("voices") or []
-    if not isinstance(voices, list):
-        voices = []
+    while pages < _EL_MAX_PAGES:
+        try:
+            payload = _fetch_voice_page(api_key, token, timeout)
+        except ValueError:
+            # A first-page failure means we have nothing to show: the caller
+            # needs the error. Later pages: keep what already arrived and say
+            # plainly what is missing — a partial list beats an empty picker.
+            if not voices:
+                raise
+            partial = (f" (incomplete: page {pages + 1} failed after "
+                       f"{_EL_PAGE_ATTEMPTS} attempts)")
+            print(f"    [voices] page {pages + 1} failed — keeping the "
+                  f"{len(voices)} voice(s) already fetched", flush=True)
+            break
+
+        pages += 1
+        page = payload.get("voices")
+        if not isinstance(page, list):
+            page = []
+        for v in page:
+            # The token walk should not repeat a voice, but a duplicate here
+            # would show up twice in the dropdown, so filter defensively.
+            if isinstance(v, dict):
+                vid = v.get("voice_id") or v.get("voiceId") or ""
+                if vid and vid not in seen_ids:
+                    seen_ids.add(vid)
+                    voices.append(v)
+        if total is None:
+            total = payload.get("total_count")
+
+        if pages == 1 or pages % 5 == 0:
+            of = f"/{total}" if isinstance(total, int) else ""
+            print(f"    [voices] {len(voices)}{of} fetched "
+                  f"({pages} page(s), {int(time.time() - started)}s)",
+                  flush=True)
+
+        if not payload.get("has_more"):
+            break
+        token = payload.get("next_page_token")
+        if not token:
+            break
+    else:
+        # Loop guard tripped. Never truncate silently.
+        partial = f" (stopped at the {_EL_MAX_PAGES}-page safety limit)"
+        print(f"    [voices] stopped at {_EL_MAX_PAGES} pages — "
+              f"{len(voices)} voice(s) fetched", flush=True)
+
+    print(f"    [voices] {len(voices)} voice(s) in "
+          f"{int(time.time() - started)}s{partial}", flush=True)
 
     matched_voices: List[Dict[str, str]] = []
     other_voices:   List[Dict[str, str]] = []
