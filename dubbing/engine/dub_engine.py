@@ -191,7 +191,8 @@ REQUIRED_FUNCTIONS = [
     "_build_subtitle_srt",           # Stage-1 English SRT (for translation)
     "_parse_srt_to_analysis_format", # LLM input format
     "_run_gemini_pipeline",          # Step1 -> Step2 -> Step3 chain
-    "_run_emotion_enrichment",       # Step4 emotion tags (best-effort)
+    "_run_emotion_enrichment",       # Step4 emotion tags (strict=True from here)
+    "_load_lang_prompt",             # per-language prompt file (pre-spend check)
     "_extract_srt_entries",          # SRT -> (start, end, text) rows (review pairing)
     "_split_translation_paragraphs", # dub script -> blank-line paragraphs
     "_pair_review_rows",             # EN segments <-> translation paragraphs, aligned
@@ -1073,9 +1074,12 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     # comes back unchanged.
     if _emotion_enabled(args):
         _say("S2d", f"Step-4 emotion enrichment on {gemini_model}…")
+        # strict=True: ANY failure here stops the run. This is the last free
+        # moment before the ElevenLabs spend, and every sync mode still needs
+        # a mandatory LLM call afterwards.
         tts_text = pl._run_emotion_enrichment(
             script_text, language=language, model=gemini_model,
-            status_cb=lambda m: _say("S2d", m))
+            status_cb=lambda m: _say("S2d", m), strict=True)
         if not (tts_text or "").strip():
             tts_text = script_text
     else:
@@ -1197,6 +1201,89 @@ def _require_ffmpeg(pl, hard):
           "translate-only runs on WAV input can proceed.)")
 
 
+def _required_prompts(args):
+    """The prompt files THIS run will load — not all five.
+
+    Which ones depend on the run: a --provided-script run never enters the
+    translation chain, and match mode neither enriches emotion nor maps
+    subtitles. Listing more than the run needs would block a language whose
+    missing prompt does not matter here.
+    """
+    need = []
+    if args.steps in ("full", "translate") and not args.provided_script:
+        need += ["Step1_Translation_Prompt", "Step2_Review_Prompt",
+                 "Step3_Punctuation_Prompt"]
+    if args.steps in ("full", "dub") and _sync_mode(args) != "match":
+        # match mode builds its matcher prompt inline and skips Step 4.
+        if _emotion_enabled(args):
+            need.append("Step4_Emotion_Prompt")
+        need.append("SyncingPrompt")
+    return need
+
+
+def _preflight_prompts(pl, args):
+    """Read every prompt file this run needs BEFORE anything bills.
+
+    A missing or empty prompt used to surface only when the stage that loads
+    it ran — and in a legacy run both Step 4 and SyncingPrompt sit AFTER the
+    ElevenLabs spend, so adding a language without its SyncingPrompt meant
+    paying for a TTS synthesis and a Scribe pass before finding out. Reading
+    them up front costs a few filesystem stats.
+    """
+    needed = _required_prompts(args)
+    missing = []
+    for stage in needed:
+        fname = f"{stage}_{args.language}.txt"
+        try:
+            text = pl._load_lang_prompt(stage, args.language)
+        except Exception as e:
+            missing.append(f"{fname} — {e.__class__.__name__}")
+            continue
+        if not (text or "").strip():
+            missing.append(f"{fname} — the file is empty")
+    if missing:
+        raise RuntimeError(
+            f"Prompt file(s) missing or empty for {args.language}, stopping "
+            "before any paid transcription or speech synthesis:\n  "
+            + "\n  ".join(missing)
+            + "\nAdd them under dubbing/prompts/ (adapt the _Bengali.txt "
+              "copies), then run again.")
+    if needed:
+        _note(f"Prompts present: {len(needed)} file(s) for {args.language}.")
+
+
+def _preflight_llm(pl):
+    """One tiny LLM call BEFORE any paid API work. Raises if it fails.
+
+    Every --steps full / dub run needs the LLM for something it cannot skip:
+    the section-match call in 'match' mode, the EN<->target mapping in
+    'legacy'. Both sit AFTER Scribe transcription and AFTER ElevenLabs
+    speech synthesis, so an unreachable endpoint used to be discovered only
+    once the expensive half had already been paid for a run that could never
+    finish. On 2026-08-24 a Kannada run logged the gateway as unreachable at
+    S2d, carried on to spend a full TTS synthesis plus an 11.3 MB Scribe
+    pass, and only then died at S3c on the same endpoint.
+
+    Same probe as --test-llm, same failure surface. Cost is one sub-token
+    reply, which is why it can run unconditionally.
+
+    Deliberately placed alongside the voice resolution: that already fails
+    fast "before any expensive transcription/translation work happens", and
+    the LLM simply never got the same treatment.
+    """
+    provider, model = pl._active_provider_and_model()
+    _note(f"Checking the LLM is reachable ({provider}, {model})…")
+    reply = pl._llm_generate(
+        "Reply with the single word OK and nothing else.", model)
+    if not (reply or "").strip():
+        raise RuntimeError(
+            f"The LLM at {provider} ({model}) accepted the connection but "
+            "returned an empty reply. Stopping before any paid "
+            "transcription or speech synthesis — fix the LLM provider in "
+            "the panel's Settings tab, then run again.")
+    _note("LLM reachable.")
+
+
 def _begin_run(args, manifest):
     """Common head of full/translate/dub: audio checks + pipeline import +
     keys.
@@ -1219,6 +1306,12 @@ def _begin_run(args, manifest):
     if callable(_roles) and _roles():
         _note(f"Per-stage model overrides: {_roles()}")
     _require_ffmpeg(pl, hard=(args.steps in ("full", "dub")))
+    # v0.15.1: prove the LLM answers before anything bills. full/dub always
+    # need it (see _preflight_llm); a translate run handed --provided-script
+    # skips the whole LLM chain, so it must not be blocked by this.
+    if args.steps in ("full", "dub") or not args.provided_script:
+        _preflight_prompts(pl, args)
+        _preflight_llm(pl)
     return pl, api_key, {"audio_path": audio_path}
 
 

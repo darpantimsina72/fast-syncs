@@ -27,6 +27,7 @@ Adaptations (everything else is verbatim):
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.request
 from typing import Dict, List, Optional, Set, Tuple
@@ -766,10 +767,49 @@ def _tm_capture(language: str, en_entries, proofed_text: str,
         return 0
 
 
+def _is_endpoint_unreachable(err: BaseException) -> bool:
+    """True when the LLM endpoint could not be reached AT ALL.
+
+    Distinguishes "the network never got me to a server" from "a server
+    answered and said no". The first means every later LLM call in this run
+    is doomed; the second may be specific to one request.
+
+    Typed walk over the cause chain, deliberately NOT a substring match on
+    the message: `URLError.reason` can be an arbitrary server-supplied
+    string, so an HTTP reason phrase containing "connection refused" must
+    never be able to masquerade as a dead network. Same policy as
+    config._is_cert_verify_error.
+
+    HTTPError is excluded on purpose — receiving a status code proves the
+    endpoint answered.
+    """
+    cur: Optional[BaseException] = err
+    for _ in range(10):                       # bounded: chains can be cyclic
+        if cur is None:
+            break
+        # HTTPError first: it subclasses URLError, but a status code proves
+        # the endpoint answered.
+        if isinstance(cur, urllib.error.HTTPError):
+            return False
+        # Any other URLError means urlopen never got an HTTP response at all
+        # — DNS failure, refused, timed out, no route. No need to inspect
+        # .reason, and deliberately no attempt to: it can be a
+        # server-supplied string.
+        if isinstance(cur, urllib.error.URLError):
+            return True
+        # Un-wrapped transport failures (a raw socket read outside urlopen).
+        if isinstance(cur, (ConnectionError, TimeoutError, socket.timeout)):
+            return True
+        nxt = cur.__cause__ or cur.__context__
+        cur = nxt if isinstance(nxt, BaseException) else None
+    return False
+
+
 def _run_emotion_enrichment(text: str,
                             language: str = TTS_DEFAULT_LANGUAGE,
                             model: str = GEMINI_DEFAULT_MODEL,
-                            status_cb=None) -> str:
+                            status_cb=None,
+                            strict: bool = False) -> str:
     """
     Step4: inject ElevenLabs v3 emotion / accent tags into a punctuated script.
 
@@ -778,8 +818,20 @@ def _run_emotion_enrichment(text: str,
     pause tags through the script in a Sadhguru-style cadence. Words and
     punctuation of the input are preserved verbatim — only tags are added.
 
-    Best-effort: on ANY failure (missing prompt, network, Gemini error) the
-    original text is returned so the TTS step is never blocked.
+    strict=False (library default, unchanged): best-effort on most failures
+    (missing prompt, a Gemini error, an empty reply) — the original text
+    comes back so the TTS step is never blocked. An UNREACHABLE endpoint
+    still re-raises even here, because it dooms every later call.
+
+    strict=True (what dub_engine passes, v0.15.1): ANY failure raises. This
+    step is the first LLM call of the dub half and runs BEFORE the
+    ElevenLabs spend, so it is the last free moment to abandon a run. Every
+    sync mode still needs a mandatory LLM call afterwards — the section
+    match in 'match' mode, the EN<->target mapping in 'legacy' — so limping
+    on with un-enriched text mostly means paying for TTS and a Scribe pass
+    and failing anyway. On 2026-08-24 a Kannada run did exactly that.
+
+    Stopping costs nothing but a re-run: nothing has been billed yet.
     """
     if not STEP4_EMOTION_ENABLED or not text or not text.strip():
         return text
@@ -791,6 +843,10 @@ def _run_emotion_enrichment(text: str,
                                  role="emotion") or ""
         enriched = _strip_code_fence(enriched).strip()
         if not enriched:
+            if strict:
+                raise RuntimeError(
+                    "Step-4 emotion enrichment returned an empty reply from "
+                    f"{model}. Stopping before the ElevenLabs spend.")
             if status_cb:
                 status_cb("Step4: Emotion enrichment returned empty — using original text.")
             return text
@@ -798,6 +854,12 @@ def _run_emotion_enrichment(text: str,
             status_cb("Step4: Emotion enrichment ✓")
         return enriched
     except Exception as e:
+        # Not best-effort when the caller asked for strict, and never for an
+        # unreachable endpoint: the mandatory LLM call later in this run
+        # would fail identically, and everything between here and there is
+        # paid for.
+        if strict or _is_endpoint_unreachable(e):
+            raise
         if status_cb:
             status_cb(f"Step4: Emotion enrichment skipped ({e}). Using original text.")
         return text
