@@ -1197,6 +1197,38 @@ def _require_ffmpeg(pl, hard):
           "translate-only runs on WAV input can proceed.)")
 
 
+def _preflight_llm(pl):
+    """One tiny LLM call BEFORE any paid API work. Raises if it fails.
+
+    Every --steps full / dub run needs the LLM for something it cannot skip:
+    the section-match call in 'match' mode, the EN<->target mapping in
+    'legacy'. Both sit AFTER Scribe transcription and AFTER ElevenLabs
+    speech synthesis, so an unreachable endpoint used to be discovered only
+    once the expensive half had already been paid for a run that could never
+    finish. On 2026-08-24 a Kannada run logged the gateway as unreachable at
+    S2d, carried on to spend a full TTS synthesis plus an 11.3 MB Scribe
+    pass, and only then died at S3c on the same endpoint.
+
+    Same probe as --test-llm, same failure surface. Cost is one sub-token
+    reply, which is why it can run unconditionally.
+
+    Deliberately placed alongside the voice resolution: that already fails
+    fast "before any expensive transcription/translation work happens", and
+    the LLM simply never got the same treatment.
+    """
+    provider, model = pl._active_provider_and_model()
+    _note(f"Checking the LLM is reachable ({provider}, {model})…")
+    reply = pl._llm_generate(
+        "Reply with the single word OK and nothing else.", model)
+    if not (reply or "").strip():
+        raise RuntimeError(
+            f"The LLM at {provider} ({model}) accepted the connection but "
+            "returned an empty reply. Stopping before any paid "
+            "transcription or speech synthesis — fix the LLM provider in "
+            "the panel's Settings tab, then run again.")
+    _note("LLM reachable.")
+
+
 def _begin_run(args, manifest):
     """Common head of full/translate/dub: audio checks + pipeline import +
     keys.
@@ -1219,6 +1251,11 @@ def _begin_run(args, manifest):
     if callable(_roles) and _roles():
         _note(f"Per-stage model overrides: {_roles()}")
     _require_ffmpeg(pl, hard=(args.steps in ("full", "dub")))
+    # v0.15.1: prove the LLM answers before anything bills. full/dub always
+    # need it (see _preflight_llm); a translate run handed --provided-script
+    # skips the whole LLM chain, so it must not be blocked by this.
+    if args.steps in ("full", "dub") or not args.provided_script:
+        _preflight_llm(pl)
     return pl, api_key, {"audio_path": audio_path}
 
 

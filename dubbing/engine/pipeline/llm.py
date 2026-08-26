@@ -27,6 +27,7 @@ Adaptations (everything else is verbatim):
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.request
 from typing import Dict, List, Optional, Set, Tuple
@@ -766,6 +767,44 @@ def _tm_capture(language: str, en_entries, proofed_text: str,
         return 0
 
 
+def _is_endpoint_unreachable(err: BaseException) -> bool:
+    """True when the LLM endpoint could not be reached AT ALL.
+
+    Distinguishes "the network never got me to a server" from "a server
+    answered and said no". The first means every later LLM call in this run
+    is doomed; the second may be specific to one request.
+
+    Typed walk over the cause chain, deliberately NOT a substring match on
+    the message: `URLError.reason` can be an arbitrary server-supplied
+    string, so an HTTP reason phrase containing "connection refused" must
+    never be able to masquerade as a dead network. Same policy as
+    config._is_cert_verify_error.
+
+    HTTPError is excluded on purpose — receiving a status code proves the
+    endpoint answered.
+    """
+    cur: Optional[BaseException] = err
+    for _ in range(10):                       # bounded: chains can be cyclic
+        if cur is None:
+            break
+        # HTTPError first: it subclasses URLError, but a status code proves
+        # the endpoint answered.
+        if isinstance(cur, urllib.error.HTTPError):
+            return False
+        # Any other URLError means urlopen never got an HTTP response at all
+        # — DNS failure, refused, timed out, no route. No need to inspect
+        # .reason, and deliberately no attempt to: it can be a
+        # server-supplied string.
+        if isinstance(cur, urllib.error.URLError):
+            return True
+        # Un-wrapped transport failures (a raw socket read outside urlopen).
+        if isinstance(cur, (ConnectionError, TimeoutError, socket.timeout)):
+            return True
+        nxt = cur.__cause__ or cur.__context__
+        cur = nxt if isinstance(nxt, BaseException) else None
+    return False
+
+
 def _run_emotion_enrichment(text: str,
                             language: str = TTS_DEFAULT_LANGUAGE,
                             model: str = GEMINI_DEFAULT_MODEL,
@@ -778,8 +817,20 @@ def _run_emotion_enrichment(text: str,
     pause tags through the script in a Sadhguru-style cadence. Words and
     punctuation of the input are preserved verbatim — only tags are added.
 
-    Best-effort: on ANY failure (missing prompt, network, Gemini error) the
-    original text is returned so the TTS step is never blocked.
+    Best-effort on most failures (missing prompt, a Gemini error, an empty
+    reply): the original text comes back so the TTS step is never blocked.
+
+    EXCEPTION, v0.15.1 — an UNREACHABLE endpoint re-raises. This step is the
+    first LLM call of the dub half, and it runs BEFORE the ElevenLabs spend.
+    Every sync mode then needs a mandatory LLM call later (the section match
+    in 'match' mode, the EN<->target mapping in 'legacy'), so a dead endpoint
+    here means the run cannot finish no matter what. Swallowing it bought
+    nothing and cost a full TTS synthesis plus a Scribe pass on the result:
+    on 2026-08-24 a Kannada run did exactly that, logging the gateway as
+    unreachable at S2d and still paying for both before dying at S3c.
+
+    A server that ANSWERS and refuses is still best-effort — that may be
+    specific to this one request.
     """
     if not STEP4_EMOTION_ENABLED or not text or not text.strip():
         return text
@@ -798,6 +849,10 @@ def _run_emotion_enrichment(text: str,
             status_cb("Step4: Emotion enrichment ✓")
         return enriched
     except Exception as e:
+        if _is_endpoint_unreachable(e):
+            # Not best-effort: the mandatory LLM call later in this run will
+            # fail identically, and everything between here and there is paid.
+            raise
         if status_cb:
             status_cb(f"Step4: Emotion enrichment skipped ({e}). Using original text.")
         return text
