@@ -808,7 +808,8 @@ def _is_endpoint_unreachable(err: BaseException) -> bool:
 def _run_emotion_enrichment(text: str,
                             language: str = TTS_DEFAULT_LANGUAGE,
                             model: str = GEMINI_DEFAULT_MODEL,
-                            status_cb=None) -> str:
+                            status_cb=None,
+                            strict: bool = False) -> str:
     """
     Step4: inject ElevenLabs v3 emotion / accent tags into a punctuated script.
 
@@ -817,20 +818,20 @@ def _run_emotion_enrichment(text: str,
     pause tags through the script in a Sadhguru-style cadence. Words and
     punctuation of the input are preserved verbatim — only tags are added.
 
-    Best-effort on most failures (missing prompt, a Gemini error, an empty
-    reply): the original text comes back so the TTS step is never blocked.
+    strict=False (library default, unchanged): best-effort on most failures
+    (missing prompt, a Gemini error, an empty reply) — the original text
+    comes back so the TTS step is never blocked. An UNREACHABLE endpoint
+    still re-raises even here, because it dooms every later call.
 
-    EXCEPTION, v0.15.1 — an UNREACHABLE endpoint re-raises. This step is the
-    first LLM call of the dub half, and it runs BEFORE the ElevenLabs spend.
-    Every sync mode then needs a mandatory LLM call later (the section match
-    in 'match' mode, the EN<->target mapping in 'legacy'), so a dead endpoint
-    here means the run cannot finish no matter what. Swallowing it bought
-    nothing and cost a full TTS synthesis plus a Scribe pass on the result:
-    on 2026-08-24 a Kannada run did exactly that, logging the gateway as
-    unreachable at S2d and still paying for both before dying at S3c.
+    strict=True (what dub_engine passes, v0.15.1): ANY failure raises. This
+    step is the first LLM call of the dub half and runs BEFORE the
+    ElevenLabs spend, so it is the last free moment to abandon a run. Every
+    sync mode still needs a mandatory LLM call afterwards — the section
+    match in 'match' mode, the EN<->target mapping in 'legacy' — so limping
+    on with un-enriched text mostly means paying for TTS and a Scribe pass
+    and failing anyway. On 2026-08-24 a Kannada run did exactly that.
 
-    A server that ANSWERS and refuses is still best-effort — that may be
-    specific to this one request.
+    Stopping costs nothing but a re-run: nothing has been billed yet.
     """
     if not STEP4_EMOTION_ENABLED or not text or not text.strip():
         return text
@@ -842,6 +843,10 @@ def _run_emotion_enrichment(text: str,
                                  role="emotion") or ""
         enriched = _strip_code_fence(enriched).strip()
         if not enriched:
+            if strict:
+                raise RuntimeError(
+                    "Step-4 emotion enrichment returned an empty reply from "
+                    f"{model}. Stopping before the ElevenLabs spend.")
             if status_cb:
                 status_cb("Step4: Emotion enrichment returned empty — using original text.")
             return text
@@ -849,9 +854,11 @@ def _run_emotion_enrichment(text: str,
             status_cb("Step4: Emotion enrichment ✓")
         return enriched
     except Exception as e:
-        if _is_endpoint_unreachable(e):
-            # Not best-effort: the mandatory LLM call later in this run will
-            # fail identically, and everything between here and there is paid.
+        # Not best-effort when the caller asked for strict, and never for an
+        # unreachable endpoint: the mandatory LLM call later in this run
+        # would fail identically, and everything between here and there is
+        # paid for.
+        if strict or _is_endpoint_unreachable(e):
             raise
         if status_cb:
             status_cb(f"Step4: Emotion enrichment skipped ({e}). Using original text.")
