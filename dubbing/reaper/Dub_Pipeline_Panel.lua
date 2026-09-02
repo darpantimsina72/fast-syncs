@@ -6089,8 +6089,15 @@ function V5.ui_settings_window(ctx)
     -- examples/demo.lua early-outs on `if not rv then return end` without
     -- ending. Calling it anyway raises
     --   ImGui_End: Calling End() too many times!
-    -- and killed the panel for anyone who had collapsed this window: ImGui
-    -- persists the collapsed state, so it came back every launch.
+    --
+    -- Begin() reports not-visible more often than "collapsed" suggests. The
+    -- case that actually reached users: dragging this window onto the main
+    -- one DOCKS the two as tabs in one node, and the unselected tab is not
+    -- visible. A field machine's ReaImGui ini showed exactly that —
+    -- ###dub_pipeline DockId=0x1,0 and ###dub_settings DockId=0x1,1, with
+    -- Collapsed=0 on both. The layout persists in
+    -- <REAPER resource>/ReaImGui/AEEFD7DC.ini, so the error returned at
+    -- every launch until that file was reset.
     reaper.ImGui_End(ctx)
   end
   V5.settings_open = open and true or false

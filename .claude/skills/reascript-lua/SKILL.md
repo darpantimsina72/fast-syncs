@@ -106,9 +106,20 @@ This repo had it wrong in all three window frames until v0.15.2. The two with
 Sync window) hid it, because a window that cannot be collapsed almost always
 reports visible. The Settings window has no such flag, so anyone who
 collapsed it got the error on every frame — and ImGui persists the collapsed
-state, so it survived restarts. `NoCollapse` is not a fix either: `Begin`
-also reports not-visible for a fully clipped window, which is precisely what
+state, so it survived restarts. `NoCollapse` is not a fix either, and collapsing is not even the
+main trigger: **two windows docked into one node become tabs, and the
+unselected tab is not visible.** That is what actually reached users —
+dragging the Settings window onto the panel docked them together. A field
+machine's ini showed `###dub_pipeline DockId=0x1,0` and
+`###dub_settings DockId=0x1,1` with `Collapsed=0` on both. `Begin` also
+reports not-visible for a fully clipped window, which is precisely what
 `check_offscreen()` exists to rescue.
+
+ReaImGui persists that layout per context in
+`<REAPER resource path>/ReaImGui/<hash>.ini` — the hash comes from the
+context name, so the dub panel is always `AEEFD7DC.ini` and the standalone
+Auto Sync window `EBCA1704.ini`. Deleting the file resets window
+positions/docking only; no app settings live there.
 
 Correct shape (`Dub_Pipeline_Panel.lua` `V5.ui_settings_window`):
 
