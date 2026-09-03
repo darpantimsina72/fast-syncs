@@ -1,6 +1,6 @@
 -- @description Fast Syncs — AI dubbing sync for REAPER
 -- @author darpantimsina72
--- @version 0.15.2
+-- @version 0.16.0
 -- @about
 --   Transcribes your Dialogue VO and Dub tracks, asks Gemini which dubbed clip
 --   means the same thing as which English clip, and moves each dubbed clip to
