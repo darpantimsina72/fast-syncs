@@ -18,8 +18,8 @@ punctuation** (your choice of LLM) → **text-to-speech** (ElevenLabs) →
 A ReaImGui panel drives everything from inside REAPER, including a pause for
 human review of the translation before any TTS cost is spent.
 
-Supported target languages: Bengali, Hindi, Kannada, Malayalam, Tamil,
-Telugu, Gujarati, Marathi, Punjabi, Assamese, Odia, Nepali.
+Supported target languages: Assamese, Bengali, Gujarati, Hindi, Kannada,
+Malayalam, Marathi, Nepali, Odia, Punjabi, Tamil, Telugu.
 
 ## Requirements
 
@@ -97,17 +97,36 @@ double-click on `setup_mac.command`. Any one of these fixes it:
 
 ## API keys and privacy
 
-Open the panel and expand **⚙ Settings**:
+Open the panel and go to **⚙ Settings → Connections**. Every API the app talks
+to has a row there — the OpenAI-compatible gateway, Gemini, Vertex AI, the
+server proxy, and ElevenLabs — and each row says whether its key works and
+which models that key serves.
 
-- **LLM** — pick a provider (`vertex` / `gemini` / `openai` / `server`), set the
-  model (default `gemini-2.5-pro`) and the provider's credentials. Key fields are
-  masked (a "Show keys" checkbox reveals them). **Test connection** makes
-  one tiny LLM call and shows the reply.
-- **TTS** — your ElevenLabs key, the ElevenLabs model, and the voice.
-  **Fetch voices** pulls the voice catalogue for the selected language into
-  a combo; a manual voice-id field is always available as a fallback.
+- **Paste a key and it checks itself.** About a second after you stop typing,
+  the row asks that API whether the key is valid (one HTTP call, nothing
+  blocks) and reports back: *valid · 14 models available*, *key rejected (HTTP
+  401)*, or what went wrong. No button to press.
+- **The model list comes from the key.** A validated key fills that provider's
+  Model dropdown with the ids it can actually serve; the built-in list stays
+  below it, and **Custom** still turns the dropdown into a text box for an id
+  nobody advertises. If your saved model is not one the key serves, the row
+  says so and offers the one it detected.
+- **Every key field has its own eye.** Click it to read that key in plain text,
+  click again to mask it. One field at a time, and never remembered across
+  launches.
+- **Used for AI** at the top (or **Use for AI** on any row) picks which
+  provider translates, reviews and maps. **Test connection** at the bottom is
+  the end-to-end proof: one real LLM call through the engine with the model you
+  selected.
 
-**This tab is the only place credentials are entered.** The **Auto Sync** tab
+Voice work moved to the **Tools** tab → **Voices**: the ElevenLabs model,
+**Fetch voices** for the selected language, auditioning, and the default voice
+every stage falls back to. A manual voice-id field is always available as a
+fallback. Only the ElevenLabs *key* stays in Connections, with the other
+credentials.
+
+**Settings → Connections is the only place credentials are entered.** The
+**Auto Sync** tab
 uses the same keys and has no fields of its own — every save mirrors the shared
 ones (provider, model, keys, gateway URL, ElevenLabs key, server URL + token)
 into `sync_pipeline_settings.json` next to `run_sync.py`, leaving Auto Sync's own
@@ -134,11 +153,30 @@ from those files only — they are never placed on a command line.
 2. Pick the English audio and the target language. (Voice and models live
    in ⚙ Settings.) Two ways to pick the audio:
    - **Browse…** — pick a file on disk, or
-   - **From track → Use track** — take it straight from a project track,
-     no file browsing. A track holding one clean item uses that item's
-     source file directly; anything else (chunks, trims, offsets) is
-     rendered to `<project path>/DubSource/` automatically and that wav
-     is used.
+   - **Or take it off a track → Use** — take it straight from the
+     timeline, no file browsing.
+
+   **The timeline decides how much gets dubbed.** Trim an item to the two
+   minutes you want and only those two minutes are transcribed, translated
+   and spoken — you are not billed for the rest of the talk. What **Use**
+   would take, most specific first:
+
+   1. the **time selection**, if you dragged one (clamped to the track, so a
+      selection past the end of the talk never renders silence),
+   2. the **item(s) you selected** — which also say which track, so the
+      picker can stay on *(from track)*,
+   3. everything the chosen track holds.
+
+   The line under the picker says which, live, while you trim — and turns
+   **amber** while the audio in the field is not that span, because pressing
+   Run without pressing Use is how the whole file gets dubbed by accident.
+   A whole untrimmed item at 0:00 uses its source file directly; anything
+   else is rendered to `<project path>/DubSource/` first.
+
+   The span is remembered next to that wav, so the dub is **imported back
+   where it came from** — a region taken from 2:00 lands at 2:00, under the
+   item it was made for, not at 0:00 — and ▶ Play here on the review screen
+   plays the right part of the talk.
 3. **Already have the translation?** Use the **Paste Translation** tab:
    pick the audio + language there and paste the translated script (one
    blank line between paragraphs — **📥 Paste from clipboard** works too).
@@ -154,29 +192,66 @@ from those files only — they are never placed on a command line.
    Advanced → *Dub piece size* (**clause** by default, or *sentence*, or
    *thought* for the old one-block-per-idea behaviour).
 
-   The panel has eight tabs: **Full Pipeline** (the LLM translates —
-   pauses for your review), **Paste Translation** (your script),
-   **Auto Sync** (the fast-syncs clip-matching pipeline, embedded right in
-   this window — its own settings live inside the tab), **Text to Speech**
-   (paste any text, get it spoken on a `TTS` track — see below),
-   **Regen Audio** (re-synthesize one selected chunk), **Track Voice**
-   (re-voice a whole track), **Logs** (full live log) and **Settings**
-   (keys, python override, updater).
+   **🔍 Preview sync — see the drift before spending any credits.** With a
+   script pasted, the **🔍 Preview sync** button next to Run does a free dry
+   run instead of a dubbing run. It listens to the source audio for where
+   the speaker actually stops and starts, cuts it into chunks at those
+   pauses, spreads your script across them, and estimates how long each
+   line will take to speak from its character count and the language's
+   speaking rate. Nothing is generated and nothing is billed — the only
+   network call is the transcription, and that is cached on disk, so you
+   can preview as many times as you like.
 
-   **Voice bookmarks.** Anywhere you pick a voice — ⚙ Settings, Track
-   Voice, Text to Speech — there is a search box and a **☆ Bookmark this
+   You get two files next to the audio:
+
+   - `<name>_sync_plan.html` — **🌐 Open preview** opens it in your browser.
+     Source speech on the top lane, the estimated dub on the bottom lane,
+     both on one time axis with the pauses drawn hatched. Where a coloured
+     bar sticks out past its grey bar, that is exactly where the dub will
+     drift. Green fits, amber eats into the pause, **red overflows**.
+   - `<name>_sync_plan.txt` — the same thing as editable text. **📝 Edit
+     plan** opens it; change any `TR:` line (shorten an overflowing one,
+     move a sentence to the chunk it belongs in), save, and press
+     **⟲ Reload**. Free, and as many times as you want. Only the `TR:`
+     lines are read back — the timings always come from the audio, so a
+     stray edit to a timestamp cannot desync anything.
+
+   When it looks right, **▶ Approve & Generate**. That is the only step
+   that spends credits. Each chunk is synthesized and laid down at *its own
+   original timestamp*, so the dub keeps the source's rhythm exactly; a
+   chunk that still runs long is sped up (pitch preserved) to fit, up to a
+   ceiling of 1.25× by default. Anything that would need more than that is
+   left alone and named in the log rather than squashed into mush — shorten
+   its line and preview again. Nothing lands on **Un sync** in this mode:
+   every chunk already has a home.
+
+   Tuning lives in `engine/engine_settings.json` — `pause_min_ms` (200; the
+   shortest gap that counts as a pause), `pause_thr_db` (−42; the silence
+   floor), `max_atempo` (1.25) and `plan_rate_override` (force a chars/sec
+   rate if the estimate reads slow or fast for your voice).
+
+   The rail down the left has five destinations: **Dub** (the whole run —
+   the LLM translates and pauses for your review, or you paste your own
+   script), **Sync** (the fast-syncs clip-matching pipeline, embedded right
+   in this window — its own settings live inside it), **Tools** (four voice
+   utilities behind one row of chips: Voices, Text to speech, Redo one line,
+   Re-voice a track — see below), **Log** (full live log) and **Settings**
+   (connections, models, prompts, advanced, about).
+
+   **Voice bookmarks.** Anywhere you pick a voice — any of the Tools —
+   there is a search box and a **☆ Bookmark this
    voice** button. Starred voices sit at the top of the list with a ★ and
    stay there across projects, languages and restarts, so you never scroll
    the whole account catalogue again. Bookmarks are saved in
    `reaper/voice_bookmarks.json` on your machine only.
 
    **A model per stage** (⚙ Settings → *Model per stage*). By default every
-   AI call uses the one **Model** field. Fill in a stage's box to give just
-   that stage its own model — a fast, cheap one for the mechanical work
-   (matching, emotion tags) and the strong one for translation. Stages:
+   AI call uses the one **Model** field. Pick a model in a stage's dropdown
+   to give just that stage its own — a fast, cheap one for the mechanical
+   work (matching, emotion tags) and the strong one for translation. Stages:
    Translate, Emotion tags, Dub matching, Legacy sync map, and Auto Sync
-   match (handed to the Auto Sync tab when you save). Empty = use the main
-   Model, which is what every existing setup already does.
+   match (handed to the Auto Sync tab when you save). *same as Model* = use
+   the main Model, which is what every existing setup already does.
 
    **Add a language** (⚙ Settings → *Languages*). Type a name, optionally a
    locale code, pick an existing language to copy prompts from, and click
@@ -212,6 +287,32 @@ from those files only — they are never placed on a command line.
    - **Back to setup** — the paused run is kept; the setup phase offers
      **Resume review** (it even survives closing the panel).
 
+   **🎙 Cast — the ElevenLabs voices, chosen here.** The chip row beside
+   List/Grid is the cast: the first speaker is the **main voice** (the one
+   the run is launched with, and the one every paragraph you do not
+   re-assign is spoken by), and you can add up to eight more.
+
+   - Open **🎙 Cast** to name each speaker, pick its voice from your
+     ElevenLabs catalogue (**⟳ Fetch voices** fills the combos), audition it
+     with **🔊**, or promote another speaker to main with **⇧ main**.
+   - Press a speaker's chip to make it *active*, then click the coloured
+     chip on any paragraph to cast that line to it. The right-hand
+     inspector has the same choice as a list, for the selected paragraph.
+   - **🔎 Detect speakers** reads `Name:` labels off the English column and
+     casts those paragraphs for you. It never edits the script — including
+     the labels, which ElevenLabs would otherwise read aloud.
+   - The casting is saved with your edits as
+     `<out_dir>/<base>_speakers.json`, so a resumed review comes back with
+     the same cast. A single-voice run writes no such file.
+   - **Continue** refuses while a speaker that has paragraphs has no voice —
+     that is a line nobody could speak, and it costs nothing to fix here.
+
+   The engine speaks each paragraph in its cast voice: in match sync mode
+   one request per run of same-voice pieces, in legacy sync mode one request
+   per run of same-voice paragraphs. Emotion enrichment (legacy mode) is
+   checked against the paragraph count first — if it changed, the cast is
+   reported as unusable rather than applied to the wrong lines.
+
    Tick **Full run (no review)** in the setup phase for the one-shot
    behavior with no pause.
 
@@ -238,40 +339,52 @@ from those files only — they are never placed on a command line.
    runs — **Resume review** a paused run or **Import to timeline** a
    finished one at any time, with no re-transcription / re-translation.
    The app version is in the panel's title bar and Settings tab.
-7. **Fix single lines with chunk regeneration** — go to the **Regen Audio**
-   tab, select a chunk item on a "Dub Chunks" track, edit the item's text,
-   click **⟳ Regenerate**. The engine synthesizes just that text and the
-   panel swaps the item's take source to the new wav — non-destructively,
-   new files only ever land in `<out_dir>/regen/` with auto-incrementing
-   version suffixes.
-   Below the button, **Regenerate in another voice (optional)** re-does the
-   same chunk in a different ElevenLabs voice — same bookmarks + search as
-   the other tabs, or paste a voice id. **⟳ Fetch voices** next to the search
-   box pulls your account's catalogue for the current language right there
-   (no detour through ⚙ Settings), and the list is cached in
-   `reaper/voice_cache.json`, so it is already filled the next time the panel
-   opens. **🔊 Test voice** auditions the pick before you spend a regen on
-   it: the start of the selected chunk is synthesized in that voice and
-   played straight away — nothing is imported, no item is touched, and
-   pressing it again with the same voice and text just replays the sample
-   instead of calling ElevenLabs twice (samples live in `engine/preview/`,
-   newest one only). Leave the voice empty and regeneration uses the ⚙ Settings voice
-   exactly as before. The choice sticks until you change it, so several
-   chunks can be redone in the new voice one by one.
-8. **Change the voice of a whole track** — go to the **Track Voice** tab,
-   pick any project track and a target ElevenLabs voice, click **🎤 Change
-   voice**. The track is rendered to a wav, converted with the ElevenLabs
+7. **Fix single lines** — **Tools → Redo one line**. Select a chunk item on a
+   "Dub Chunks" track and the panel shows it in context: which chunk it is
+   (*47 of 148*), the slot it has to land in, and the lines either side of it.
+   Edit the text and a **fit meter** says, before you spend anything, whether
+   the new line will still fit — the speaking rate is measured from that
+   chunk's own text and duration, so it is this speaker, this language, this
+   project. Too long turns it amber, because in Match mode an overrunning
+   chunk is parked on the Un sync track.
+   **⟳ Regenerate this line** synthesizes just that text and swaps the item's
+   take source to the new wav. Non-destructive on disk (files land in
+   `<out_dir>/regen/` with version suffixes) *and* on the timeline: afterwards
+   you can play the new take, play the one it replaced, then **Keep it** or
+   **Put the old one back**.
+   **Redo it in a different voice** re-does the same chunk in another
+   ElevenLabs voice — same bookmarks + search as everywhere else, or paste a
+   voice id. **⟳ Fetch voices** pulls your account's catalogue for the current
+   language right there, cached in `reaper/voice_cache.json` so it is already
+   filled next time. **🔊 Test voice** auditions the pick before you spend a
+   regen on it: the start of the selected chunk is synthesized in that voice
+   and played straight away — nothing imported, no item touched, and pressing
+   it again with the same voice and text replays the sample instead of calling
+   ElevenLabs twice (samples live in `engine/preview/`, newest one only).
+   Leave the voice empty and regeneration uses the default voice. The choice
+   sticks, so several chunks can be redone in the new voice one by one.
+8. **Change the voice of a whole track** — **Tools → Re-voice a track**. The
+   project's tracks are listed with their item count and length, so you can
+   tell "EN Original" from "Dub Chunks" at a glance. Pick one, pick a voice,
+   and the panel writes out what will happen in a sentence — which track, how
+   long, which voice, what the new track will be called — before you press
+   **Convert**. The track is rendered to a wav, converted with the ElevenLabs
    voice changer (speech-to-speech — timing and pacing are kept, so a synced
-   dub stays synced), and imported as a new track directly below the
-   original. The original track is muted but never modified. Files land in
+   dub stays synced), and imported as a new track directly below the original.
+   The original track is muted but never modified. Files land in
    `<project path>/VoiceChange/`.
-9. **Just speak some text** — go to the **Text to Speech** tab, paste (or
-   type) any text, pick a voice, click **🔊 Generate + import**. The audio
-   is synthesized and dropped straight onto a `TTS` track at the edit
-   cursor, with the spoken text kept in the item's note. No transcription,
-   no translation, no syncing — the plain "say this in that voice" tool.
-   Files land in `<project path>/TTS/`, so save the project first.
-   **Import again** re-places the last clip at the current cursor.
+9. **Just speak some text** — **Tools → Text to speech**. Paste (or type) any
+   text; beside the box the panel shows who will speak it, where it lands (the
+   `TTS` track, at the edit cursor's timecode) and what it will cost, and the
+   button repeats it: *Speak it in Priya S — ~8 s, ~128 credits*. Both numbers
+   are local estimates (≈15 characters a second, 1 credit a character), not a
+   quote from ElevenLabs. The audio is dropped straight onto the `TTS` track
+   with the spoken text kept in the item's note. No transcription, no
+   translation, no syncing — the plain "say this in that voice" tool. Files
+   land in `<project path>/TTS/`, so save the project first.
+   **Recent** keeps the last eight generations (in `reaper/tts_history.json`):
+   play one, drop it in again at the cursor, or open its folder — re-inserting
+   a line you already paid for never costs a second synthesis.
 10. **Sync dubbed clips to the English timeline** — the **Auto Sync** tab is
    the full fast-syncs pipeline embedded in this window: it reads your
    Dialogue VO + Dub tracks, AI-matches every clip, and snaps each dubbed
@@ -355,7 +468,6 @@ dubbing/                    (inside the fast-syncs repo)
 - Batch processing of multiple files
 - Per-sentence TTS editor (studio-style)
 - History / re-dub manager
-- Multi-speaker per-paragraph voices
 - Prompt editor UI (prompts are plain files — edit them in any editor)
 - Feedback systems (updating is handled by the fast-syncs **Update…**
   button since v0.5)

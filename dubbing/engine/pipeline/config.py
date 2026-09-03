@@ -551,6 +551,49 @@ DEFAULT_BN_MIN_MS = 80
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".aiff", ".aif", ".m4a"}
 
 
+# ─── Speaking rate — estimated chars/sec per language ────────────────────────
+# The one rate table. It lived in agent_splitter.py (a module about LLM
+# rephrasing) until v0.13 needed the same numbers for the free dry-run fit
+# analysis in pausechunk.py; two copies drifting apart would mean the preview
+# and the shortener disagreed about whether a line fits. agent_splitter
+# re-exports these for backward compatibility.
+#
+# Measured against ElevenLabs output for these voices, not against human
+# speech — that is why Hindi is markedly slower than the others.
+LANG_CHARS_PER_SEC = {
+    "Hindi": 9.2,      # Hindi is spoken slower on ElevenLabs
+    "Marathi": 12.0,
+    "Bengali": 12.0,
+    "Gujarati": 11.0,
+    "Tamil": 12.0,
+    "Telugu": 11.5,
+    "Kannada": 11.5,
+    "Malayalam": 12.0,
+    "Punjabi": 10.5,
+    "Sanskrit": 10.0,
+    "English": 14.0,
+}
+DEFAULT_CHARS_PER_SEC = 11.0
+
+# Rate used for the clause-size design target in tts.py (CLAUSE_MAX_CHARS is
+# sized so a full-length clause lands near 4 s at this rate) and for the
+# longest-unit warning dub_engine prints at S2d.
+CLAUSE_CHARS_PER_SEC = 14.3
+
+
+def estimate_duration(text: str, language: str = "") -> float:
+    """Estimate spoken duration of *text* in seconds from character count.
+
+    ElevenLabs [tags] are stripped first — they steer prosody but are never
+    spoken, so counting them would inflate every estimate on an
+    emotion-enriched script.
+    """
+    clean_text = re.sub(r"\[.*?\]", "", text).strip()  # remove tags
+    rate = (LANG_CHARS_PER_SEC.get(language, DEFAULT_CHARS_PER_SEC)
+            if language else DEFAULT_CHARS_PER_SEC)
+    return len(clean_text) / rate if rate else 0.0
+
+
 # ─── TTS settings loader (new in v0.3 — replaces the app's api.txt et al.) ───
 # config/tts_settings.json schema (contract v0.3):
 #     {"elevenlabs_api_key": "...", "el_model": "...",

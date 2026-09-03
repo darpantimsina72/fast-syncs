@@ -8,11 +8,15 @@ Extracted from Translation_and_Syncing_App.py (bulk app, v1.8.0):
 
 Skipped on purpose (out of scope for the standalone engine):
     lines 2817-2844 _indic_matplotlib_font (matplotlib UI helper)
-    lines 3093-3095, 3112-3204 multi-speaker dubbing (_speakers_save and
-                    synthesize_tts_elevenlabs_multi). The read-only speaker
-                    map helpers (lines 3080-3109 minus _speakers_save) ARE
-                    ported so the engine can keep detecting and reporting a
-                    saved voice map before ignoring it (v0.2 behaviour).
+    lines 3093-3095 _speakers_save (the panel's review screen writes the
+                    cast file; nothing in the engine edits it).
+
+Multi-speaker dubbing is IN scope since v0.16, by a different route than
+the bulk app's synthesize_tts_elevenlabs_multi: the two match-mode
+synthesizers below take an optional per-piece *voices* list and never mix
+two voices inside one request, and the legacy stage speaks runs of
+same-voice paragraphs through synthesize_sections_elevenlabs. The read-only
+speaker-map helpers are what both read the cast from.
 
 Adaptations (everything else is verbatim):
   * _build_tts_client() reads the Google service-account key path from
@@ -25,6 +29,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import urllib.error
 import urllib.request
 import uuid
@@ -240,6 +245,29 @@ def synthesize_tts(text: str, output_path: str, status_cb=None,
     return output_path
 
 
+def _resolve_voice_list(voices, n: int, default_voice: str):
+    """Validate a parallel per-piece voice list into n sanitized ids.
+
+    None (or a list that names one voice for everything) collapses to None,
+    which is the single-voice path unchanged -- the multi-voice code below is
+    then never entered, so a normal run cannot be affected by it. A blank or
+    unparseable entry falls back to *default_voice* rather than failing the
+    run: by the time we are here the script is translated and reviewed, and
+    refusing to speak it over one bad id would throw all of that away.
+    """
+    if not voices:
+        return None
+    if len(voices) != n:
+        raise ValueError(
+            f"voices list has {len(voices)} entries for {n} piece(s) -- the "
+            "two must run in parallel.")
+    out = []
+    for v in voices:
+        vid = _sanitize_voice_id(str(v or "").strip())
+        out.append(vid or default_voice)
+    return out if len(set(out)) > 1 else None
+
+
 def _split_text_for_elevenlabs(text: str,
                                max_chars: int = ELEVENLABS_CHUNK_CHARS) -> list:
     """
@@ -332,10 +360,15 @@ def _split_text_for_elevenlabs(text: str,
 
 
 # ─── Multi-speaker voice map (read-only detection helpers) ──────────────────
-# Per-project map of paragraph-index → ElevenLabs voice, saved by the bulk
-# app next to the other pipeline outputs as <base>_speakers.json. The engine
-# only DETECTS such a map to warn that multi-speaker dubbing is unsupported
-# — multi-speaker synthesis itself is out of scope (see module header).
+# Per-project map of paragraph-index → ElevenLabs voice, saved next to the
+# other pipeline outputs as <base>_speakers.json — by the bulk app, or by the
+# dub panel's review screen, where the cast is chosen a paragraph at a time
+# before anything is spoken. Since v0.16 the engine HONOURS it (dub_engine
+# _stage_dub_match / _stage_dub_legacy); before that it only reported it.
+#
+# The index is 1-based and counts blank-line separated paragraphs of the dub
+# script, which is the same thing as a row of the review screen. A paragraph
+# with no entry is spoken by the run's main voice (--voice-id).
 
 def _speakers_file_path(base: str) -> str:
     return base + "_speakers.json"
@@ -369,18 +402,28 @@ _SENTENCE_END_RE = re.compile(r'(?<=[.!?…।॥])\s+')
 _ONLY_TAGS_RE    = re.compile(r'(?:\[[^\]]+\]\s*)+$')
 
 
-def _split_script_into_sentences(text: str) -> List[str]:
-    """
-    Split a script into sentence-level segments for per-sentence TTS.
-    Blank lines are hard paragraph breaks; single newlines inside a paragraph
-    are treated as spaces. Inline emotion tags ([calm], [pause]…) that stand
-    alone stay attached to the sentence that follows them.
+def _split_script_into_sentences_with_paras(text: str):
+    """Sentence split, plus the 1-based PARAGRAPH number each sentence is in.
+
+    The paragraph is the unit the CAST is keyed by: one row of the panel's
+    review screen is one paragraph, and <base>_speakers.json maps those
+    numbers to voices. So the sentence list and the paragraph list are built
+    by the SAME walk -- counting paragraphs separately afterwards would be a
+    second implementation of "what is a paragraph", and the day the two
+    disagreed a line would quietly change voice.
+
+    Rules are the plain splitter's: blank lines are hard paragraph breaks,
+    single newlines inside a paragraph are spaces, and a stand-alone emotion
+    tag rides on the sentence that follows it.
     """
     sentences = []
+    paras = []
+    pnum = 0
     for para in re.split(r'\n\s*\n', text):
         para = re.sub(r'\s*\n\s*', ' ', para.strip())
         if not para:
             continue
+        pnum += 1
         parts = [p.strip() for p in _SENTENCE_END_RE.split(para) if p.strip()]
         carry = ""
         for p in parts:
@@ -388,15 +431,27 @@ def _split_script_into_sentences(text: str) -> List[str]:
                 p = carry + " " + p
                 carry = ""
             if _ONLY_TAGS_RE.fullmatch(p):
-                carry = p          # tag-only fragment → prefix of next sentence
+                carry = p          # tag-only fragment -> prefix of next one
                 continue
             sentences.append(p)
+            paras.append(pnum)
         if carry:                  # trailing tag-only fragment
             if sentences:
                 sentences[-1] += " " + carry
             else:
                 sentences.append(carry)
-    return sentences
+                paras.append(pnum)
+    return sentences, paras
+
+
+def _split_script_into_sentences(text: str) -> List[str]:
+    """
+    Split a script into sentence-level segments for per-sentence TTS.
+    Blank lines are hard paragraph breaks; single newlines inside a paragraph
+    are treated as spaces. Inline emotion tags ([calm], [pause]…) that stand
+    alone stay attached to the sentence that follows them.
+    """
+    return _split_script_into_sentences_with_paras(text)[0]
 
 
 # ─── v0.12 clause-level units ────────────────────────────────────────────────
@@ -408,7 +463,8 @@ def _split_script_into_sentences(text: str) -> List[str]:
 # 350 small pieces. We reproduce that granularity from the TEXT instead, using
 # the boundary hierarchy the Auto Sync matcher prompt already documents:
 # paragraph → . ? ! → ; : → , → dash.
-# 60 chars ≈ 4 s at the ~14.3 chars/s these voices average. Measured on a
+# 60 chars ≈ 4 s at config.CLAUSE_CHARS_PER_SEC, the rate these voices
+# average. Measured on a
 # real 3.4k-char Telugu script: 90 → 66 pieces (worst 7.4 s), 60 → ~85
 # pieces (worst 5.7 s), and below ~55 nothing improves because the clause
 # marks run out. The old silence-cut pipeline averaged ~1.8 s per piece, so
@@ -472,6 +528,43 @@ def _split_script_into_units(text: str, max_chars: int = CLAUSE_MAX_CHARS,
         else:
             units.append(sent)
     return _merge_tiny_units(units, min_chars) if min_chars > 0 else units
+
+
+def _split_script_into_units_with_paras(text: str,
+                                        max_chars: int = CLAUSE_MAX_CHARS,
+                                        min_chars: int = CLAUSE_MIN_CHARS):
+    """_split_script_into_units, plus the paragraph number of every unit.
+
+    One deliberate difference from the plain version: a tiny fragment is
+    never merged into a neighbour from ANOTHER paragraph. Merging across that
+    line would hand part of one speaker's line to the previous speaker's
+    voice, which is worse than a short piece. Single-voice runs still go
+    through the plain function and are byte-for-byte unaffected.
+    """
+    units = []
+    paras = []
+    sents, spar = _split_script_into_sentences_with_paras(text)
+    for sent, pnum in zip(sents, spar):
+        parts = (_subdivide_unit(sent, max_chars)
+                 if (max_chars and max_chars > 0) else [sent])
+        for u in parts:
+            units.append(u)
+            paras.append(pnum)
+    if min_chars <= 0:
+        return units, paras
+
+    out, opar = [], []
+    for u, p in zip(units, paras):
+        if out and len(u) < min_chars and opar[-1] == p:
+            out[-1] = out[-1] + " " + u
+        else:
+            out.append(u)
+            opar.append(p)
+    if len(out) > 1 and len(out[0]) < min_chars and opar[0] == opar[1]:
+        out[1] = out[0] + " " + out[1]
+        out.pop(0)
+        opar.pop(0)
+    return out, opar
 
 
 def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
@@ -743,6 +836,68 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
     return output_path
 
 
+# ─── Time-stretch (v0.13, pause-aware sync) ──────────────────────────────────
+# ffmpeg's atempo accepts 0.5–2.0 per filter instance; chain instances for
+# anything outside that. The pause-aware path never asks for more than ~1.25x,
+# but the chain costs three lines and removes a whole class of silent failure.
+_ATEMPO_MIN, _ATEMPO_MAX = 0.5, 2.0
+
+
+def _atempo_chain(ratio: float) -> str:
+    """'atempo=a,atempo=b,…' factors multiplying to *ratio*."""
+    parts, r = [], float(ratio)
+    while r > _ATEMPO_MAX:
+        parts.append(_ATEMPO_MAX)
+        r /= _ATEMPO_MAX
+    while r < _ATEMPO_MIN:
+        parts.append(_ATEMPO_MIN)
+        r /= _ATEMPO_MIN
+    parts.append(r)
+    return ",".join(f"atempo={p:.6f}" for p in parts)
+
+
+def stretch_wav_atempo(input_path: str, output_path: str, ratio: float,
+                       status_cb=None) -> str:
+    """Speed *input_path* up by *ratio* into *output_path*; return the path.
+
+    ratio > 1 shortens (speaks faster), < 1 lengthens. Pitch is preserved —
+    atempo resamples in the time domain, unlike changing the sample rate.
+
+    Returns *input_path* unchanged, after a loud status line, when the ratio
+    is a no-op or ffmpeg is unavailable. Callers treat the return value as
+    "the audio to use", so a missing ffmpeg degrades to an unstretched (and
+    therefore overlong) chunk rather than failing a run that has already
+    spent its TTS credits.
+    """
+    from .config import FFMPEG_PATH
+    if abs(float(ratio) - 1.0) < 0.005:
+        return input_path
+    if not FFMPEG_PATH:
+        if status_cb:
+            status_cb("WARNING: ffmpeg not found — cannot time-stretch this "
+                      "chunk; it stays at its synthesized length and will "
+                      "overrun its slot.")
+        return input_path
+    cmd = [FFMPEG_PATH, "-nostdin", "-loglevel", "error", "-y",
+           "-i", input_path, "-filter:a", _atempo_chain(ratio),
+           "-map_metadata", "-1", output_path]
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=300)
+    except Exception as e:
+        if status_cb:
+            status_cb(f"WARNING: ffmpeg time-stretch failed to start ({e}) — "
+                      "chunk left unstretched.")
+        return input_path
+    if proc.returncode != 0 or not os.path.isfile(output_path):
+        detail = (proc.stderr or b"").decode("utf-8", "replace").strip()[:300]
+        if status_cb:
+            status_cb(f"WARNING: ffmpeg time-stretch failed ({detail}) — "
+                      "chunk left unstretched.")
+        return input_path
+    return output_path
+
+
 # Silence inserted between sections in the concatenated wav. Spans exclude
 # it, so cutting a section out of the wav never clips a neighbour even when
 # an item is nudged a few ms in REAPER.
@@ -753,13 +908,22 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
                                    api_key: str,
                                    voice_id: str = ELEVENLABS_TTS_VOICE_ID,
                                    model_id: str = ELEVENLABS_TTS_MODEL,
-                                   status_cb=None):
+                                   status_cb=None,
+                                   voices=None):
     """Synthesize *section_texts* one by one into ONE concatenated WAV
     (contract v0.7 match mode). Returns (output_path, spans) where spans is
     one (start_ms, end_ms) pair per section inside the wav, gaps excluded.
 
+    *voices* (v0.16) is an optional parallel list naming the voice for each
+    section -- the multi-speaker cast the panel writes to
+    <base>_speakers.json. One voice for everything (or None) is the
+    single-voice path, unchanged.
+
     Every section keeps prosody continuity via ElevenLabs request-stitching:
     the neighbouring script text travels as previous_text/next_text context.
+    That context stops at a voice change: the previous speaker's words are
+    not this speaker's run-up, and feeding them across the boundary is how a
+    new voice inherits the old one's cadence.
     Long sections still go through the ~ELEVENLABS_CHUNK_CHARS splitter.
     Validation, tag stripping for non-v3 models, the locked-output divert
     and the ffmpeg/pydub error paths mirror synthesize_tts_elevenlabs."""
@@ -790,6 +954,8 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
         sections = [s.strip() if s.strip() else o
                     for s, o in zip(stripped, sections)]
 
+    section_voices = _resolve_voice_list(voices, len(sections), voice_id)
+
     output_path = ensure_writable_output(output_path, status_cb=status_cb)
 
     try:
@@ -803,7 +969,9 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
     log_lines = [
         f"TTS Section Log — {os.path.basename(output_path)}",
         "Platform : ElevenLabs (sectioned, request-stitched)",
-        f"Voice ID : {voice_id}",
+        f"Voice ID : {voice_id}"
+        + (f" (+{len(set(section_voices)) - 1} more — multi-speaker cast)"
+           if section_voices else ""),
         f"Model    : {model_id}",
         f"Sections : {len(sections)}",
         f"Gap      : {SECTION_GAP_MS}ms between sections (spans exclude it)",
@@ -816,8 +984,14 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
         if status_cb:
             status_cb(f"TTS: section {i + 1} of {total} "
                       f"({len(text)} chars)…")
+        sec_voice = section_voices[i] if section_voices else voice_id
         prev_ctx = sections[i - 1] if i > 0 else None
         next_ctx = sections[i + 1] if i + 1 < total else None
+        if section_voices:
+            if i > 0 and section_voices[i - 1] != sec_voice:
+                prev_ctx = None
+            if i + 1 < total and section_voices[i + 1] != sec_voice:
+                next_ctx = None
         sec_bytes = []
         subchunks = _split_text_for_elevenlabs(text)
         for k, sub in enumerate(subchunks):
@@ -826,7 +1000,7 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
             p = " ".join(filter(None, [prev_ctx] + subchunks[:k])) or None
             n = " ".join(filter(None, subchunks[k + 1:] + [next_ctx])) or None
             sec_bytes.append(_elevenlabs_tts_post(
-                sub, api_key, voice_id, model_id,
+                sub, api_key, sec_voice, model_id,
                 previous_text=p, next_text=n))
         raw = b"".join(sec_bytes)
         with open(f"{out_base}_sec_{i + 1:03d}.mp3", "wb") as sf:
@@ -964,20 +1138,28 @@ def _elevenlabs_tts_post_ts(chunk: str, api_key: str, voice_id: str,
     return audio, chars, starts, ends
 
 
-def _pack_sentences(sentences, max_chars: int):
+def _pack_sentences(sentences, max_chars: int, keys=None):
     """Greedy request packing that NEVER splits inside a sentence.
 
     Returns a list of lists of sentence indices. A single sentence longer
     than *max_chars* gets a request of its own — the API accepts it (the
     cap here is our packing size, far below the model limit), and keeping
-    it whole preserves the sentence == piece rule."""
-    groups, cur, cur_len = [], [], 0
+    it whole preserves the sentence == piece rule.
+
+    *keys* (v0.16) is an optional parallel list; a group never spans two
+    different keys. Multi-voice synthesis passes the per-sentence voice, so
+    one request is always one speaker — there is no way to ask ElevenLabs
+    for two voices in a single call, and a group is a call."""
+    groups, cur, cur_len, cur_key = [], [], 0, None
     for i, s in enumerate(sentences):
         n = len(s)
         extra = n if not cur else n + 1          # +1 for the joining space
-        if cur and cur_len + extra > max_chars:
+        k = keys[i] if keys else None
+        if cur and (cur_len + extra > max_chars or k != cur_key):
             groups.append(cur)
             cur, cur_len = [], 0
+        if not cur:
+            cur_key = k
         cur.append(i)
         cur_len += n if cur_len == 0 else n + 1
     if cur:
@@ -1020,7 +1202,8 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
                                     api_key: str,
                                     voice_id: str = ELEVENLABS_TTS_VOICE_ID,
                                     model_id: str = ELEVENLABS_TTS_MODEL,
-                                    status_cb=None):
+                                    status_cb=None,
+                                    voices=None):
     """v0.8: speak *sentences* in long natural stretches and return
     (output_path, spans) with ONE (start_ms, end_ms) pair PER SENTENCE
     inside the combined wav.
@@ -1029,8 +1212,15 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
     (~ELEVENLABS_CHUNK_CHARS per request), each request goes to the
     /with-timestamps endpoint, and per-sentence spans are read from the
     returned character table — no re-transcription, no per-sentence calls.
+    *voices* (v0.16) is an optional parallel list naming the voice of each
+    sentence. Packing then breaks on a voice change as well as on the size
+    cap, so every request is one speaker; one voice for everything (or None)
+    is the single-voice path, unchanged.
+
     Neighbouring script text rides along as previous_text/next_text so
-    prosody survives the few request boundaries. Validation, tag stripping
+    prosody survives the few request boundaries — except across a voice
+    change, where the previous speaker's words are not this speaker's
+    run-up. Validation, tag stripping
     for non-v3 models, and the locked-output divert mirror the other
     synthesizers."""
     if not api_key or not api_key.strip():
@@ -1069,12 +1259,16 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
             "pydub not installed — the sentence-timed TTS mode needs it to "
             "assemble the audio. Re-run the setup script.")
 
-    groups = _pack_sentences(sentences, ELEVENLABS_CHUNK_CHARS)
+    sent_voices = _resolve_voice_list(voices, len(sentences), voice_id)
+    groups = _pack_sentences(sentences, ELEVENLABS_CHUNK_CHARS,
+                             keys=sent_voices)
     out_base = os.path.splitext(output_path)[0]
     log_lines = [
         f"TTS Sentence Log — {os.path.basename(output_path)}",
         "Platform : ElevenLabs (/with-timestamps, sentence-timed)",
-        f"Voice ID : {voice_id}",
+        f"Voice ID : {voice_id}"
+        + (f" (+{len(set(sent_voices)) - 1} more — multi-speaker cast)"
+           if sent_voices else ""),
         f"Model    : {model_id}",
         f"Sentences: {len(sentences)} in {len(groups)} request(s)",
         f"Gap      : {SECTION_GAP_MS}ms between requests (spans exclude it)",
@@ -1095,15 +1289,23 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
             offsets.append((a, a + len(s)))
             pos = a + len(s)
 
-        prev_ctx = sentences[group[0] - 1] if group[0] > 0 else None
-        nxt_i = group[-1] + 1
+        grp_voice = sent_voices[group[0]] if sent_voices else voice_id
+        prev_i, nxt_i = group[0] - 1, group[-1] + 1
+        prev_ctx = sentences[prev_i] if prev_i >= 0 else None
         next_ctx = sentences[nxt_i] if nxt_i < len(sentences) else None
+        if sent_voices:
+            if prev_i >= 0 and sent_voices[prev_i] != grp_voice:
+                prev_ctx = None
+            if nxt_i < len(sentences) and sent_voices[nxt_i] != grp_voice:
+                next_ctx = None
 
         if status_cb:
             status_cb(f"TTS: stretch {gi + 1} of {len(groups)} "
-                      f"({len(group)} sentence(s), {len(text)} chars)…")
+                      f"({len(group)} sentence(s), {len(text)} chars"
+                      + (f", voice {grp_voice}" if sent_voices else "")
+                      + ")…")
         audio, chars, starts, ends = _elevenlabs_tts_post_ts(
-            text, api_key, voice_id, model_id,
+            text, api_key, grp_voice, model_id,
             previous_text=prev_ctx, next_text=next_ctx)
         with open(f"{out_base}_str_{gi + 1:03d}.mp3", "wb") as sf:
             sf.write(audio)
@@ -1146,6 +1348,7 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
         cursor += seg_ms
 
         log_lines += [f"=== STRETCH {gi + 1} of {len(groups)} ===",
+                      f"Voice      : {grp_voice}",
                       f"Sentences  : {[i + 1 for i in group]}",
                       f"Characters : {len(text)}",
                       f"Duration   : {seg_ms}ms",

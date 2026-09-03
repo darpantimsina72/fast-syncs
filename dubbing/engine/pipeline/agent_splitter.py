@@ -6,30 +6,18 @@ timing windows and estimated speech durations.
 import re
 from typing import Dict, List, Tuple, Sequence
 from .llm import _llm_generate
-from .config import GEMINI_DEFAULT_MODEL
+from .config import (GEMINI_DEFAULT_MODEL, LANG_CHARS_PER_SEC,
+                     DEFAULT_CHARS_PER_SEC, estimate_duration)
 
-# Estimated speaking rate: characters per second depending on language
-LANG_CHARS_PER_SEC = {
-    "Hindi": 9.2,      # Hindi is spoken slower on ElevenLabs
-    "Marathi": 12.0,
-    "Bengali": 12.0,
-    "Gujarati": 11.0,
-    "Tamil": 12.0,
-    "Telugu": 11.5,
-    "Kannada": 11.5,
-    "Malayalam": 12.0,
-    "Punjabi": 10.5,
-    "Sanskrit": 10.0,
-    "English": 14.0,
-}
-DEFAULT_CHARS_PER_SEC = 11.0
-
-
-def estimate_duration(text: str, language: str = "") -> float:
-    """Estimate spoken duration of text in seconds based on character count and language."""
-    clean_text = re.sub(r"\[.*?\]", "", text).strip()  # remove tags
-    rate = LANG_CHARS_PER_SEC.get(language, DEFAULT_CHARS_PER_SEC) if language else DEFAULT_CHARS_PER_SEC
-    return len(clean_text) / rate
+# The speaking-rate table and estimate_duration used to be DEFINED here, in a
+# module about LLM rephrasing. v0.13's free dry-run fit analysis
+# (pipeline/pausechunk.py) needs the same numbers, and two copies drifting
+# apart would mean the preview and the shortener disagreed about whether a
+# line fits. They now live in pipeline/config.py; these names are re-exported
+# so every existing `from .agent_splitter import estimate_duration` keeps
+# working.
+__all__ = ["LANG_CHARS_PER_SEC", "DEFAULT_CHARS_PER_SEC", "estimate_duration",
+           "shorten_text", "agentic_split_match"]
 
 
 def shorten_text(tr_text: str, en_text: str, target_dur: float, language: str,

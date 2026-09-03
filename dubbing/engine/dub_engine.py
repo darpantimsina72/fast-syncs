@@ -50,9 +50,11 @@ Modes (v0.1 + v0.2 modes keep IDENTICAL flags and manifests):
                       first). Manifest: {"status":"ok","voices":
                       [{"id","name"},…]} (or status error).
 
-Scope notes (unchanged from v0.1): NO multi-speaker dubbing (a saved
-speaker voice map is detected and reported, then ignored), NO translation-
-memory WRITES, NO run-history recording. Translation-memory READS (from
+Scope notes: multi-speaker dubbing IS supported since v0.16 — a saved
+cast (<base>_speakers.json, written by the panel's review screen) names a
+voice per script paragraph, and both sync modes honour it; without one the
+run is single-voice exactly as before. NO translation-memory WRITES, NO
+run-history recording. Translation-memory READS (from
 this repo's data/translation_memory.db) and Step-4 emotion enrichment
 mirror the bulk app's defaults (both ON). Emotion is toggleable:
 --no-emotion on the CLI, or {"emotion": false} in engine_settings.json.
@@ -169,9 +171,11 @@ def _custom_language_names():
         return []
 
 
+
 for _name in _custom_language_names():
     if _name not in LANGUAGES:
         LANGUAGES.append(_name)
+LANGUAGES.sort()          # --language choices read alphabetically in --help
 
 # The five per-language prompt stages the pipeline loads from prompts/.
 PROMPT_STAGES = ["Step1_Translation_Prompt", "Step2_Review_Prompt",
@@ -225,6 +229,17 @@ REQUIRED_FUNCTIONS = [
     "place_pieces",                  # windowed placement + bounded borrowing
     "synthesize_sentences_elevenlabs",# /with-timestamps TTS -> spans per sentence
     "_split_script_into_units",      # v0.12 clause-level units
+    # v0.13 pause-aware sync (pipeline/pausechunk.py + preview_html.py)
+    "pause_chunks_from_regions",     # speech regions -> pause-delimited chunks
+    "source_text_for_chunks",        # Scribe words bucketed per chunk
+    "assign_script_to_chunks",       # target script spread by duration share
+    "build_plan",                    # chunks + texts + fit analysis -> rows
+    "format_plan_text",              # plan rows -> the editable plan file
+    "parse_plan_text",               # plan file -> the approved TR: lines
+    "summarize_plan",                # one-line plan summary for the log
+    "plan_counts",                   # verdict histogram (manifest + preview)
+    "render_plan_html",              # the readable timeline preview
+    "stretch_wav_atempo",            # ffmpeg time-stretch to fit a slot
 ]
 REQUIRED_ATTRIBUTES = [
     "GEMINI_DEFAULT_MODEL",
@@ -233,6 +248,9 @@ REQUIRED_ATTRIBUTES = [
     "DEFAULT_THR_DB", "DEFAULT_HYS_DB", "DEFAULT_MIN_MS",          # EN regions
     "DEFAULT_BN_THR_DB", "DEFAULT_BN_HYS_DB", "DEFAULT_BN_MIN_MS", # TTS regions
     "CLAUSE_MAX_CHARS",              # v0.12 clause subdivision threshold
+    "CLAUSE_CHARS_PER_SEC",          # v0.13 shared rate behind CLAUSE_MAX_CHARS
+    "LANG_CHARS_PER_SEC",            # v0.13 per-language speaking rate table
+    "PAUSE_MIN_S", "MAX_ATEMPO",     # v0.13 pause gate + stretch ceiling
 ]
 
 # Per-mode manifest key sets (contract v0.1 + v0.2 + v0.3). _write_manifest
@@ -247,6 +265,13 @@ REVIEW_MANIFEST_KEYS = ["status", "error", "audio", "language", "out_dir",
                         "en_srt", "en_text", "translation_text",
                         "final_script"]
 REGEN_MANIFEST_KEYS = ["status", "error", "regen_wav"]
+# v0.13 pause-aware dry run. plan_txt is the editable artifact, plan_html the
+# readable one; chunk_count / the verdict tallies let the panel draw its
+# summary strip without parsing the plan file itself.
+PLAN_MANIFEST_KEYS = ["status", "error", "audio", "language", "out_dir",
+                      "en_srt", "plan_txt", "plan_html", "chunk_count",
+                      "fits_count", "tight_count", "over_count",
+                      "short_count", "empty_count"]
 TEST_LLM_MANIFEST_KEYS = ["status", "error", "provider", "model", "reply"]
 VOICES_MANIFEST_KEYS = ["status", "error", "voices"]
 VOICE_CHANGE_MANIFEST_KEYS = ["status", "error", "vc_wav"]
@@ -276,11 +301,23 @@ def _parse_args():
     ap.add_argument("--el-model", default="eleven_v3",
                     help="ElevenLabs TTS model id (default: eleven_v3)")
     ap.add_argument("--steps", default="full",
-                    choices=["full", "translate", "dub"],
+                    choices=["full", "translate", "dub", "plan", "dubplan"],
                     help="Pipeline scope: 'full' = one shot (v0.1), "
                          "'translate' = stop after S2c for script review, "
                          "'dub' = resume from a reviewed script "
-                         "(requires --script)")
+                         "(requires --script), "
+                         "'plan' = pause-aware dry run: detect the source "
+                         "pauses, split --provided-script across them and "
+                         "estimate the fit, writing an editable plan + an "
+                         "HTML preview. NO TTS, NO LLM, no credits. "
+                         "'dubplan' = generate from an approved plan "
+                         "(requires --plan)")
+    ap.add_argument("--plan", dest="plan", default=None,
+                    help="Approved sync plan file for --steps dubplan "
+                         "(as written by --steps plan, possibly user-edited). "
+                         "Only its TR: lines are read — every timing is "
+                         "re-derived from the audio, so a hand-edited "
+                         "timestamp cannot desync the run.")
     ap.add_argument("--script", default=None,
                     help="Reviewed translation text file for --steps dub "
                          "(blank-line paragraph format, as written by the "
@@ -406,6 +443,24 @@ def _parse_args():
     if args.provided_script and args.steps == "dub":
         ap.error("--provided-script is only valid with --steps translate/"
                  "full (--steps dub already takes the script via --script)")
+    # v0.13 pause-aware sync. The plan stage takes the target script the same
+    # way Paste Translation does (--provided-script); the generate stage takes
+    # the approved plan instead, because the plan IS the script by then.
+    if args.steps == "plan" and not (args.provided_script or args.plan):
+        ap.error("--steps plan requires --provided-script <utf-8 target "
+                 "script> — the pasted target-language text to lay out "
+                 "across the detected pauses — or --plan <sync plan file> "
+                 "to re-measure text that is already assigned per chunk")
+    if args.steps == "dubplan" and not args.plan:
+        ap.error("--steps dubplan requires --plan <sync plan file> — run "
+                 "'--steps plan' first, review/edit its plan file, then pass "
+                 "that file here")
+    if args.plan and args.steps not in ("dubplan", "plan"):
+        ap.error("--plan is only valid with --steps dubplan (generate) or "
+                 "--steps plan (re-measure the corrected TR: lines)")
+    if args.provided_script and args.steps == "dubplan":
+        ap.error("--provided-script is not valid with --steps dubplan (the "
+                 "approved plan already carries the target text)")
     if args.text_file or args.out_wav or args.in_wav:
         ap.error("--text-file/--out-wav/--in-wav are only valid with "
                  "--regen-chunk / --voice-change")
@@ -493,6 +548,49 @@ def _chunk_max_chars(args, pl) -> int:
     return pl.CLAUSE_MAX_CHARS
 
 
+def _engine_setting(key, default, cast=float, minimum=None, maximum=None):
+    """One scalar from engine_settings.json, validated, else *default*.
+
+    Same read-with-fallback shape as _chunk_mode / _chunk_max_chars: the file
+    is optional, a broken value is ignored rather than fatal, and the caller
+    always gets a usable number.
+    """
+    try:
+        with open(ENGINE_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or key not in data:
+            return default
+        raw = data.get(key)
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            return default
+        v = cast(raw)
+        if minimum is not None and v < minimum:
+            return default
+        if maximum is not None and v > maximum:
+            return default
+        return v
+    except Exception:
+        return default
+
+
+def _plan_settings(pl):
+    """The v0.13 pause-aware knobs, resolved once per run.
+
+    Returns (pause_min_s, thr_db, max_atempo, rate_override). All are
+    optional keys in engine_settings.json — an install that never touches
+    that file gets the tuned defaults.
+    """
+    pause_min_s = _engine_setting("pause_min_ms", pl.PAUSE_MIN_S * 1000.0,
+                                  float, minimum=0.0, maximum=5000.0) / 1000.0
+    thr_db = _engine_setting("pause_thr_db", pl.DEFAULT_THR_DB, float,
+                             minimum=-90.0, maximum=-6.0)
+    max_atempo = _engine_setting("max_atempo", pl.MAX_ATEMPO, float,
+                                 minimum=1.0, maximum=2.0)
+    rate_override = _engine_setting("plan_rate_override", 0.0, float,
+                                    minimum=1.0, maximum=60.0)
+    return pause_min_s, thr_db, max_atempo, rate_override
+
+
 def _app_version() -> str:
     """Fast-syncs VERSION file (repo root, two levels above engine/)."""
     try:
@@ -517,8 +615,8 @@ def _note(msg):
 def _import_pipeline():
     """Import the local pipeline package and return a flat facade namespace.
 
-    All pipeline symbols (functions and constants) are aggregated onto one
-    SimpleNamespace so the stage code can
+    All pipeline symbols (functions, constants, module attributes like
+    the decode helpers) are aggregated onto one SimpleNamespace so the stage code can
     keep addressing them the way it addressed the app module in v0.1/v0.2
     (pl.<symbol>). Name collisions across modules are shared imports of the
     same objects (e.g. TTS_LANGUAGES), so the aggregation order is safe.
@@ -526,9 +624,11 @@ def _import_pipeline():
     if ENGINE_DIR not in sys.path:
         sys.path.insert(0, ENGINE_DIR)
     from pipeline import (config, stt, srt_tools, llm, tts, sync, tm,  # noqa: F401
-                          match, agent_splitter, agent_aligner)
+                          match, agent_splitter, agent_aligner,
+                          pausechunk, preview_html)
     ns = types.SimpleNamespace()
-    for mod in (config, stt, srt_tools, llm, tts, sync, match, agent_splitter, agent_aligner):
+    for mod in (config, stt, srt_tools, llm, tts, sync, match, agent_splitter,
+                agent_aligner, pausechunk, preview_html):
         for name, value in vars(mod).items():
             if name.startswith("__"):
                 continue
@@ -560,7 +660,7 @@ def _selfcheck(args) -> int:
     # prompts ship with the repo, so absence means a broken checkout). A
     # USER-ADDED language (v0.7) is different: its prompts are created by the
     # panel, so a gap there is a warning naming the files to write, never a
-    # failed selfcheck that blocks setup for the other twelve languages.
+    # failed selfcheck that blocks setup for the other eleven languages.
     custom = set(_custom_language_names())
     missing_prompts, missing_custom = [], []
     for lang in LANGUAGES:
@@ -838,6 +938,44 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
     ctx["punc_result"] = punc_result
 
 
+def _paragraphs(text):
+    """The script's paragraphs, by the same rule everything else uses:
+    blank-line separated, empties dropped. This is the unit the cast is
+    keyed by — one paragraph is one row of the panel's review screen."""
+    import re as _re
+    return [p.strip() for p in _re.split(r"\n\s*\n", text or "")
+            if p.strip()]
+
+
+def _cast_map(pl, base):
+    """{paragraph_index: voice_id} from <base>_speakers.json, or {}.
+
+    The panel writes this file when the review screen casts a paragraph to
+    a second voice, and writes NO file (and deletes a stale one) for a
+    single-voice run — so an empty map here means "one voice", not "the
+    cast is missing"."""
+    fn = getattr(pl, "_speakers_voice_map", None)
+    if not callable(fn):
+        return {}
+    try:
+        return fn(base) or {}
+    except Exception:
+        return {}
+
+
+def _cast_note(cast, voices, what):
+    """One log line that says who is speaking how much — the last chance to
+    notice a mis-cast script before the credits are spent on it."""
+    tally = {}
+    for v in voices:
+        tally[v] = tally.get(v, 0) + 1
+    parts = ", ".join(f"{v}: {n}" for v, n in
+                      sorted(tally.items(), key=lambda kv: -kv[1]))
+    return (f"Multi-speaker cast: {len(tally)} voice(s) over {len(voices)} "
+            f"{what} ({parts}); map covers "
+            f"{len(cast)} paragraph(s).")
+
+
 def _stage_dub(pl, args, api_key, manifest, ctx, voice_id):
     """S2d..S3e dispatcher (v0.7): 'match' = Gemini section matching before
     per-section TTS (Auto-Sync-style placement + Un sync statuses);
@@ -895,7 +1033,18 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     # ── [S2d] unit split + Gemini section match + TTS ──────────────────────
     # 'clause' subdivides an over-long sentence at ; : , or a dash so a
     # single unit never becomes a 15-second block on the timeline.
-    if grain == "clause":
+    cast = _cast_map(pl, base)
+    unit_paras = None
+    if cast and hasattr(pl, "_split_script_into_units_with_paras"):
+        # The cast is keyed by paragraph, so the units have to remember which
+        # paragraph they came from. Same split as below, walked once.
+        if grain == "clause":
+            sentences, unit_paras = pl._split_script_into_units_with_paras(
+                script_text, _chunk_max_chars(args, pl))
+        else:
+            sentences, unit_paras = \
+                pl._split_script_into_sentences_with_paras(script_text)
+    elif grain == "clause":
         sentences = pl._split_script_into_units(script_text,
                                                 _chunk_max_chars(args, pl))
     else:
@@ -904,8 +1053,8 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
         raise RuntimeError("The dub script produced no units to match.")
     _longest = max(len(s) for s in sentences)
     _say("S2d", f"Script split into {len(sentences)} unit(s) "
-                f"(longest {_longest} chars ≈ {_longest / 14.3:.1f}s of "
-                "speech).")
+                f"(longest {_longest} chars ≈ "
+                f"{_longest / pl.CLAUSE_CHARS_PER_SEC:.1f}s of speech).")
     if _emotion_enabled(args):
         _say("S2d", "note: Step-4 emotion enrichment is skipped in match "
                     "sync mode (pieces are synthesized from the clean "
@@ -920,6 +1069,20 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     tts_path = os.path.join(
         out_dir, pl._tts_output_name(language, audio_path, "_tts"))
 
+    # A piece speaks in the voice cast to the paragraph its first sentence
+    # came from. agentic_split_match rewrites sentences in place and never
+    # renumbers them, so the sentence -> paragraph list built above is still
+    # valid here; a piece whose paragraph nobody cast falls to the main voice.
+    def _piece_voice(tr_ids):
+        if not unit_paras:
+            return voice_id
+        for j in tr_ids or ():
+            if 0 < j <= len(unit_paras):
+                v = cast.get(unit_paras[j - 1])
+                if v:
+                    return v
+        return voice_id
+
     if grain != "section":
         pieces = pl.build_pieces(sections, unmatched_tr, sentences,
                                  en_entries)
@@ -931,12 +1094,18 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
                     f"{len(pieces) - n_matched} unmatched, "
                     f"{len(unmatched_en)} English cue(s) without a "
                     "translation.")
+        p_voices = [_piece_voice(p.get("tr_ids")) for p in pieces]
+        if len(set(p_voices)) > 1:
+            _say("S2d", _cast_note(cast, p_voices, "sentence piece(s)"))
+        else:
+            p_voices = None
         _say("S2d", f"Synthesizing {len(texts)} sentence(s) in long "
                     f"stretches ({language}, voice {voice_id}, model "
                     f"{args.el_model})…")
         tts_path, spans = pl.synthesize_sentences_elevenlabs(
             texts, tts_path, api_key=api_key, voice_id=voice_id,
-            model_id=args.el_model, status_cb=lambda m: _say("S2d", m))
+            model_id=args.el_model, voices=p_voices,
+            status_cb=lambda m: _say("S2d", m))
     else:
         chunks = pl.build_chunks(sections, unmatched_tr, sentences)
         if not chunks:
@@ -947,11 +1116,31 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
                     f"{len(chunks) - n_matched} unmatched chunk(s), "
                     f"{len(unmatched_en)} English cue(s) without a "
                     "translation.")
+        c_voices = [_piece_voice(c.get("tr_ids")) for c in chunks]
+        if len(set(c_voices)) > 1:
+            _say("S2d", _cast_note(cast, c_voices, "section(s)"))
+            # A section is a THOUGHT, and Gemini can group one across a
+            # paragraph break — which, with a cast, can mean across a
+            # speaker. The section then speaks in its first paragraph's
+            # voice. Said out loud here because 'sentence' or 'clause' piece
+            # size does not have the problem, and switching is the fix.
+            _mixed = sum(1 for c in chunks
+                         if len({_piece_voice([j]) for j in
+                                 (c.get("tr_ids") or ())}) > 1)
+            if _mixed:
+                _say("S2d", f"WARNING: {_mixed} matched section(s) span more "
+                            "than one cast voice; each is spoken by the "
+                            "voice of its first paragraph. Piece size "
+                            "'clause' or 'sentence' keeps every speaker "
+                            "separate.")
+        else:
+            c_voices = None
         _say("S2d", f"Synthesizing {len(chunks)} section(s) ({language}, "
                     f"voice {voice_id}, model {args.el_model})…")
         tts_path, spans = pl.synthesize_sections_elevenlabs(
             texts, tts_path, api_key=api_key, voice_id=voice_id,
-            model_id=args.el_model, status_cb=lambda m: _say("S2d", m))
+            model_id=args.el_model, voices=c_voices,
+            status_cb=lambda m: _say("S2d", m))
     manifest["tts_wav"] = tts_path
     _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)} "
                 f"({len(spans)} piece span(s)).")
@@ -1050,22 +1239,13 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     audio_path = ctx["audio_path"]
     script_text = ctx["script_text"]
 
-    # ── [S2d] Step-4 emotion enrichment + TTS (ElevenLabs, single voice) ───
-    # Single-voice only: a saved per-paragraph speaker voice map (which the
-    # bulk app's worker would honour via synthesize_tts_elevenlabs_multi) is
-    # reported loudly, then ignored.
-    _speakers_map = getattr(pl, "_speakers_voice_map", None)
-    if callable(_speakers_map):
-        try:
-            spk_map = _speakers_map(base) or {}
-        except Exception:
-            spk_map = {}
-        if spk_map:
-            _say("S2d", f"WARNING: this project has a saved multi-speaker "
-                        f"voice map ({len(spk_map)} paragraph(s)) — "
-                        "multi-speaker dubbing is not supported; "
-                        "the whole script is dubbed with the single voice "
-                        f"{voice_id}.")
+    # ── [S2d] Step-4 emotion enrichment + TTS (ElevenLabs) ─────────────
+    # v0.16: a saved cast is HONOURED here, not just reported. The script is
+    # spoken in runs of consecutive paragraphs that share a voice, one
+    # ElevenLabs request per run, concatenated into the one TTS wav the rest
+    # of this stage expects — S3b re-transcribes that wav, so nothing
+    # downstream needs to know how many voices made it.
+    cast = _cast_map(pl, base)
 
     # Step-4 emotion enrichment before ElevenLabs TTS, exactly like the bulk
     # app's single-voice worker (ON by default there; the app only strips
@@ -1087,16 +1267,54 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
         _say("S2d", "Emotion enrichment disabled (--no-emotion / settings) "
                     "— sending the bare punctuated text to TTS.")
 
-    _say("S2d", f"Synthesizing {language} speech (voice {voice_id}, "
-                f"model {args.el_model})…")
+    # Which paragraph is whose. Emotion enrichment rewrites the script, and
+    # the cast is keyed by paragraph NUMBER — so if enrichment came back with
+    # a different number of paragraphs the map can no longer be trusted, and
+    # guessing which line moved is exactly how a talk gets the wrong voice.
+    run_texts, run_voices = None, None
+    if cast:
+        p_out = _paragraphs(tts_text)
+        p_in = _paragraphs(script_text)
+        if len(p_out) != len(p_in):
+            _say("S2d", "WARNING: emotion enrichment changed the paragraph "
+                        f"count ({len(p_in)} → {len(p_out)}), so the saved "
+                        "cast cannot be matched to the script — the whole "
+                        f"script is dubbed with {voice_id}. Re-run with "
+                        "--no-emotion to keep the cast.")
+        else:
+            voices = [cast.get(i + 1) or voice_id for i in range(len(p_out))]
+            if len(set(voices)) > 1:
+                runs = []
+                for para_text, v in zip(p_out, voices):
+                    if runs and runs[-1][1] == v:
+                        runs[-1][0].append(para_text)
+                    else:
+                        runs.append(([para_text], v))
+                run_texts = ["\n\n".join(t) for t, _ in runs]
+                run_voices = [v for _, v in runs]
+                _say("S2d", _cast_note(cast, voices, "paragraph(s)")
+                            + f" Speaking them as {len(run_texts)} run(s).")
+
     tts_path = os.path.join(
         out_dir, pl._tts_output_name(language, audio_path, "_tts"))
-    # synthesize_tts_elevenlabs may divert to a "-2" name when the previous
-    # wav is still locked (open REAPER project) — use the returned path.
-    tts_path = pl.synthesize_tts_elevenlabs(
-        tts_text, tts_path, api_key=api_key, voice_id=voice_id,
-        model_id=args.el_model,
-        status_cb=lambda m: _say("S2d", m))
+    if run_texts:
+        _say("S2d", f"Synthesizing {language} speech in "
+                    f"{len(set(run_voices))} voices (model "
+                    f"{args.el_model})…")
+        tts_path, _spans = pl.synthesize_sections_elevenlabs(
+            run_texts, tts_path, api_key=api_key, voice_id=voice_id,
+            model_id=args.el_model, voices=run_voices,
+            status_cb=lambda m: _say("S2d", m))
+    else:
+        _say("S2d", f"Synthesizing {language} speech (voice {voice_id}, "
+                    f"model {args.el_model})…")
+        # synthesize_tts_elevenlabs may divert to a "-2" name when the
+        # previous wav is still locked (open REAPER project) — use the
+        # returned path.
+        tts_path = pl.synthesize_tts_elevenlabs(
+            tts_text, tts_path, api_key=api_key, voice_id=voice_id,
+            model_id=args.el_model,
+            status_cb=lambda m: _say("S2d", m))
     manifest["tts_wav"] = tts_path
     _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)}")
 
@@ -1284,9 +1502,14 @@ def _preflight_llm(pl):
     _note("LLM reachable.")
 
 
-def _begin_run(args, manifest):
+def _begin_run(args, manifest, need_llm=True):
     """Common head of full/translate/dub: audio checks + pipeline import +
     keys.
+
+    *need_llm* is False for the v0.13 pause-aware modes, which never call a
+    language model — requiring a working LLM provider there would block a
+    free preview on a machine that only has an ElevenLabs key, which is
+    exactly the setup this feature is meant to serve.
 
     Returns (pl, api_key, ctx) with ctx pre-seeded with the absolute
     audio path.
@@ -1296,7 +1519,7 @@ def _begin_run(args, manifest):
     manifest["language"] = args.language
     if not os.path.isfile(audio_path):
         raise RuntimeError(f"Audio file not found: {audio_path}")
-    pl, api_key = _load_pipeline_and_keys(args, need_llm=True)
+    pl, api_key = _load_pipeline_and_keys(args, need_llm=need_llm)
     # _llm_provider_label(), not GEMINI_DEFAULT_MODEL: the constant is the
     # Gemini default and says nothing about the provider this install actually
     # calls, so a gateway run used to advertise "gemini-2.5-pro" in its log.
@@ -1305,11 +1528,13 @@ def _begin_run(args, manifest):
     _roles = getattr(pl, "_llm_role_overrides_label", None)
     if callable(_roles) and _roles():
         _note(f"Per-stage model overrides: {_roles()}")
-    _require_ffmpeg(pl, hard=(args.steps in ("full", "dub")))
+    _require_ffmpeg(pl, hard=(args.steps in ("full", "dub", "dubplan")))
     # v0.15.1: prove the LLM answers before anything bills. full/dub always
     # need it (see _preflight_llm); a translate run handed --provided-script
-    # skips the whole LLM chain, so it must not be blocked by this.
-    if args.steps in ("full", "dub") or not args.provided_script:
+    # skips the whole LLM chain, so it must not be blocked by this. The v0.13
+    # pause-aware modes pass need_llm=False and never call a model at all —
+    # requiring one there would block a free preview.
+    if need_llm and (args.steps in ("full", "dub") or not args.provided_script):
         _preflight_prompts(pl, args)
         _preflight_llm(pl)
     return pl, api_key, {"audio_path": audio_path}
@@ -1326,6 +1551,367 @@ def _run_full(args, manifest):
     _stage_translate(pl, args, api_key, manifest, ctx)
     ctx["script_text"] = ctx["punc_result"]
     _stage_dub(pl, args, api_key, manifest, ctx, voice_id)
+
+
+def _stage_pause_plan(pl, args, api_key, manifest, ctx):
+    """S1a/S1b for the pause-aware modes: transcribe, detect, chunk, assign.
+
+    Shared by --steps plan and --steps dubplan. dubplan re-runs this rather
+    than trusting the plan file's numbers: the timings must come from the
+    audio every time, so a hand-edited (or stale) timestamp in the plan can
+    never desync a paid run. Only the TR: text is taken from the file.
+
+    Fills *ctx* with out_dir, base, chunks, en_texts, total_dur_s and the
+    resolved settings tuple.
+    """
+    audio_path = ctx["audio_path"]
+    pause_min_s, thr_db, max_atempo, rate_override = _plan_settings(pl)
+
+    out_dir, base = _prepare_out_dir(pl, audio_path, manifest)
+    ctx["out_dir"], ctx["base"] = out_dir, base
+
+    # ── [S1a] Transcription — disk-cached, so Reload is free ────────────────
+    _say("S1a", "Transcribing source audio (ElevenLabs Scribe)…")
+    result = pl._transcribe_audio(audio_path, api_key)
+    words = result.get("words", [])
+    if not words:
+        raise RuntimeError("No word data from ElevenLabs for the source "
+                           "audio.")
+    _say("S1a", f"Transcription done ({len(words)} word tokens).")
+
+    # ── [S1b] Pause detection -> the chunk grid ─────────────────────────────
+    _say("S1b", f"Detecting pauses (floor {thr_db:.0f} dB, minimum gap "
+                f"{pause_min_s * 1000:.0f} ms)…")
+    y_data, sr = pl._load_audio_any(audio_path)
+    total_dur_s = float(len(y_data)) / float(sr) if sr else 0.0
+    regions = pl._detect_regions_from_audio(
+        y_data, sr, thr_db, pl.DEFAULT_HYS_DB, pl.DEFAULT_MIN_MS)
+    if not regions:
+        raise RuntimeError("No speech detected in the source audio (is the "
+                           "file silent, or is the level below the "
+                           f"{thr_db:.0f} dB floor?).")
+    chunks = pl.pause_chunks_from_regions(regions, total_dur_s, pause_min_s)
+    if not chunks:
+        raise RuntimeError("Pause detection produced no chunks.")
+
+    # The English SRT is written for the same reason the other modes write
+    # it: it is the human-readable record of what the source said where.
+    final_srt = pl._build_subtitle_srt(regions, words)
+    srt_path = base + ".srt"
+    _write_text(srt_path, final_srt)
+    manifest["en_srt"] = srt_path
+
+    en_texts = pl.source_text_for_chunks(chunks, words)
+    _longest = max(c["dur_s"] for c in chunks)
+    _pauses = sorted(c["pause_after_s"] for c in chunks[:-1])
+    _line = (f"{len(chunks)} pause-delimited chunk(s) from {len(regions)} "
+             f"region(s) — source {total_dur_s:.1f}s, longest chunk "
+             f"{_longest:.1f}s")
+    if _pauses:
+        _line += f", median pause {_pauses[len(_pauses) // 2]:.2f}s"
+    _say("S1b", _line)
+
+    ctx["chunks"] = chunks
+    ctx["en_texts"] = en_texts
+    ctx["total_dur_s"] = total_dur_s
+    ctx["plan_settings"] = (pause_min_s, thr_db, max_atempo, rate_override)
+    return chunks
+
+
+def _run_plan(args, manifest):
+    """--steps plan: the free dry run.
+
+    Detect the source's pauses, lay the target script across them, estimate
+    each chunk's spoken duration from character count and the per-language
+    rate, and write two artifacts: an editable plan file and a self-contained
+    HTML review page. No TTS request, no LLM call, no credits.
+
+    Two text sources, and which one is used decides whether a review survives:
+
+      --provided-script  the flowing pasted script, spread across the chunks
+                         by duration share. The FIRST look at a run.
+      --plan             a plan file whose TR: lines are already assigned per
+                         chunk. Re-measures exactly those lines against
+                         freshly detected pauses, so corrections made in the
+                         review page (or by hand) are preserved. Reload used
+                         to re-spread the original script here, which threw
+                         every correction away.
+    """
+    pl, api_key, ctx = _begin_run(args, manifest, need_llm=False)
+    _stage_pause_plan(pl, args, api_key, manifest, ctx)
+    base = ctx["base"]
+    chunks, en_texts = ctx["chunks"], ctx["en_texts"]
+    _pause_min, _thr, max_atempo, rate_override = ctx["plan_settings"]
+
+    if args.plan:
+        # Re-measure pass. Timings still come from the audio — only the TR:
+        # text is taken from the file, exactly as --steps dubplan does it.
+        plan_path = os.path.abspath(os.path.expanduser(args.plan))
+        if not os.path.isfile(plan_path):
+            raise RuntimeError(f"--plan file not found: {plan_path}")
+        corrected = pl.parse_plan_text(_read_text(plan_path))
+        if not corrected or not any(t.strip() for t in corrected):
+            raise RuntimeError(
+                f"No TR: lines found in the plan file: {plan_path} — it must "
+                "be a plan written by '--steps plan' (target text on the TR: "
+                "lines).")
+        if len(corrected) != len(chunks):
+            _note(f"WARNING: the plan has {len(corrected)} chunk(s) but the "
+                  f"audio now yields {len(chunks)} — pairing by index and "
+                  "padding/truncating. Re-run the preview from the pasted "
+                  "script if the audio changed.")
+        tr_texts = [(corrected[i] if i < len(corrected) else "")
+                    for i in range(len(chunks))]
+        _say("S1b", f"Re-measuring {len(chunks)} chunk(s) against the "
+                    "corrected plan…")
+        _note(f"Target text loaded per chunk from: {plan_path}")
+    else:
+        script_path = os.path.abspath(os.path.expanduser(args.provided_script))
+        if not os.path.isfile(script_path):
+            raise RuntimeError(
+                f"--provided-script file not found: {script_path}")
+        script_text = _read_text(script_path).strip()
+        if not script_text:
+            raise RuntimeError(f"--provided-script file is empty: "
+                               f"{script_path}")
+        _note(f"Target script loaded: {script_path} ({len(script_text)} "
+              "chars).")
+        _say("S1b", f"Spreading the script across {len(chunks)} chunk(s) by "
+                    "duration share…")
+        tr_texts = pl.assign_script_to_chunks(script_text, chunks,
+                                              args.language)
+
+    plan = pl.build_plan(chunks, en_texts, tr_texts, args.language,
+                         max_atempo, rate_override)
+
+    plan_txt = base + "_sync_plan.txt"
+    _write_text(plan_txt, pl.format_plan_text(
+        plan, ctx["audio_path"], args.language, ctx["total_dur_s"],
+        max_atempo, rate_override))
+    manifest["plan_txt"] = plan_txt
+
+    plan_html = base + "_sync_plan.html"
+    try:
+        pl.render_plan_html(plan, plan_html, ctx["audio_path"], args.language,
+                            ctx["total_dur_s"], max_atempo, rate_override)
+        manifest["plan_html"] = plan_html
+    except Exception as e:
+        # The HTML is the readable, editable half; the plan file is the
+        # contract. Losing the review page must not lose the analysis.
+        _note(f"WARNING: could not write the HTML review page ({e}) — the "
+              "plan file is still valid.")
+
+    counts = pl.plan_counts(plan)
+    manifest["chunk_count"] = str(len(plan))
+    for key in ("fits", "tight", "over", "short", "empty"):
+        manifest[f"{key}_count"] = str(counts.get(key, 0))
+
+    _say("S1b", pl.summarize_plan(plan))
+    _note("Plan written — NO audio was generated and no credits were spent. "
+          f"Correct the target text in {os.path.basename(plan_html)} (the "
+          "only surface that renders Indic script properly), paste the "
+          "corrections back in the panel and reload to re-check — or approve "
+          "to generate.")
+
+
+def _run_dubplan(args, manifest):
+    """--steps dubplan --plan <file>: generate from an approved plan.
+
+    The whole matching/placement stack is bypassed. Every chunk already has
+    a home — the timestamp where the source speaker started — so this only
+    has to synthesize, fit each chunk to its slot, and lay the pieces down
+    at their original starts. Nothing can be demoted to Un sync here,
+    because nothing has to compete for a position.
+    """
+    pl, api_key, ctx = _begin_run(args, manifest, need_llm=False)
+
+    # Read and validate the plan BEFORE resolving the voice or transcribing:
+    # a plan the user pointed at by mistake is a local file check, and it
+    # must not cost an API round trip to discover.
+    plan_path = os.path.abspath(os.path.expanduser(args.plan))
+    if not os.path.isfile(plan_path):
+        raise RuntimeError(f"--plan file not found: {plan_path}")
+    approved = pl.parse_plan_text(_read_text(plan_path))
+    if not approved or not any(t.strip() for t in approved):
+        raise RuntimeError(
+            f"No TR: lines found in the plan file: {plan_path} — it must be "
+            "a plan written by '--steps plan' (target text on the TR: "
+            "lines).")
+
+    voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
+                                         args.voice_id)
+    _note(f"Dub voice: {voice_id} ({voice_how})")
+
+    _stage_pause_plan(pl, args, api_key, manifest, ctx)
+    out_dir, base = ctx["out_dir"], ctx["base"]
+    chunks, en_texts = ctx["chunks"], ctx["en_texts"]
+    _pause_min, _thr, max_atempo, rate_override = ctx["plan_settings"]
+
+    if len(approved) != len(chunks):
+        _note(f"WARNING: the plan has {len(approved)} chunk(s) but the audio "
+              f"now yields {len(chunks)} — pairing by index and padding/"
+              "truncating. Re-run '--steps plan' if the audio changed.")
+    tr_texts = [(approved[i] if i < len(approved) else "")
+                for i in range(len(chunks))]
+    plan = pl.build_plan(chunks, en_texts, tr_texts, args.language,
+                         max_atempo, rate_override)
+    _say("S2d", "Approved plan: " + pl.summarize_plan(plan))
+
+    live = [(i, row) for i, row in enumerate(plan) if row["tr"].strip()]
+    if not live:
+        raise RuntimeError("Every chunk in the plan has empty TR: text — "
+                           "nothing to synthesize.")
+
+    # ── [S2d] One stitched synthesis pass over the chunks that have text ────
+    _say("S2d", f"Synthesizing {len(live)} chunk(s) ({args.language}, voice "
+                f"{voice_id}, model {args.el_model})…")
+    tts_path = os.path.join(
+        out_dir, pl._tts_output_name(args.language, ctx["audio_path"], "_tts"))
+    tts_path = pl.ensure_writable_output(tts_path,
+                                         status_cb=lambda m: _say("S2d", m))
+    tts_path, spans = pl.synthesize_sections_elevenlabs(
+        [row["tr"] for (_i, row) in live], tts_path, api_key=api_key,
+        voice_id=voice_id, model_id=args.el_model,
+        status_cb=lambda m: _say("S2d", m))
+    if len(spans) != len(live):
+        raise RuntimeError(
+            f"Synthesis returned {len(spans)} span(s) for {len(live)} chunk"
+            "(s) — refusing to place audio that cannot be matched to the "
+            "plan.")
+    _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)}.")
+
+    _say("S3a", "Chunk grid came from the source pauses — no matching pass.")
+    _say("S3b", "Chunk offsets taken from synthesis — no re-transcription.")
+    _say("S3c", "No EN <-> script mapping needed: each chunk owns its own "
+                "source timestamp.")
+
+    # ── [S3d] Fit each chunk to its slot, then lay them down ────────────────
+    _say("S3d", "Fitting chunks to their slots…")
+    entries, texts, stretched, still_over = [], [], 0, []
+    use_pydub = bool(pl.PYDUB_AVAILABLE)
+    fitted, source_audio, gap = None, None, None
+
+    for n, ((ci, row), (s_ms, e_ms)) in enumerate(zip(live, spans), 1):
+        chunk = chunks[ci]
+        hard_slot_ms = (chunk["dur_s"] + chunk["pause_after_s"]) * 1000.0
+        measured_ms = max(1.0, e_ms - s_ms)
+        ratio = 1.0
+        if hard_slot_ms > 0 and measured_ms > hard_slot_ms:
+            ratio = min(measured_ms / hard_slot_ms, max_atempo)
+            if measured_ms / hard_slot_ms > max_atempo + 0.005:
+                still_over.append((chunk["index"],
+                                   (measured_ms - hard_slot_ms) / 1000.0))
+
+        if use_pydub:
+            if source_audio is None:
+                source_audio = pl._AudioSegment.from_file(tts_path)
+                gap = pl._AudioSegment.silent(
+                    duration=pl.SECTION_GAP_MS,
+                    frame_rate=source_audio.frame_rate)
+            seg = source_audio[int(s_ms):int(e_ms)]
+            if ratio > 1.005:
+                seg = _stretch_segment(pl, seg, ratio, out_dir, n)
+                stretched += 1
+            if fitted is None:
+                fitted, start_ms = seg, 0
+            else:
+                # Same SECTION_GAP_MS cushion synthesize_sections_elevenlabs
+                # leaves between sections, and excluded from the spans for the
+                # same reason: an item nudged a few ms in REAPER must not pull
+                # in its neighbour's audio.
+                fitted = fitted + gap
+                start_ms = len(fitted)
+                fitted = fitted + seg
+            end_ms = len(fitted)
+        else:
+            # No pydub: fall back to the unstretched spans in the raw wav.
+            start_ms, end_ms = int(s_ms), int(e_ms)
+
+        entries.append({
+            "index":           n,
+            "orig_start_ms":   int(start_ms),
+            "orig_end_ms":     int(end_ms),
+            "synced_start_ms": int(round(chunk["start_s"] * 1000)),
+            "sync_status":     "synced",
+        })
+        texts.append(row["tr"])
+
+    if fitted is not None:
+        fitted.export(tts_path, format="wav")
+    manifest["tts_wav"] = tts_path
+    _say("S3d", f"{len(entries)} chunk(s) placed at their source "
+                f"timestamps; {stretched} time-stretched to fit.")
+    if still_over:
+        _say("S3d", "WARNING: "
+             + f"{len(still_over)} chunk(s) still overrun their slot after "
+               f"the {max_atempo:.2f}x ceiling and were left long rather "
+               "than squashed — "
+             + ", ".join(f"#{i} by {o:.1f}s" for i, o in still_over[:8])
+             + ("…" if len(still_over) > 8 else "")
+             + ". Shorten their TR: lines and re-run the plan to fix.")
+
+    # ── Standard artifacts — unchanged contract, so the importers just work ─
+    sync_ts_path = base + "_sync_timestamps.txt"
+    _write_text(sync_ts_path, pl._format_timestamps_as_text(entries))
+    manifest["timestamps_txt"] = sync_ts_path
+
+    texts_path = base + "_sync_texts.txt"
+    _write_text(texts_path, "\n\n".join(
+        " ".join((t or "").split()) or EMPTY_PARAGRAPH_PLACEHOLDER
+        for t in texts) + "\n")
+    manifest["sync_texts"] = texts_path
+
+    manifest["synced_count"] = str(len(entries))
+    manifest["unsynced_count"] = "0"
+
+    srt_lines = []
+    for n, e in enumerate(sorted(entries,
+                                 key=lambda x: x["synced_start_ms"]), 1):
+        start_s = e["synced_start_ms"] / 1000.0
+        end_s = start_s + (e["orig_end_ms"] - e["orig_start_ms"]) / 1000.0
+        srt_lines += [str(n),
+                      f"{pl._srt_ts(start_s)} --> {pl._srt_ts(end_s)}",
+                      " ".join((texts[e["index"] - 1] or "").split()), ""]
+    synced_srt_path = base + "_sync_synced.srt"
+    _write_text(synced_srt_path, "\n".join(srt_lines))
+    manifest["synced_srt"] = synced_srt_path
+
+    # ── [S3e] Render ────────────────────────────────────────────────────────
+    _say("S3e", "Rendering the synced audio…")
+    synced_path = os.path.join(
+        out_dir, pl._tts_output_name(args.language, ctx["audio_path"],
+                                     "_synced"))
+    synced_path = pl.ensure_writable_output(
+        synced_path, status_cb=lambda m: _say("S3e", m))
+    pl.sync_audio_with_timestamps(
+        tts_path, entries, synced_path,
+        status_cb=lambda m: _say("S3e", m), extend_last=False)
+    manifest["synced_wav"] = synced_path
+    _say("S3e", f"Synced audio saved: {os.path.basename(synced_path)}")
+
+
+def _stretch_segment(pl, seg, ratio, out_dir, n):
+    """Time-stretch one pydub segment via ffmpeg; return the new segment.
+
+    Round-trips through a scratch wav because atempo is an ffmpeg filter,
+    not a pydub operation. Any failure returns the segment unchanged —
+    stretch_wav_atempo logs why, and an overlong chunk is a far better
+    outcome than a run that dies after the credits are spent.
+    """
+    scratch = os.path.join(out_dir, "_fit")
+    try:
+        os.makedirs(scratch, exist_ok=True)
+        raw = os.path.join(scratch, f"chunk_{n:04d}.wav")
+        fit = os.path.join(scratch, f"chunk_{n:04d}_fit.wav")
+        seg.export(raw, format="wav")
+        got = pl.stretch_wav_atempo(raw, fit, ratio,
+                                    status_cb=lambda m: _say("S3d", m))
+        if got and os.path.isfile(got) and got != raw:
+            return pl._AudioSegment.from_file(got)
+    except Exception as e:
+        _say("S3d", f"WARNING: could not time-stretch chunk {n} ({e}) — "
+                    "left at its synthesized length.")
+    return seg
 
 
 def _paired_paragraph_texts(pl, final_srt, punc_result):
@@ -1605,7 +2191,7 @@ def main() -> int:
     args = _parse_args()
 
     v = _app_version()
-    _note(f"Reaper Dubbing App{' v' + v if v else ''} (contract v0.12)")
+    _note(f"Reaper Dubbing App{' v' + v if v else ''} (contract v0.13)")
 
     if args.app_dir:
         _note("WARNING: --app-dir is deprecated as of v0.3 and IGNORED — "
@@ -1624,6 +2210,10 @@ def main() -> int:
                                    _run_voice_change, "ok")
     elif args.regen_chunk:
         keys, runner, ok_status = REGEN_MANIFEST_KEYS, _run_regen, "ok"
+    elif args.steps == "plan":
+        keys, runner, ok_status = PLAN_MANIFEST_KEYS, _run_plan, "plan"
+    elif args.steps == "dubplan":
+        keys, runner, ok_status = MANIFEST_KEYS, _run_dubplan, "ok"
     elif args.steps == "translate":
         keys, runner, ok_status = (REVIEW_MANIFEST_KEYS, _run_translate,
                                    "review")

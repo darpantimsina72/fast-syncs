@@ -1,0 +1,15 @@
+{
+  "name": "dub-panel-layout-harness",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Draws the REAPER panels without REAPER to catch overlapping text",
+  "scripts": {
+    "test": "node run.js",
+    "test:wide": "WIDE=1 node run.js",
+    "test:sync": "node run-sync.js"
+  },
+  "dependencies": {
+    "fengari": "^0.1.4",
+    "luaparse": "^0.3.1"
+  }
+}
