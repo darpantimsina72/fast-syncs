@@ -1,6 +1,6 @@
 -- @description Fast Syncs — AI dubbing sync for REAPER
 -- @author darpantimsina72
--- @version 0.15.1
+-- @version 0.15.2
 -- @about
 --   Transcribes your Dialogue VO and Dub tracks, asks Gemini which dubbed clip
 --   means the same thing as which English clip, and moves each dubbed clip to
@@ -2281,8 +2281,12 @@ local function main()
         poll_python_step()   -- refresh log/progress before rendering
       end
       render_active_phase(_ui_ctx, close_window)
+      -- ReaImGui calls End() ONLY when Begin() returned true (see the note in
+      -- Dub_Pipeline_Panel.lua V5.ui_settings_window). NoCollapse makes the
+      -- not-visible branch rare here, but a fully clipped window still hits
+      -- it — which is exactly what check_offscreen() above is for.
+      reaper.ImGui_End(_ui_ctx)
     end
-    reaper.ImGui_End(_ui_ctx)   -- always paired with Begin()
     _ui_window_open = _ui_window_open and open
     if _ui_window_open then
       reaper.defer(frame)

@@ -6084,8 +6084,22 @@ function V5.ui_settings_window(ctx)
     reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 8.0, 5.0)
     V5.ui_settings_body(ctx)
     reaper.ImGui_PopStyleVar(ctx, 3)
+    -- ReaImGui calls End() ONLY when Begin() returned true — unlike upstream
+    -- Dear ImGui, whose docs say to always pair them. cfillion's own
+    -- examples/demo.lua early-outs on `if not rv then return end` without
+    -- ending. Calling it anyway raises
+    --   ImGui_End: Calling End() too many times!
+    --
+    -- Begin() reports not-visible more often than "collapsed" suggests. The
+    -- case that actually reached users: dragging this window onto the main
+    -- one DOCKS the two as tabs in one node, and the unselected tab is not
+    -- visible. A field machine's ReaImGui ini showed exactly that —
+    -- ###dub_pipeline DockId=0x1,0 and ###dub_settings DockId=0x1,1, with
+    -- Collapsed=0 on both. The layout persists in
+    -- <REAPER resource>/ReaImGui/AEEFD7DC.ini, so the error returned at
+    -- every launch until that file was reset.
+    reaper.ImGui_End(ctx)
   end
-  reaper.ImGui_End(ctx)
   V5.settings_open = open and true or false
 end
 
@@ -6591,8 +6605,11 @@ local function main()
       end
 
       V5.ui_status_bar(_ui_ctx)
+      -- Inside the guard: see the note in V5.ui_settings_window. NoCollapse
+      -- hid this one, but Begin() also reports not-visible for a fully
+      -- clipped window — the very case check_offscreen() above exists for.
+      reaper.ImGui_End(_ui_ctx)
     end
-    reaper.ImGui_End(_ui_ctx)   -- always paired with Begin()
 
     -- v0.13: the settings window is a sibling top-level window, drawn after
     -- the main one closes its Begin/End pair. Closing it never closes the app.
