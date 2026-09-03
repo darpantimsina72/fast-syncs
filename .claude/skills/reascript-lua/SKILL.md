@@ -91,11 +91,50 @@ loaded, so `APIExists` alone is a false positive that then crashes the
 unprotected `ImGui_CreateContext` in `main()`. The function actually creates
 and destroys a probe context. Keep that.
 
-**Begin/End must always be paired, even when not visible.**
-`auto_sync_pipeline.lua:2254-2267`: `ImGui_End(ctx)` is called outside the
-`if visible then` guard. Same rule for `BeginChild`/`EndChild`
-(`:600-605`) and every `PushStyleColor`/`PopStyleColor` pair. An unpaired
-call corrupts the whole frame stack and the window vanishes.
+**`ImGui_End` is called ONLY when `ImGui_Begin` returned true.**
+This is the opposite of upstream Dear ImGui, whose docs say to always pair
+them — ReaImGui diverges, and cfillion's own `examples/demo.lua` early-outs
+with `if not rv then return open end` and never calls `End`. Calling it
+regardless raises:
+
+```
+ImGui_End: Calling End() too many times!
+```
+
+This repo had it wrong in all three window frames until v0.15.2. The two with
+`ImGui_WindowFlags_NoCollapse` (the main dub panel, and the standalone Auto
+Sync window) hid it, because a window that cannot be collapsed almost always
+reports visible. The Settings window has no such flag, so anyone who
+collapsed it got the error on every frame — and ImGui persists the collapsed
+state, so it survived restarts. `NoCollapse` is not a fix either, and collapsing is not even the
+main trigger: **two windows docked into one node become tabs, and the
+unselected tab is not visible.** That is what actually reached users —
+dragging the Settings window onto the panel docked them together. A field
+machine's ini showed `###dub_pipeline DockId=0x1,0` and
+`###dub_settings DockId=0x1,1` with `Collapsed=0` on both. `Begin` also
+reports not-visible for a fully clipped window, which is precisely what
+`check_offscreen()` exists to rescue.
+
+ReaImGui persists that layout per context in
+`<REAPER resource path>/ReaImGui/<hash>.ini` — the hash comes from the
+context name, so the dub panel is always `AEEFD7DC.ini` and the standalone
+Auto Sync window `EBCA1704.ini`. Deleting the file resets window
+positions/docking only; no app settings live there.
+
+Correct shape (`Dub_Pipeline_Panel.lua` `V5.ui_settings_window`):
+
+```lua
+local visible, open = reaper.ImGui_Begin(ctx, 'Settings###dub_settings', true)
+if visible then
+  ...
+  reaper.ImGui_End(ctx)     -- inside the guard
+end
+V5.settings_open = open and true or false   -- `open` is valid either way
+```
+
+`PushStyleColor`/`PopStyleColor`, `PushStyleVar`/`PopStyleVar` and
+`BeginChild`/`EndChild` (`:600-605`) *do* still need strict pairing — an
+unpaired one corrupts the frame stack and the window vanishes.
 
 ---
 
