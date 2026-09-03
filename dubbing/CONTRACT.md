@@ -6,6 +6,457 @@ The original app is READ-ONLY — never modify or write anything inside
 is only a one-time extraction source and optional key-migration source, never
 a runtime dependency.
 
+## v0.17 — The region: the run covers what the timeline shows
+
+Trimming an item is how you say what the dub is of, and the panel only half
+heard it. A track holding one clean item handed its **source file** to the
+engine — the whole file, however short the item had been trimmed to — and
+anything else was rendered from project **0:00**, so a two-minute excerpt of
+an hour-long talk was transcribed, translated and *spoken* in full. The
+result then landed at 0:00, nowhere near the item it came from.
+
+The engine is unchanged: it still dubs the wav it is given. What changed is
+which wav that is, and where the answer comes back to.
+
+### What gets taken (`V5.timeline_region`)
+
+Resolved every frame, so the source row is live while you trim. Most
+specific statement first:
+
+1. **the time selection** — you dragged over the part you mean,
+2. **the selected item(s)** — you clicked the piece you mean; that also says
+   which track, so the picker may stay on "(from track)",
+3. **everything the chosen track holds**.
+
+A time selection is **clamped to the track's items**: one dragged past the
+end of the talk would otherwise render, and transcribe, minutes of silence.
+A selection spanning two tracks is narrowed to one — "dub this item" never
+means "mix these two".
+
+### What is handed over (`audio_for_region`)
+
+- `V5.region_is_whole_file(plan)` is the only case that needs no render: ONE
+  item, untrimmed (`D_STARTOFFS` 0, length == source length), unstretched
+  (`D_PLAYRATE` 1), starting at 0:00, and the region is all of it. This is
+  the v0.4.1 fast path plus the two conditions it was missing — the item has
+  to *start* at zero, and the region has to be the whole of it.
+- Anything else renders that exact span. `render_track_stem` took `from_s` /
+  `to_s` for this; passing neither still means 0:00 → last item end, which is
+  what the voice changer wants (it re-voices a whole track in place).
+- The span is in the file name as well as the sidecar
+  (`Sadhguru EN_2m00s-3m35s_20260820_101500.wav`): a `DubSource/` folder is
+  otherwise four identical-looking wavs of the same talk.
+
+### `<wav>.dubregion.json` — the span travels with the audio
+
+```json
+{"version": 1, "source": "D:\\p\\talk.wav", "project_pos": 120.5,
+ "start": 120.5, "end": 215.5, "track": "Sadhguru EN",
+ "why": "the track's items"}
+```
+
+Written **only beside audio the panel itself rendered** (in `DubSource/`), so
+nothing is ever dropped next to the user's own files. A plain file has no
+sidecar and `V5.region_offset` answers 0, which is exactly what every run did
+before regions existed.
+
+Two consumers, and both would otherwise be wrong by the length of the talk:
+
+- **`import_to_timeline`** offsets every track it builds — EN Original, Dub
+  Chunks, Un sync, the muted reference — by `project_pos`. Every time in the
+  manifest is measured from the region's own 0:00, so placing them at the
+  project's 0:00 puts the whole dub minutes away from the audio it was made
+  for. The summary says `Placed at: 0:02:00.500` when it happens.
+- **`V5.review_relink`** takes the review transport's zero from it. A region
+  wav is never *on* the timeline — it IS a slice of something that is — so
+  the item-by-filename search could only ever answer 0:00, and ▶ Play here
+  would play the wrong part of the talk.
+
+### The nudge
+
+Pressing Run without pressing Use is the failure this feature exists to end,
+so the source row's caption goes **amber** whenever the audio in the field is
+not the span the timeline is showing: `press Use to dub 1:35 — 2:00 → 3:35
+(the track's items) — not the whole file`. It reads `dubbing 1:35 — …` once
+the two agree.
+
+### Tests
+
+`tests.lua` §9c, against a new minimal project model in `mock.lua`
+(`T.set_project` — tracks, items, takes, sources, selection, time selection;
+`CountTracks` used to answer 0, so the track picker had never been drawn in
+this harness at all). It asserts the span for an untrimmed item, a trimmed
+one, both time-selection cases and a selected item that supplies its track;
+that a trimmed item is **never** handed over as its whole source file; the
+sidecar round trip; the review transport's zero; and it draws the setup
+screen with a project, which is where the caption line lives.
+
+That last one caught the bug worth naming: `local ta, tb = f and f(...)`
+adjusts the `and` expression to **one** value, so the time selection's end
+was always nil and a time selection could never win.
+
+## v0.16 — The cast: the voice is chosen on the screen that reads the script
+
+The voice was one id in ⚙ Settings, chosen before the run and invisible on
+the one screen where the script is actually read. A talk is not always one
+voice — Sadhguru speaks most of it, a question comes from the audience, an
+invocation belongs to someone else — and until now the engine's answer to a
+saved per-paragraph voice map was to detect it, warn, and dub the whole
+thing in one voice anyway.
+
+The paragraph is where the question is obvious, and the review screen
+already lists paragraphs. So the casting happens there, before anything is
+spoken or billed, and the engine honours it.
+
+### `<base>_speakers.json` — read AND written, and now obeyed
+
+Same file the bulk app wrote and `pipeline/tts.py` already knew how to read
+(`_speakers_load` / `_speakers_voice_map`). Written by the panel's review
+screen on 💾 Save and before ▶ Continue:
+
+```json
+{
+  "version": 1,
+  "language": "Hindi",
+  "default_voice_id": "<the main voice>",
+  "speakers": [
+    {"key": "s1", "name": "Sadhguru",   "voice_id": "…"},
+    {"key": "s2", "name": "Questioner", "voice_id": "…"}
+  ],
+  "assignments": {
+    "2": {"speaker": "s2", "voice_id": "…"}
+  }
+}
+```
+
+- The assignment key is the **1-based blank-line-separated paragraph number
+  of the dub script** — which is exactly one row of the review screen, and
+  exactly what `_speakers_voice_map` already returned.
+- `speakers` is the panel's own record (names, so a resumed review comes
+  back with the same cast); the engine reads `assignments` only.
+- A paragraph with no assignment is spoken by the run's main voice, which
+  the panel also passes as `--voice-id`. **A single-voice run writes no file
+  and deletes a stale one** — an empty map means "one voice", never "the
+  cast went missing".
+
+### Engine: both sync modes speak the cast
+
+The rule everywhere is *one request is one voice* — there is no way to ask
+ElevenLabs for two voices in one call, and a request is the unit of prosody.
+
+- `match` mode. When a cast exists the script is split by
+  `_split_script_into_units_with_paras` /
+  `_split_script_into_sentences_with_paras`, which return the paragraph
+  number of every unit alongside the unit. `agentic_split_match` rewrites
+  sentences in place and never renumbers them, so that list stays valid
+  through matching; a piece takes the voice of the paragraph its first
+  sentence came from. `synthesize_sentences_elevenlabs` /
+  `synthesize_sections_elevenlabs` take an optional parallel `voices` list,
+  and `_pack_sentences(…, keys=voices)` breaks a request on a voice change
+  as well as on the size cap.
+- `legacy` mode. Consecutive paragraphs that share a voice become one run;
+  the runs go through `synthesize_sections_elevenlabs` and concatenate into
+  the one TTS wav the rest of the stage expects. S3b re-transcribes that
+  wav, so nothing downstream needs to know how many voices made it.
+- **Request stitching stops at a voice change.** `previous_text` /
+  `next_text` exist to keep prosody continuous; feeding the previous
+  speaker's words across the boundary is how a new voice inherits the old
+  one's cadence.
+- **A tiny clause fragment is never merged across a paragraph.** The plain
+  `_merge_tiny_units` folds "Questioner:" (11 chars) into whatever precedes
+  it — which, with a cast, hands the start of one speaker's line to the
+  previous speaker's voice. The `_with_paras` splitter refuses that merge;
+  single-voice runs still take the plain path and are unaffected.
+- **Emotion enrichment is checked, not trusted.** It rewrites the script
+  (legacy mode only), and the cast is keyed by paragraph NUMBER. If the
+  enriched text comes back with a different paragraph count the cast is
+  reported as unusable and the run is single-voice, because guessing which
+  line moved is how a talk gets the wrong voice. `--no-emotion` keeps the
+  cast.
+- **`section` piece size warns.** A section is a *thought*, and Gemini can
+  group one across a paragraph — so a section can span two speakers. It is
+  spoken by its first paragraph's voice, and the log says how many did that;
+  `clause` or `sentence` keeps every speaker separate.
+- Voice ids are sanitized per entry (`_resolve_voice_list`); a blank or
+  unparseable one falls back to the main voice rather than failing a run
+  whose translation has already been paid for and reviewed.
+
+### Panel: 🎙 Cast on the review screen
+
+- The strip rides on the **view row** (List/Grid, S/M/L) and **never
+  wraps**. The review screen has no vertical slack left at 780 px — the
+  layout harness measures 0 px of it in the degenerate text-measurement
+  regimes — so one more wrapping row is the difference between a table and a
+  1-pixel sliver of one. Speakers that do not fit collapse into a `+N` chip
+  that opens the editor.
+- The editor is drawn over the table and takes only what the table can
+  spare; below ~90 px it does not draw at all rather than squeeze the script
+  off the screen (the strip's chips and the inspector still cast lines).
+- Casting a line: press a speaker chip to make it *active*, then click a
+  paragraph's coloured chip. Clicking a paragraph already on the active
+  speaker puts it back on the main voice. The inspector lists the whole cast
+  for the selected paragraph.
+- **🔎 Detect speakers** reads `Name:` labels off the English column and
+  casts those paragraphs. It never edits the script — including the labels,
+  which ElevenLabs would otherwise read aloud.
+- **⇧ main** swaps a speaker with the main voice, naming the implicit
+  assignments first so nobody's lines change voice.
+- ▶ Continue and Skip edit refuse while a speaker that has paragraphs has no
+  voice. The main voice may be left empty — that is the engine's documented
+  auto-resolve, and the strip says `main voice: auto` so it is a choice
+  rather than a surprise.
+- Picking the main voice writes it to `config/tts_settings.json`, so Regen
+  Audio, Track Voice and the next run all agree with what was cast here.
+
+### Tests
+
+- `dubbing/engine/test_cast.py` — offline, no API: the file round-trip, the
+  paragraph numbers, the piece→voice rule, request packing, the voice-list
+  validation and the legacy run grouping.
+- `dubbing/reaper/layout-harness/tests.lua` §7c — the whole screen drawn
+  with a real multi-speaker cast (strip, editor open, row chips in both
+  layouts, the List's voice column, the eight-speaker `+N` overflow), plus
+  the model assertions for assign / remove / promote / detect / load.
+
+## v0.15 — The review page is where the script is corrected
+
+v0.13 shipped two gates for one decision. `review` asked "is the wording
+right?" over blank-line PARAGRAPHS with no timecode, no slot and no verdict;
+`plan` asked "does it fit?" over pause-detected CHUNKS with the wording
+already frozen into a file. Different units, so nothing lined up, and the fit
+question could only be answered after the wording question had been answered
+blind.
+
+Worse, the loop both surfaces advertised did not exist: **`⟲ Reload` re-ran
+`--steps plan` against the original pasted script**, which re-spread it across
+the chunks and threw away every `TR:` edit. The panel hint and the engine's
+own closing note each promised "edit the TR: line → save → Reload"; doing
+that silently reverted the edit.
+
+### `--steps plan` takes its text from either source
+
+`--provided-script` (the flowing pasted script, spread by duration share) is
+the FIRST look at a run. `--plan <file>` re-measures the `TR:` lines that are
+already assigned per chunk, against freshly detected pauses — the same
+"timings from the audio, text from the file" rule `dubplan` has always
+followed. Passing neither is still an error; `--plan` is now valid with
+`plan` and `dubplan` only.
+
+`V5.plan_reload` passes the plan file, falling back to the script only if the
+plan has gone missing. Corrections now survive a reload, and re-measuring
+stays free (the S1a transcription is disk-cached).
+
+### `preview_html.py` — readable became editable
+
+The page keeps its two lanes and gains one editable row per chunk: a
+`contenteditable` target cell, and a live re-estimate on every keystroke using
+the same arithmetic as `estimate_fit` / `estimate_duration` (strip `[tags]`,
+count characters, divide by the language rate), so the fit bar, the verdict,
+the tally pills and the chunk's bar in the timeline all move as words are cut.
+"Only problems" collapses the list to the chunks that are not `fits`; clicking
+any bar jumps to its row.
+
+The page **cannot write to disk** — it is opened as `file://` with no server —
+so saving means `Copy corrected plan` (clipboard, with an `execCommand`
+fallback because `file://` is not a secure context) or `Download plan file`.
+Both emit a COMPLETE plan file, byte-identical to `format_plan_text`, with the
+verdict/estimate/atempo columns recomputed for consistency. That the round
+trip is a deliberate human step is the point: nothing reaches a paid run
+without passing through the panel's own button.
+
+### Panel: the gate, plus the lane strip
+
+`V5.ui_phase_plan` is now the review gate — 🌐 Open review page ·
+📥 Paste corrections · ⟲ Re-measure · 📝 Edit plan file · 📁 Folder — over
+`V5.plan_strip`, a two-lane draw-list strip (source above, estimated dub
+below, hatched pauses, one time axis). Drawn as rectangles on purpose:
+**rectangles need no text shaping**, so it is the one honest picture of a
+whole Indic run the panel can render. Hover names a chunk, click selects it,
+and the selection is shared with the table below (`P.sel` / `P.scroll_to`).
+
+Hit testing is decided by the SOURCE slot (`start_s` to `start_s + dur +
+pause`), because those tile the axis without overlaps — an overflowing dub bar
+reaches into its neighbour's slot, so letting the longer of the two decide
+hands clicks to the wrong row.
+
+`V5.plan_paste_corrections` validates before it writes: the clipboard must
+parse as plan rows with `TR:` lines AND carry exactly this run's chunk count
+(a stale page from an older preview is refused by name), and the previous plan
+is copied to `<plan>.bak` first, because the reload rewrites it.
+
+## v0.13 — Pause-aware sync: the source's own silences are the chunk grid
+
+Every mode up to here cuts chunks from the SCRIPT and then searches for
+somewhere to put them — Gemini section matching, spring rounds, bleed-over,
+the order sweep, and a demotion path to `Un sync` for whatever will not fit.
+The drift only becomes visible after ElevenLabs has been billed. v0.13 adds a
+second, independent path that inverts this: the source audio's pauses are the
+chunk grid, so every chunk's position is fixed before any text is considered,
+and a free dry run reports the fit before a credit is spent.
+
+Both engine modes are additive. `full`, `translate`, `dub`, `--regen-chunk`,
+`--voice-change`, `--test-llm` and `--list-voices` are byte-for-byte
+unchanged, and **the paid mode emits the same five artifacts as match mode**
+(`tts_wav`, `timestamps_txt`, `sync_texts`, `synced_srt`, `synced_wav`), so
+`import_to_timeline`, `Import_Dub_Results.lua` and `parse_timestamps_file`
+need no changes at all.
+
+### `pipeline/pausechunk.py` (new)
+
+Pure functions, seconds throughout, no I/O and no network.
+
+- `pause_chunks_from_regions(regions, total_dur_s, pause_min_s)` — the
+  primitive the repo never had: `_detect_regions_from_audio` returns SPEECH
+  spans and nothing ever materialized the silences between them. Regions
+  closer than `PAUSE_MIN_S` (0.20 s) are merged — a 150 ms breath is a region
+  boundary but not a place a dubber would cut. Emits `index`, `start_s`,
+  `end_s`, `dur_s`, `pause_after_s`; the trailing chunk measures its pause to
+  `total_dur_s`, so a long tail of room tone is visible rather than silently
+  becoming unlimited headroom. Chunks tile the timeline exactly:
+  `end_s + pause_after_s == next start_s`.
+- `source_text_for_chunks(chunks, words)` — Scribe words bucketed per chunk
+  with the SAME rule as `_build_subtitle_srt` (first chunk whose end the word
+  does not pass; non-`word` tokens skipped).
+- `assign_script_to_chunks(script_text, chunks, language)` — the pasted script
+  is in the TARGET language and the transcript is in the source language, so
+  there is nothing to align on textually. Each chunk's share of total speech
+  time becomes its share of the characters; sentences
+  (`tts._split_script_into_sentences`, danda-aware, tag-safe) are never split
+  and land in the chunk holding their character MIDPOINT. Midpoint, not
+  greedy accumulation: a script with fewer sentences than chunks must spread
+  out instead of piling into the first few and leaving the tail silent.
+  Always returns exactly `len(chunks)` strings. This is a starting point, not
+  an answer — the plan file exists so a wrong assignment is moved by hand and
+  re-previewed for free.
+- `estimate_fit(...)` — two slots per chunk. `speech_slot = dur_s` (how long
+  the source speaker talked) and `hard_slot = dur_s + pause_after_s`
+  (overrunning THAT means the dub is still talking when the next chunk must
+  start). Verdicts: `fits` · `tight` (eats into the pause) · `over` (exceeds
+  even speech + pause) · `short` (under `SHORT_RATIO` = 0.85 × speech slot) ·
+  `empty`. `atempo` is the speed-up the paid run would apply, clamped to
+  `MAX_ATEMPO`.
+- `format_plan_text` / `parse_plan_text` / `plan_counts` / `summarize_plan`.
+
+### The rate table moved to `config.py`
+
+`LANG_CHARS_PER_SEC`, `DEFAULT_CHARS_PER_SEC` and `estimate_duration` lived in
+`agent_splitter.py` — a module about LLM rephrasing — and the dry run needs
+the same numbers. Two copies that drifted apart would mean the preview and the
+shortener disagreed about what fits. `agent_splitter` re-exports them, so
+every existing caller is unchanged. The bare `14.3` literal duplicated in
+`tts.py` and `dub_engine.py` is now `config.CLAUSE_CHARS_PER_SEC`.
+
+### Plan file — `<base>_sync_plan.txt` (the editable artifact)
+
+Line-oriented, NOT JSON, and deliberately so: the panel's Lua reader
+(`json_field`) is flat-scalar only and `V5.json_object_array` drops numeric
+fields, so a nested JSON plan would arrive half-parsed. This shape parses with
+one `string.match`, exactly like the timestamps sidecar.
+
+```
+# comment lines, regenerated every run
+[1] [0ms] [4120ms] [4120ms] [680ms] [fits] [3980ms] [1.00]
+EN: what the source said here
+TR: the target text that has to fit
+                                   <- blank line between rows
+```
+`[idx] [start] [end] [duration] [pause after] [verdict] [estimate] [atempo]`.
+
+**Only the `TR:` lines are read back.** Every timing is re-derived from the
+audio on every run, so a hand-edited (or stale) timestamp cannot desync a paid
+run. `parse_plan_text` indexes by the row's own `[idx]`, so reordered or
+renumbered rows still land on the chunk they name, and a `TR:` line wrapped
+across several lines is rejoined. Readers handle CRLF and a UTF-8 BOM
+(Notepad writes one).
+
+### `--steps plan` — the free dry run
+
+Requires `--provided-script` (the target text, the same file channel Paste
+Translation uses — Indic text never travels on argv) — or, since v0.15,
+`--plan` to re-measure text already assigned per chunk. Runs S1a (transcription,
+already disk-cached by `_transcript_cache_path`, so Reload never re-uploads)
+and S1b (pause detection), then chunks, assigns, estimates and writes
+`<base>_sync_plan.txt` + `<base>_sync_plan.html`. **No TTS request and no LLM
+call** — `_begin_run(..., need_llm=False)`, because requiring a working LLM
+provider would block a free preview on a machine that only has an ElevenLabs
+key, which is exactly the setup this serves.
+
+Manifest `"status": "plan"` with `PLAN_MANIFEST_KEYS`: `plan_txt`,
+`plan_html`, `chunk_count` and the five verdict tallies (strings, like every
+other numeric manifest field). A failure to write the HTML is a warning — the
+plan file is the contract, the HTML is the readable half.
+
+### `--steps dubplan --plan <file>` — the only paid step
+
+The whole matching/placement stack is bypassed: nothing can be demoted to
+`Un sync`, because nothing has to compete for a position.
+
+1. Plan read and validated BEFORE the voice is resolved or anything is
+   transcribed — a mistyped path is a local file check and must not cost an
+   API round trip.
+2. Timings re-derived by re-running the S1a/S1b stage (`_stage_pause_plan`,
+   shared with `plan`); only the `TR:` text comes from the file.
+3. ONE stitched `synthesize_sections_elevenlabs` pass over the chunks that
+   have text — per-chunk requests in isolation would lose `previous_text` /
+   `next_text` prosody continuity and cost more. A span count that disagrees
+   with the chunk count is a hard failure, never a silent mis-pairing.
+4. Fit: `measured > hard_slot` → `tts.stretch_wav_atempo` at
+   `min(measured / hard_slot, max_atempo)`. Ratios past the ceiling are **not
+   squashed** — the chunk stays long and is named in the log, because the
+   point of this feature is seeing drift, not hiding it. Chunks are
+   reassembled with the same `SECTION_GAP_MS` cushion between them and the
+   spans exclude it, for the same reason match mode does it.
+5. Placement is not an algorithm: `synced_start_ms` is the source chunk's own
+   `start_s`, every status is `synced`, and the silence padding falls out for
+   free because `sync_audio_with_timestamps` overlays onto a silent canvas —
+   the untouched gaps ARE the original pauses.
+
+`tts.stretch_wav_atempo(in, out, ratio)` shells `FFMPEG_PATH` with an
+`atempo` chain (`_atempo_chain` splits ratios outside ffmpeg's 0.5–2.0
+per-instance range). It returns the INPUT path unchanged on any failure or a
+missing ffmpeg, after a loud status line: an overlong chunk is a far better
+outcome than a run that dies after the credits are spent.
+
+### `pipeline/preview_html.py` (new)
+
+`render_plan_html(...)` writes ONE self-contained file — inline CSS/JS, system
+font stack, zero external requests (a CDN reference would render this blank
+behind corporate TLS inspection, exactly when it matters). Two lanes on one
+shared px/sec axis, both anchored at the chunk's real start time: a target bar
+overhanging its source bar IS the drift. Pause gaps are hatched. This exists
+because Dear ImGui has no complex-text shaping — Devanagari is not legible in
+the panel, and a preview whose point is reading the target text has to leave
+it.
+
+### `engine_settings.json` keys (all optional, `_engine_setting`)
+
+`pause_min_ms` (200) · `pause_thr_db` (−42.0) · `max_atempo` (1.25) ·
+`plan_rate_override` ("") · `plan_split_mode` ("proportional", a hook for a
+future Gemini splitter). An install that never touches the file gets the
+tuned defaults.
+
+### Panel (`Dub_Pipeline_Panel.lua`)
+
+- New `_ui_phase` value **`plan`** — a sixth phase, mirroring `review`. It is
+  NOT a util mode: it owns the phase and carries a manifest, like `translate`.
+  Mode names are `plan` / `dubplan`; **`preview` was already taken** as a
+  `UTIL_MODES` key by the v0.11 voice preview.
+- `MODE_STAGES` gains `plan = {S1a, S1b}` and `dubplan`.
+- `V5.parse_plan_file` (the Lua half of the plan format), `V5.enter_plan_phase`,
+  `V5.ui_phase_plan` (the gate: 🌐 Open preview · 📝 Edit plan · ⟲ Reload ·
+  📁 Folder, a verdict tally, the chunk table with the same capability-probed
+  `BeginTable` / plain-rows fallback as the review editor, and a green
+  ▶ Approve & Generate), `V5.start_plan_run`, `V5.start_dubplan_run`,
+  `V5.plan_reload`. All on `V5` — the main chunk is at Lua's 200-local limit.
+- `⟲ Reload` re-runs `--steps plan` against the SAME script file the first run
+  wrote, so an edited plan is re-measured without re-pasting the script and
+  without re-transcribing. **Superseded in v0.15** — re-spreading the script
+  discarded every `TR:` edit; Reload now passes the plan file itself.
+- Setup gains a `🔍 Preview sync` button beside Run, enabled only in the
+  "I have a script" mode (it needs the pasted target text).
+- `build_engine_cmd` gains `--plan`; `_finish_run` routes `status == "plan"`;
+  a finished `dubplan` run records in the per-project history like any dub.
+
 ## v0.12 — Clause-sized pieces (sentence boundaries were still too coarse)
 
 v0.10 cut per SENTENCE, which is coarse for these scripts: Indic
@@ -621,6 +1072,7 @@ plain files — edit in any editor), updater/feedback systems.
     engine/
       run_dub.py          # launcher (env, tee log, pid, done marker)
       dub_engine.py       # worker: imports app module, runs pipeline
+      hidden_run.py       # Windows: re-launch a helper with no console window
       engine_settings.json# written by setup: {"app_dir": "..."}
       status/             # created at runtime by run_dub.py
         engine_log.txt    # live tee of worker stdout+stderr
@@ -651,11 +1103,13 @@ used by `setup_mac.command`; all real runs go through `run_dub.py`):
   no status files, no manifest. Prints `SELFCHECK OK` and exits 0 on
   success; non-zero on failure. `--audio`/`--language` are not required
   with this flag.
-- `--language`: display name, one of: Bengali Hindi Kannada Malayalam Tamil
-  Telugu Gujarati Marathi Assamese Odia Nepali
+- `--language`: display name, one of: Assamese Bengali Gujarati Hindi Kannada
+  Malayalam Marathi Nepali Odia Punjabi Tamil Telugu
 - `--el-model` default `eleven_v3`; `--steps` only `full` for v0.1.
 - `run_dub.py`: stdlib only. Deletes old status files, spawns
-  `dub_engine.py` via subprocess (same interpreter), tees combined
+  `dub_engine.py` via subprocess (same interpreter, except that a pythonw.exe
+  launcher spawns the worker as python.exe — see the no-console note below),
+  tees combined
   stdout/stderr to `status/engine_log.txt` (line-buffered, utf-8), writes
   `status/engine_pid.txt` (its OWN pid pre-fork is useless — write the CHILD
   pid), on child exit writes `status/engine_done.txt` with exit code.
@@ -731,6 +1185,24 @@ Adapt proven patterns from `/Users/ilp/Documents/Claude code/fast syncs/auto_syn
   fast-syncs-style candidates (`probe_python` pattern).
 - Launch non-blocking: Windows `reaper.ExecProcess(cmd, -2)`; macOS
   `os.execute(cmd .. ' >/dev/null 2>&1 &')` — run_dub.py owns log/pid/done.
+- No console windows on Windows. `ExecProcess(cmd, -2)` detaches the child but
+  does NOT suppress its console, and a console on top of REAPER shows only
+  what the panel's own log pane already shows. So:
+  * the engine is launched with **pythonw.exe** — the same interpreter built
+    without a console (`V5.pythonw` swaps `python.exe` → `pythonw.exe` when it
+    exists beside it). `run_dub.py` still spawns the WORKER as `python.exe`
+    (`_worker_python()`), which stays no-window via `CREATE_NO_WINDOW`;
+  * `cmd.exe`/`curl.exe`/`powershell` helpers (update check, connection
+    probes, preview playback) go through `V5.win_hidden`, which writes the
+    command to a scratch `.bat` and has pythonw.exe run `engine/hidden_run.py`
+    on it with `CREATE_NO_WINDOW`. **A batch file eats a lone `%`** — the
+    generated .bat doubles them, or curl's `-w "%{http_code}"` would arrive as
+    `"{http_code}"` and the probe would never report a status.
+  Both routes fall back to the old visible-window command when pythonw.exe or
+  hidden_run.py is missing, so a partial install still works.
+- Anything the user needs to see belongs in the panel, never in a console:
+  the engine's stdout+stderr is teed to `engine_log.txt` and rendered in the
+  log pane; helper output is read back from files by the pollers.
 - Poll in `reaper.defer` loop: tail `engine_log.txt` (read from last size),
   show stage from `[Sxx]` tags; when `engine_done.txt` appears → read
   `status/engine_done.json` → success/failure phase.

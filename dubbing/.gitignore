@@ -3,6 +3,7 @@ config/
 dub_panel_settings.json
 reaper/voice_bookmarks.json
 reaper/voice_cache.json
+reaper/tts_history.json
 engine/engine_settings.json
 
 # Local data (translation memory database).

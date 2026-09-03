@@ -69,6 +69,27 @@ import traceback
 ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATUS_DIR = os.path.join(ENGINE_DIR, "status")
 
+
+def _worker_python():
+    """The interpreter to run dub_engine.py with.
+
+    The panel starts this launcher with pythonw.exe so REAPER cannot give it a
+    console window. pythonw.exe would work for the worker too (it is spawned
+    with CREATE_NO_WINDOW either way), but the worker is a plain console
+    program with a piped stdout, so hand it python.exe and keep its
+    environment exactly as it has always been.
+    """
+    exe = sys.executable
+    if os.name == "nt" and exe:
+        head, tail = os.path.split(exe)
+        low = tail.lower()
+        if low.endswith("w.exe"):
+            cand = os.path.join(head, tail[:-len("w.exe")] + ".exe")
+            if os.path.exists(cand):
+                return cand
+    return exe
+
+
 # The 12 target languages supported by the pipeline (display names), plus
 # any the user added in the panel (v0.7). This launcher validates --language
 # before spawning the worker, so the two lists must agree — dub_engine.py
@@ -147,6 +168,7 @@ try:
                 LANGUAGES.append(_n)
 except Exception:
     pass
+LANGUAGES.sort()          # --language choices read alphabetically in --help
 
 
 def main() -> int:
@@ -335,7 +357,7 @@ def main() -> int:
             log_file.flush()
             return 1
 
-        cmd = [sys.executable, "-u", engine_script,
+        cmd = [_worker_python(), "-u", engine_script,
                "--el-model", args.el_model]
         if args.language:
             cmd += ["--language", args.language]
@@ -413,16 +435,20 @@ def main() -> int:
 
         # Tee: every worker line goes to the log file (flushed per line so
         # the Lua poller sees it live) and, best-effort, to our own stdout.
-        # stdout may be an invalid handle when REAPER starts us detached, so
-        # the echo must never be allowed to crash the tee loop.
+        # stdout may be missing entirely (sys.stdout is None under pythonw.exe,
+        # which the panel uses so no console window opens) or an invalid handle
+        # when REAPER starts us detached, so the echo must never be allowed to
+        # crash the tee loop.
+        echo = sys.stdout
         for line in proc.stdout:
             log_file.write(line)
             log_file.flush()
-            try:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-            except Exception:
-                pass
+            if echo is not None:
+                try:
+                    echo.write(line)
+                    echo.flush()
+                except Exception:
+                    echo = None      # broken once, broken for the whole run
 
         proc.wait()
         exit_code = proc.returncode

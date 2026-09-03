@@ -19,4 +19,10 @@ Modules:
     tm         — translation-memory port (SQLite, data/ dir inside this repo)
     match      — v0.7 auto-sync-style Gemini section matcher + slot placer
                  (script sentences ↔ English cues, synced/unsync statuses)
+    pausechunk — v0.13 pause-aware chunking: the SOURCE audio's silences are
+                 the chunk grid, plus the free dry-run fit analysis (no API
+                 calls) behind --steps plan
+    preview_html — v0.13 self-contained HTML timeline for a sync plan (the
+                 panel cannot render Indic text, so the preview lives in a
+                 browser)
 """

@@ -1,0 +1,1675 @@
+<title>Dub Panel Rebuild</title>
+<meta charset="utf-8">
+<style>
+/* ─────────────────────────────────────────────────────────────
+   PAGE TOKENS — light is the base, dark redefines tokens only.
+   Neutral carries a slight cool/blue bias so it reads as chosen
+   next to the panel's own graphite.
+   ───────────────────────────────────────────────────────────── */
+:root{
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+        Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono",
+          Consolas, "Liberation Mono", monospace;
+
+  --paper:      #F2F4F6;
+  --card:       #FFFFFF;
+  --card-2:     #E9ECEF;
+  --ink:        #16191D;
+  --ink-2:      #4B535C;
+  --ink-3:      #6E7883;
+  --rule:       #D7DCE1;
+  --rule-soft:  #E5E9ED;
+  --accent:     #2C5C8F;
+  --accent-ink: #1E4670;
+  --bad:        #B3402F;
+  --mid:        #8A5A12;
+  --good:       #1E6B3E;
+  --bad-bg:     #FBEDEA;
+  --mid-bg:     #FBF3E2;
+  --good-bg:    #E9F4EC;
+  --shadow:     0 1px 2px rgba(20,25,32,.06), 0 8px 24px -12px rgba(20,25,32,.18);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:      #101316;
+    --card:       #171B1F;
+    --card-2:     #1E2328;
+    --ink:        #E7EBEF;
+    --ink-2:      #A8B2BC;
+    --ink-3:      #7C8792;
+    --rule:       #2A3037;
+    --rule-soft:  #21262B;
+    --accent:     #7FAEDC;
+    --accent-ink: #A6C8EC;
+    --bad:        #F08C7A;
+    --mid:        #E5B454;
+    --good:       #79D89C;
+    --bad-bg:     #2B1A17;
+    --mid-bg:     #2B2413;
+    --good-bg:    #17281D;
+    --shadow:     0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#101316; --card:#171B1F; --card-2:#1E2328;
+  --ink:#E7EBEF; --ink-2:#A8B2BC; --ink-3:#7C8792;
+  --rule:#2A3037; --rule-soft:#21262B;
+  --accent:#7FAEDC; --accent-ink:#A6C8EC;
+  --bad:#F08C7A; --mid:#E5B454; --good:#79D89C;
+  --bad-bg:#2B1A17; --mid-bg:#2B2413; --good-bg:#17281D;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.7);
+}
+
+*{ box-sizing:border-box; }
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--ui); font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{ max-width:1180px; margin:0 auto; padding:0 28px 96px; }
+
+/* ── Masthead ─────────────────────────────────────────── */
+.mast{ padding:56px 0 28px; border-bottom:1px solid var(--rule); }
+.eyebrow{
+  font-family:var(--mono); font-size:11px; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--ink-3); margin:0 0 14px;
+}
+h1{
+  font-size:clamp(30px,4.6vw,48px); line-height:1.04; letter-spacing:-.024em;
+  font-weight:750; margin:0 0 16px; text-wrap:balance; max-width:22ch;
+}
+.lede{ font-size:17px; color:var(--ink-2); margin:0; max-width:64ch; }
+.metarow{
+  display:flex; flex-wrap:wrap; gap:10px 26px; margin-top:26px;
+  font-family:var(--mono); font-size:11.5px; color:var(--ink-3);
+  letter-spacing:.04em;
+}
+.metarow b{ color:var(--ink); font-weight:600; }
+
+/* ── Section scaffolding ──────────────────────────────── */
+section{ padding-top:64px; }
+.sechead{ display:flex; align-items:baseline; gap:14px; margin:0 0 6px; }
+.sechead .n{
+  font-family:var(--mono); font-size:12px; color:var(--accent);
+  letter-spacing:.1em; padding-top:6px;
+}
+h2{
+  font-size:clamp(22px,2.6vw,30px); letter-spacing:-.018em; font-weight:700;
+  margin:0; text-wrap:balance;
+}
+.subhead{ color:var(--ink-2); margin:8px 0 28px; max-width:66ch; font-size:15.5px; }
+h3{ font-size:19px; letter-spacing:-.01em; margin:36px 0 8px; font-weight:680; }
+
+/* ── Status band ──────────────────────────────────────── */
+.shipped{
+  margin-top:26px; display:flex; flex-wrap:wrap; gap:14px 22px; align-items:center;
+  background:var(--good-bg); border:1px solid color-mix(in srgb, var(--good) 30%, transparent);
+  border-radius:10px; padding:15px 18px;
+}
+.shipped .badge{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase;
+  font-weight:700; color:var(--good); border:1px solid color-mix(in srgb, var(--good) 45%, transparent);
+  border-radius:20px; padding:3px 10px; white-space:nowrap;
+}
+.shipped p{ margin:0; font-size:14.5px; color:var(--ink-2); flex:1 1 30ch; min-width:0; }
+.shipped p b{ color:var(--ink); font-weight:640; }
+.shipped .nums{ display:flex; gap:22px; font-family:var(--mono); font-size:11.5px; color:var(--ink-3); }
+.shipped .nums b{ display:block; font-size:19px; color:var(--ink); letter-spacing:-.02em; }
+.fixed{
+  font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+  font-weight:700; color:var(--good); background:var(--good-bg);
+  border:1px solid color-mix(in srgb, var(--good) 35%, transparent);
+  border-radius:4px; padding:2px 7px; white-space:nowrap;
+}
+.find.done::before{ background:var(--good); }
+.find.done .ftitle{ text-decoration:none; }
+.what{ margin-top:22px; }
+.what dl{ margin:0; display:grid; gap:0; }
+.what dt{
+  font-family:var(--mono); font-size:12.5px; color:var(--accent-ink); font-weight:600;
+  padding:13px 0 3px; border-top:1px solid var(--rule-soft);
+}
+.what dl > dt:first-child{ border-top:0; padding-top:0; }
+.what dd{ margin:0 0 12px; font-size:14.5px; color:var(--ink-2); line-height:1.6; max-width:74ch; }
+
+/* ── Findings ─────────────────────────────────────────── */
+.finds{ display:flex; flex-direction:column; gap:10px; }
+.find{
+  background:var(--card); border:1px solid var(--rule); border-radius:9px;
+  padding:16px 18px 16px 20px; position:relative; overflow:hidden;
+  box-shadow:var(--shadow);
+}
+.find::before{
+  content:""; position:absolute; inset:0 auto 0 0; width:4px;
+  background:var(--sev, var(--rule));
+}
+.find.sev-hi{  --sev:var(--bad); }
+.find.sev-md{  --sev:var(--mid); }
+.find.sev-lo{  --sev:var(--ink-3); }
+.find-top{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.fid{
+  font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:.06em;
+  padding:3px 7px; border-radius:4px; background:var(--card-2); color:var(--ink-2);
+}
+.find.sev-hi .fid{ background:var(--bad-bg); color:var(--bad); }
+.find.sev-md .fid{ background:var(--mid-bg); color:var(--mid); }
+.ftitle{ font-weight:640; font-size:15.5px; letter-spacing:-.005em; }
+.floc{
+  font-family:var(--mono); font-size:11.5px; color:var(--ink-3);
+  margin-left:auto; white-space:nowrap;
+}
+.find p{ margin:8px 0 0; color:var(--ink-2); font-size:14.5px; line-height:1.62; }
+.find p code, .inline{
+  font-family:var(--mono); font-size:12.6px; background:var(--card-2);
+  padding:1px 5px; border-radius:3px; color:var(--ink);
+}
+.tag{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--ink-3);
+  border:1px solid var(--rule); border-radius:20px; padding:2px 9px;
+}
+
+/* ── Mockup framing ───────────────────────────────────── */
+.mock{ margin-top:34px; }
+.mock-head{
+  display:flex; flex-wrap:wrap; align-items:flex-end;
+  gap:8px 18px; padding-bottom:14px; border-bottom:2px solid var(--ink);
+}
+.mock-name{ font-size:clamp(21px,2.4vw,27px); font-weight:730; letter-spacing:-.02em; margin:0; }
+.mock-kind{
+  font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--ink-3); margin-left:auto; padding-bottom:5px;
+}
+.thesis{ margin:16px 0 22px; font-size:16px; color:var(--ink-2); max-width:70ch; }
+.thesis strong{ color:var(--ink); font-weight:640; }
+.stage{
+  overflow-x:auto; padding:22px; border-radius:12px;
+  background:
+    linear-gradient(0deg, rgba(44,92,143,.05), rgba(44,92,143,.05)),
+    repeating-linear-gradient(45deg, transparent 0 7px, var(--rule-soft) 7px 8px);
+  border:1px solid var(--rule);
+}
+.stage-note{
+  font-family:var(--mono); font-size:11.5px; color:var(--ink-3);
+  margin:10px 2px 0; letter-spacing:.02em;
+}
+.fixes{ margin-top:26px; display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(270px,1fr)); }
+.fix{
+  border:1px solid var(--rule); border-left:3px solid var(--good);
+  background:var(--card); border-radius:7px; padding:13px 15px;
+}
+.fix h4{ margin:0 0 5px; font-size:14px; font-weight:660; letter-spacing:-.005em; }
+.fix p{ margin:0; font-size:13.5px; color:var(--ink-2); line-height:1.55; }
+.fix .refs{
+  display:block; margin-top:7px; font-family:var(--mono); font-size:10.5px;
+  color:var(--ink-3); letter-spacing:.05em;
+}
+
+/* ── Comparison table ─────────────────────────────────── */
+.tblwrap{ overflow-x:auto; border:1px solid var(--rule); border-radius:10px; background:var(--card); }
+table{ border-collapse:collapse; width:100%; min-width:660px; font-size:14px; }
+th,td{ text-align:left; padding:12px 16px; border-bottom:1px solid var(--rule-soft); vertical-align:top; }
+thead th{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.11em; text-transform:uppercase;
+  color:var(--ink-3); background:var(--card-2); border-bottom:1px solid var(--rule);
+  position:sticky; top:0;
+}
+tbody tr:last-child td{ border-bottom:0; }
+td.pick{ color:var(--ink-2); }
+td b{ font-weight:640; }
+.dot{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:7px; vertical-align:1px; }
+.dot.g{ background:var(--good); } .dot.m{ background:var(--mid); } .dot.b{ background:var(--bad); }
+
+/* ═══════════════════════════════════════════════════════
+   PANEL MOCKUP KIT
+   Committed dark on purpose: this depicts a REAPER panel,
+   which is dark in every theme. Tokens are the real V5.COL
+   values from Dub_Pipeline_Panel.lua, defined unconditionally.
+   ═══════════════════════════════════════════════════════ */
+.pnl{
+  --bg:#16181B; --panel:#1A1D21; --sunk:#101214; --sunk2:#161B24;
+  --line:#282C31; --line2:#202429; --title:#101214;
+  --txt:#C8CDD3; --txt2:#99A3B0; --dim:#8899AA; --dimr:#66707E; --faint:#5F6873;
+  --hintc:#667788;
+  --acc:#3A5A8C; --acc2:#4A6A9C; --go:#2A9945; --go2:#44CC55; --job:#2A6699;
+  --ok:#55DD77; --step:#7FD3A0; --warn:#FFCC55; --warnt:#FFAA55; --err:#FF5555; --info:#55AAFF;
+  --chipok:#173021; --chipwarn:#3A2E12; --chipinfo:#1C2733; --chipoff:#22262B;
+  --btn:#22262B; --btn2:#2A2F35; --seg:#2A2F38;
+
+  width:1040px; flex:0 0 1040px; height:660px;
+  font-family:var(--ui); font-size:13px; line-height:1.42;
+  color:var(--txt); background:var(--bg);
+  border:1px solid var(--line); border-radius:7px; overflow:hidden;
+  box-shadow:0 18px 48px -20px rgba(0,0,0,.65);
+  display:grid; grid-template-rows:32px 1fr 26px;
+  user-select:none;
+}
+.pnl *{ box-sizing:border-box; }
+
+/* title bar */
+.tb{
+  background:var(--title); border-bottom:1px solid var(--line);
+  display:flex; align-items:center; padding-left:12px; gap:12px;
+}
+.tb .tt{ color:#8A93A0; font-size:12.5px; }
+.tb .tv{ color:#5F6873; font-family:var(--mono); font-size:11px; }
+.tb .caps{ margin-left:auto; display:flex; }
+.tb .cap{
+  width:46px; height:31px; display:grid; place-items:center;
+  color:#8A93A0; font-size:11px;
+}
+.tb .cap:hover{ background:#22262B; }
+.tb .cap.x:hover{ background:#8B2A2A; color:#fff; }
+.cmdk{
+  margin-left:auto; display:flex; align-items:center; gap:8px;
+  background:#1B1F24; border:1px solid var(--line); border-radius:5px;
+  padding:3px 9px; color:var(--dimr); font-size:11.5px;
+}
+.cmdk kbd{
+  font-family:var(--mono); font-size:10px; background:#25292F;
+  border:1px solid #31363D; border-radius:3px; padding:1px 4px; color:var(--txt2);
+}
+
+/* status ribbon */
+.sb{
+  border-top:1px solid var(--line); background:var(--title);
+  display:flex; align-items:center; gap:16px; padding:0 12px;
+  font-size:11.5px; color:var(--dimr);
+}
+.sb .ok{ color:var(--ok); }
+.sb .warn{ color:var(--warn); }
+.sb .push{ margin-left:auto; }
+.sb .mono{ font-family:var(--mono); font-size:10.5px; }
+
+/* rail */
+.rail{
+  background:var(--panel); border-right:1px solid var(--line);
+  padding:10px 8px; display:flex; flex-direction:column; gap:2px;
+}
+.rail .brand{
+  font-family:var(--mono); font-size:10px; letter-spacing:.14em;
+  color:var(--dimr); padding:2px 6px 0;
+}
+.rail .bver{ font-family:var(--mono); font-size:10px; color:#4C545D; padding:0 6px 8px; }
+.nav{
+  display:flex; align-items:center; gap:9px; height:27px; padding:0 8px;
+  border-radius:4px; color:var(--txt2); font-size:12.5px;
+}
+.nav .gl{ width:16px; text-align:center; opacity:.85; font-size:11.5px; }
+.nav:hover{ background:#2A3038; }
+.nav.on{ background:var(--acc); color:#fff; }
+.nav .nag{ margin-left:auto; color:var(--warn); font-size:12px; line-height:1; }
+.rail .sep{ height:1px; background:var(--line); margin:8px 4px; }
+.rail .grow{ flex:1; }
+.railmini{
+  background:var(--panel); border-right:1px solid var(--line);
+  padding:8px 0; display:flex; flex-direction:column; align-items:center; gap:3px;
+}
+.railmini .mi{
+  width:38px; height:34px; border-radius:5px; display:grid; place-items:center;
+  color:var(--txt2); font-size:14px;
+}
+.railmini .mi.on{ background:var(--acc); color:#fff; }
+.railmini .mi:hover{ background:#2A3038; }
+.railmini .msep{ width:22px; height:1px; background:var(--line); margin:6px 0; }
+
+/* generic panel bits */
+.cap-lbl{
+  font-family:var(--mono); font-size:9.5px; letter-spacing:.15em;
+  text-transform:uppercase; color:var(--dimr); margin-bottom:7px;
+}
+.fld{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+.fld > .lb{
+  font-size:11.5px; color:var(--txt2); display:flex; align-items:center; gap:5px;
+}
+.fld > .lb .q{ color:var(--hintc); font-size:10.5px; }
+.inp{
+  background:var(--sunk); border:1px solid var(--line); border-radius:4px;
+  height:26px; padding:0 9px; display:flex; align-items:center;
+  color:var(--txt); font-size:12.5px; min-width:0;
+}
+.inp.ph{ color:#59616B; }
+.inp .val{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.inp .car{ width:1px; height:14px; background:#7FAEDC; margin-left:1px; }
+.row{ display:flex; gap:6px; align-items:flex-end; min-width:0; }
+.row .inp{ flex:1; min-width:0; }
+.iconbtn{
+  width:28px; height:26px; flex:0 0 28px; border-radius:4px; background:var(--btn);
+  border:1px solid var(--line); display:grid; place-items:center; color:var(--txt2); font-size:11px; line-height:1;
+}
+.btn{
+  height:26px; border-radius:4px; background:var(--btn); border:1px solid var(--line);
+  color:var(--txt); font-size:12px; padding:0 12px; display:inline-flex;
+  align-items:center; justify-content:center; gap:6px; white-space:nowrap;
+}
+.btn.sm{ height:22px; font-size:11.5px; padding:0 9px; }
+.btn.go{ background:var(--go); border-color:#37A852; color:#fff; font-weight:620; }
+.btn.job{ background:var(--job); border-color:#357CB4; color:#fff; }
+.btn.danger{ background:#883333; border-color:#A04040; color:#fff; }
+.btn.wide{ width:100%; }
+.btn.tall{ height:34px; font-size:13.5px; }
+.seg{ display:flex; gap:3px; }
+.seg .s{
+  height:26px; padding:0 11px; border-radius:4px; background:var(--seg);
+  color:var(--txt2); font-size:12px; display:grid; place-items:center; white-space:nowrap;
+}
+.seg .s.on{ background:var(--acc); color:#fff; }
+.chip{
+  height:20px; border-radius:4px; background:var(--btn); border:1px solid var(--line);
+  color:var(--txt2); font-size:11px; padding:0 8px; display:inline-flex; align-items:center; gap:5px;
+}
+.pill{
+  border-radius:9px; font-size:10.5px; padding:2px 8px; display:inline-flex;
+  align-items:center; white-space:nowrap; line-height:1.3;
+}
+.pill.ok{ background:var(--chipok); color:var(--step); }
+.pill.warn{ background:var(--chipwarn); color:var(--warn); }
+.pill.info{ background:var(--chipinfo); color:var(--info); }
+.pill.off{ background:var(--chipoff); color:var(--dim); }
+.hr{ height:1px; background:var(--line2); }
+.ta{
+  background:var(--sunk2); border:1px solid var(--line); border-radius:4px;
+  padding:9px 11px; color:var(--txt); font-size:13px; line-height:1.7; overflow:hidden;
+  min-height:0;
+}
+.ta .ln{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ta .dimln{ color:var(--faint); }
+.mini{ font-size:11px; color:var(--dimr); }
+.mini.w{ color:var(--warnt); }
+.card{ background:var(--panel); border:1px solid var(--line); border-radius:5px; }
+
+/* THE LAYOUT CONTRACT: a step row is a grid, never absolute offsets */
+.steps{ display:flex; flex-direction:column; }
+.step{
+  display:grid; grid-template-columns:16px minmax(0,1fr) minmax(0,auto);
+  align-items:center; gap:8px; height:22px;
+}
+.step .node{ display:grid; place-items:center; }
+.step .node i{
+  width:9px; height:9px; border-radius:50%; display:block;
+  border:1.3px solid var(--line); background:transparent;
+}
+.step.done .node i{ background:var(--step); border-color:var(--step); }
+.step.cur  .node i{ background:var(--acc2); border-color:var(--acc2); box-shadow:0 0 0 4px rgba(74,106,156,.22); }
+.step.fail .node i{ background:var(--err); border-color:var(--err); }
+.step .lb{ font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.step.done .lb{ color:var(--txt2); }
+.step.cur  .lb{ color:#fff; font-weight:600; }
+.step.skip .lb{ color:var(--faint); text-decoration:line-through; text-decoration-color:#3B4249; }
+.step .vl{
+  font-size:11px; color:var(--dimr); text-align:right;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;
+}
+.step.cur .vl{ color:var(--warn); }
+.step.skip .vl{ color:#4C545D; }
+.steps .leg{ margin-left:7px; width:1.5px; height:7px; background:var(--line); }
+.steps .leg.past{ background:var(--step); }
+
+/* readiness rows — grid, so the label can never be walked over */
+.rd{ display:grid; grid-template-columns:20px minmax(0,1fr); gap:8px; align-items:center; height:21px; }
+.rd .m{ font-family:var(--mono); font-size:10.5px; }
+.rd.y .m{ color:var(--ok); } .rd.n .m{ color:var(--warnt); }
+.rd .t{ font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rd.n .t{ color:var(--warnt); }
+
+/* progress */
+.bar{ height:6px; border-radius:3px; background:#22262B; overflow:hidden; }
+.bar > i{ display:block; height:100%; background:linear-gradient(90deg,#2E6FB8,#4A93E0); }
+.bar.thick{ height:16px; border-radius:4px; position:relative; }
+.bar.thick > i{ background:linear-gradient(90deg,#2A7BC8,#55AAFF); }
+.bar.thick > b{
+  position:absolute; inset:0; display:grid; place-items:center;
+  font-family:var(--mono); font-size:10.5px; color:#DDE6EE; font-weight:400;
+}
+.meter{ display:flex; height:8px; border-radius:4px; overflow:hidden; background:#22262B; }
+.meter i{ display:block; height:100%; }
+
+/* MOCK 1 */
+.m1{ display:grid; grid-template-columns:148px minmax(0,1fr) 302px; min-height:0; }
+.m1 .form{ padding:14px 16px; display:flex; flex-direction:column; gap:12px; min-width:0; min-height:0; }
+.m1 .g2{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px 16px; }
+.m1 .runcol{
+  border-left:1px solid var(--line); background:var(--panel);
+  padding:14px 14px 12px; display:flex; flex-direction:column; gap:11px; min-height:0;
+}
+.m1 .runcol .grow{ flex:1; min-height:0; }
+.hist{ display:flex; flex-direction:column; gap:3px; }
+/* the history row that used to collide, now a grid */
+.hrow{
+  display:grid; align-items:center; gap:10px; height:24px;
+  grid-template-columns: 14px 92px minmax(0,1fr) 72px auto 104px 24px;
+}
+.hrow .d{ font-size:9px; line-height:1; }
+.hrow .when{ font-family:var(--mono); font-size:11px; color:var(--txt2); }
+.hrow .file{ font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hrow .lang{ font-size:11.5px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hrow .kb{ width:24px; height:20px; border-radius:4px; background:var(--btn); display:grid; place-items:center; color:var(--txt2); font-size:11px; }
+
+/* MOCK 2 */
+.m2{ display:grid; grid-template-rows:auto minmax(0,1fr); min-height:0; }
+.pipe{
+  border-bottom:1px solid var(--line); background:var(--panel);
+  padding:11px 14px 12px; display:flex; flex-direction:column; gap:9px;
+}
+.pipe-top{ display:flex; align-items:center; gap:12px; }
+.pipe-nodes{ display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; }
+.pn{
+  background:#1E2227; border:1px solid var(--line); border-radius:5px;
+  padding:7px 9px 8px; display:flex; flex-direction:column; gap:5px; min-width:0;
+  position:relative; overflow:hidden;
+}
+.pn::before{ content:""; position:absolute; inset:0 auto 0 0; width:2px; background:var(--line); }
+.pn .h{ display:flex; align-items:center; gap:6px; min-width:0; }
+.pn .h .nm{ font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pn .h .ix{ font-family:var(--mono); font-size:9.5px; color:#4C545D; }
+.pn .v{ font-size:10.5px; color:var(--dimr); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pn.done::before{ background:var(--step); } .pn.done .nm{ color:var(--txt2); }
+.pn.cur::before{ background:var(--info); } .pn.cur{ background:#1B222B; }
+.pn.cur .nm{ color:#fff; font-weight:620; } .pn.cur .v{ color:var(--warn); }
+.pn.skip::before{ background:#343A41; } .pn.skip .nm{ color:var(--faint); text-decoration:line-through; text-decoration-color:#3B4249; }
+.pn.todo .nm{ color:var(--txt); }
+.m2 .body{ display:grid; grid-template-columns:56px minmax(0,1fr) 322px; min-height:0; }
+.m2 .editor{ padding:13px 15px; display:flex; flex-direction:column; gap:9px; min-height:0; min-width:0; }
+.m2 .etop{ display:flex; align-items:center; gap:8px; }
+.m2 .etop .push{ margin-left:auto; }
+.m2 .insp{
+  border-left:1px solid var(--line); background:var(--panel);
+  display:flex; flex-direction:column; min-height:0;
+}
+.m2 .insp .sect{ border-bottom:1px solid var(--line2); padding:10px 14px; display:flex; flex-direction:column; gap:8px; }
+.m2 .insp .sect > .cap-lbl{ margin:0; display:flex; align-items:center; gap:8px; }
+.m2 .insp .sect > .cap-lbl .push{ margin-left:auto; letter-spacing:0; text-transform:none; font-family:var(--ui); font-size:10.5px; color:var(--faint); }
+.m2 .insp .foot{ margin-top:auto; padding:11px 14px; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:7px; }
+.kv{ display:grid; grid-template-columns:minmax(0,76px) minmax(0,1fr); gap:6px 10px; align-items:baseline; }
+.kv dt{ font-size:11px; color:var(--dimr); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kv dd{ margin:0; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kv dd.mono{ font-family:var(--mono); font-size:11px; }
+
+/* MOCK 3 */
+.m3{ display:grid; grid-template-columns:56px minmax(0,1fr) 306px; min-height:0; }
+.m3 .canvas{ padding:12px 14px; display:flex; flex-direction:column; gap:10px; min-height:0; min-width:0; }
+.m3 .ctop{ display:flex; align-items:center; gap:10px; }
+.m3 .ctop .push{ margin-left:auto; }
+.strip{ background:#191B1E; border:1px solid var(--line); border-radius:5px; padding:7px 8px 8px; }
+.ruler{ position:relative; height:14px; }
+.ruler .tk{ position:absolute; top:0; width:1px; height:14px; background:#2E3338; }
+.ruler .tl{
+  position:absolute; top:0; font-family:var(--mono); font-size:9px; color:#6F7A83;
+  transform:translateX(3px); white-space:nowrap;
+}
+.lane{ position:relative; height:18px; border-radius:2px; background:#1F2226; margin-top:4px; }
+.lane .b{ position:absolute; top:3px; height:12px; border-radius:2px; }
+.lane .b.src{ background:#5B6470; }
+.lane .b.fits{ background:#55CC77; } .lane .b.tight{ background:#E8A13A; }
+.lane .b.over{ background:#E5584A; } .lane .b.short{ background:#6FA8DC; }
+.lane .b.sel{ outline:1.5px solid #CFD7DE; outline-offset:1px; }
+.lane .pz{ position:absolute; top:7px; height:4px; background:repeating-linear-gradient(90deg,#3A4046 0 3px,transparent 3px 6px); }
+.laneleg{ display:flex; gap:14px; margin-top:6px; font-size:10px; color:#6F7A83; align-items:center; }
+.laneleg i{ width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:5px; vertical-align:-1px; }
+.ctbl{ flex:1; min-height:0; border:1px solid var(--line); border-radius:5px; overflow:hidden; background:var(--panel); display:flex; flex-direction:column; }
+.ctbl .hd, .ctbl .r{
+  display:grid; align-items:center; gap:10px; padding:0 11px;
+  grid-template-columns: 30px 62px minmax(0,1fr) 56px 56px 52px 84px;
+}
+.ctbl .hd{
+  height:24px; background:#1E2227; border-bottom:1px solid var(--line);
+  font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--dimr);
+}
+.ctbl .r{ height:26px; border-bottom:1px solid var(--line2); font-size:12px; }
+.ctbl .r.on{ background:#1D2530; }
+.ctbl .r .mono{ font-family:var(--mono); font-size:11px; color:var(--txt2); }
+.ctbl .r .tx{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--txt2); }
+.ctbl .r .num{ font-family:var(--mono); font-size:11px; text-align:right; color:var(--txt2); }
+.ctbl .r .vd{ text-align:right; }
+.m3 .insp{
+  border-left:1px solid var(--line); background:var(--panel);
+  display:flex; flex-direction:column; min-height:0;
+}
+.itabs{ display:flex; border-bottom:1px solid var(--line); }
+.itabs .t{ flex:1; height:27px; display:grid; place-items:center; font-size:11.5px; color:var(--txt2); border-right:1px solid var(--line2); }
+.itabs .t.on{ color:#fff; background:#1E2530; box-shadow:inset 0 -2px 0 var(--acc2); }
+.ibody{ padding:13px 14px; display:flex; flex-direction:column; gap:12px; min-height:0; flex:1; }
+.ibody .grow{ flex:1; min-height:0; }
+.m3 .transport{
+  border-left:1px solid var(--line); border-top:1px solid var(--line);
+  padding:11px 14px; display:flex; flex-direction:column; gap:8px;
+}
+.wave{ display:flex; align-items:flex-end; gap:2px; height:26px; }
+.wave i{ flex:1; background:#3A4A5C; border-radius:1px; }
+.wave i.hot{ background:#5B7EA5; }
+
+/* accessibility + motion */
+a{ color:var(--accent); text-decoration-thickness:1px; text-underline-offset:2px; }
+a:focus-visible, .nav:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+@media (prefers-reduced-motion: reduce){ *{ animation:none !important; transition:none !important; } }
+@media (max-width:760px){
+  .wrap{ padding:0 18px 72px; }
+  .stage{ padding:14px; }
+}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Dub Pipeline Panel · ReaImGui · layout review</p>
+  <h1>Three ways to rebuild the panel so nothing can overlap</h1>
+  <p class="lede">
+    The overlaps are not styling accidents — nine of them come from the same
+    root cause: rows placed with <span class="inline">SameLine(ctx, x)</span> at
+    hand-counted pixel offsets, and a label column measured one frame late that
+    keeps an 84&nbsp;px floor whenever ReaImGui answers <span class="inline">0</span>
+    for a glyph it has not rasterized yet. Each mockup below removes that
+    mechanism instead of nudging the numbers.
+  </p>
+  <div class="metarow">
+    <span><b>10,946</b> lines reviewed</span>
+    <span><b>9</b> layout defects</span>
+    <span><b>24</b> absolute <span style="font-family:var(--mono)">SameLine</span> offsets</span>
+    <span>panel <b>v0.26</b></span>
+  </div>
+
+  <div class="shipped">
+    <span class="badge">All built &amp; verified</span>
+    <p>The nine defects are fixed, and <b>all three screens below are
+    implemented</b> — Bridge in <span class="inline">ui_source_inputs</span> and
+    the run column, Console as <span class="inline">V5.ui_console</span>, Studio
+    as <span class="inline">V5.ui_phase_plan</span>. The Sync tab's own copies of
+    three defects are fixed in <b>auto_sync_pipeline.lua</b> too.</p>
+    <div class="nums">
+      <span><b>4,082</b>draws checked</span>
+      <span><b>0</b>collisions</span>
+      <span><b>11 × 3</b>widths × regimes</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════ AUDIT ═══════════ -->
+<section id="audit">
+  <div class="sechead"><span class="n">01</span><h2>What was overlapping, and what fixed it</h2></div>
+  <p class="subhead">
+    Ordered by how visible the collision was. Every one is a hard-coded position
+    or an unguarded measurement, and every one is now fixed in the panel — the
+    section after this is the rule set that replaced them.
+  </p>
+
+  <div class="finds">
+
+    <article class="find sev-hi done">
+      <div class="find-top">
+        <span class="fid">F1</span><span class="fixed">fixed</span>
+        <span class="ftitle">Fit-preview ruler labels print on top of each other</span>
+        <span class="floc">Dub_Pipeline_Panel.lua:8078, 8121</span>
+      </div>
+      <p>
+        <code>V5.strip_step</code> chooses a tick every 1–600&nbsp;s so that at
+        most 12 ticks fit — by <em>time</em>, with no reference to pixel width.
+        Each <code>m:ss</code> label is ~30&nbsp;px, so 12 ticks need ~360&nbsp;px,
+        but the only guard is <code>if w &lt; 80 then return end</code>. Between
+        80 and ~380&nbsp;px of strip width the ruler is unreadable — labels
+        overprint their neighbours.
+      </p>
+    </article>
+
+    <article class="find sev-hi done">
+      <div class="find-top">
+        <span class="fid">F2</span><span class="fixed">fixed</span>
+        <span class="ftitle">Input boxes drawn on top of their own labels</span>
+        <span class="floc">Dub_Pipeline_Panel.lua:1662–1684</span>
+      </div>
+      <p>
+        <code>V5.label</code> ends with
+        <code>SameLine(ctx, cell_x + form_w)</code>, where <code>form_w</code>
+        was measured on the <em>previous</em> frame. ImGui's absolute
+        <code>SameLine</code> sets the cursor to that x whether it is ahead of
+        the label or behind it — so any frame where the label is wider than
+        <code>form_w</code>, the field is drawn straight through the label text.
+        That happens on the first frame of every pane, and permanently whenever
+        <code>ImGui_CalcTextSize</code> returns 0 (ReaImGui does this for glyphs
+        the atlas has not baked — i.e. every non-ASCII label), because the code
+        deliberately keeps the 84&nbsp;px floor in that case.
+      </p>
+    </article>
+
+    <article class="find sev-hi done">
+      <div class="find-top">
+        <span class="fid">F3</span><span class="fixed">fixed</span>
+        <span class="ftitle">History state chip overlaps the Import button</span>
+        <span class="floc">Dub_Pipeline_Panel.lua:5191–5193</span>
+      </div>
+      <p>
+        <code>V5.pill</code> is as wide as its text plus 14&nbsp;px, but the
+        button after it is placed at a fixed <code>x_act + 84</code>. The
+        <code>"your script"</code> chip measures ~85–92&nbsp;px at the panel's
+        14&nbsp;px face, so it runs under the blue Import button on every
+        pasted-script row.
+      </p>
+    </article>
+
+    <article class="find sev-md done">
+      <div class="find-top">
+        <span class="fid">F4</span><span class="fixed">fixed</span>
+        <span class="ftitle">History filename prints over the timestamp</span>
+        <span class="floc">Dub_Pipeline_Panel.lua:4996, 5164–5172</span>
+      </div>
+      <p>
+        The filename column is a fixed <code>x0 + 106</code>, leaving 90&nbsp;px
+        for the date. <code>V5.hist_when</code> normally shortens to
+        <code>"19 Aug 14:32"</code> (~84&nbsp;px — already marginal) but falls
+        back to the raw stamp <code>"2026-08-19 14:32:07"</code> (~130&nbsp;px)
+        for legacy or hand-edited <code>tts_history.json</code> entries. The
+        absolute <code>SameLine</code> then walks the cursor backwards and the
+        filename lands on the date.
+      </p>
+    </article>
+
+    <article class="find sev-md done">
+      <div class="find-top">
+        <span class="fid">F5</span><span class="fixed">fixed</span>
+        <span class="ftitle">A wide label pushes its field into the next grid column</span>
+        <span class="floc">Dub_Pipeline_Panel.lua:2061–2066</span>
+      </div>
+      <p>
+        <code>V5.cell_field</code> computes
+        <code>grid_w − form_w − reserve</code> and then clamps with
+        <code>math.max(60, …)</code>. The clamp protects the field and sacrifices
+        the boundary: with a measured label near <code>LABEL_W_MAX</code> (240)
+        in a <code>CELL_MIN</code> (300) cell and a 46&nbsp;px reserve, the field's
+        right edge lands 46&nbsp;px past the cell — through the 20&nbsp;px
+        <code>CELL_GAP</code> and into the neighbouring cell's label.
+      </p>
+    </article>
+
+    <article class="find sev-md done">
+      <div class="find-top">
+        <span class="fid">F6</span><span class="fixed">fixed</span>
+        <span class="ftitle">Script-box counter escapes the right edge</span>
+        <span class="floc">Dub_Pipeline_Panel.lua:4696–4702</span>
+      </div>
+      <p>
+        This is the one right-alignment in the panel that calls
+        <code>ImGui_CalcTextSize</code> raw instead of the zero-guarded
+        <code>V5.text_w</code>. The measured string contains
+        <code>·</code> (U+00B7); a 0 answer puts <code>stats_x</code> exactly on
+        the right edge, so <code>"3 paragraphs · 1,847 characters"</code> is
+        drawn off the pane and clipped by the border.
+      </p>
+    </article>
+
+    <article class="find sev-md done">
+      <div class="find-top">
+        <span class="fid">F7</span><span class="fixed">fixed</span>
+        <span class="ftitle">Review toolbar cannot reflow, so it clips</span>
+        <span class="floc">Dub_Pipeline_Panel.lua:7831–7960</span>
+      </div>
+      <p>
+        Five fixed-width buttons chained with <code>SameLine</code> —
+        130+130+130+125+115 ≈ 660&nbsp;px, and the action row below is 550&nbsp;px.
+        There is no wrap and no measured fallback, so a panel narrower than that
+        cuts <em>⟲ Reload file</em> and <em>Back to setup</em> in half rather
+        than moving them to a second line.
+      </p>
+    </article>
+
+    <article class="find sev-lo done">
+      <div class="find-top">
+        <span class="fid">F8</span><span class="fixed">fixed</span>
+        <span class="ftitle">Review boxes are three times too tall for Indic text</span>
+        <span class="floc">Dub_Pipeline_Panel.lua:7805–7809</span>
+      </div>
+      <p>
+        <code>_para_box_height</code> divides <code>#string</code> — a
+        <em>byte</em> count — by 90 to guess line count. Devanagari and Bengali
+        run three bytes per character, so every paragraph saturates the 10-line
+        cap and the review grid becomes a column of identical oversized boxes
+        with the text stranded at the top of each.
+      </p>
+    </article>
+
+    <article class="find sev-lo done">
+      <div class="find-top">
+        <span class="fid">F9</span><span class="fixed">fixed</span>
+        <span class="ftitle">Run-plan value column is a hand-counted 96&nbsp;px</span>
+        <span class="floc">Dub_Pipeline_Panel.lua:9713–9714, 9780</span>
+      </div>
+      <p>
+        <code>V5.PLAN_VALUE = 96</code> is the only thing keeping step labels off
+        their values. It survives today because <code>"Transcribe"</code> is
+        78&nbsp;px at <code>V5.UI_PX = 14</code>. Raise the UI size, translate a
+        label, or add a longer step name and the value column is overprinted —
+        the same class as F2 and F4, just not triggered yet.
+      </p>
+    </article>
+
+  </div>
+</section>
+
+<!-- ═══════════ THE CONTRACT ═══════════ -->
+<section id="contract">
+  <div class="sechead"><span class="n">02</span><h2>The layout contract, as shipped</h2></div>
+  <p class="subhead">
+    This is what went into the panel. It is short, and it is what makes F1–F9
+    unwritable rather than merely fixed — the three mockups below are drawn
+    against the same rules.
+  </p>
+  <div class="fixes">
+    <div class="fix">
+      <h4>No absolute <span style="font-family:var(--mono);font-size:12.5px">SameLine(ctx, x)</span></h4>
+      <p>Any row with more than one column becomes a <code>BeginTable</code> with
+      <code>WidthFixed</code> / <code>WidthStretch</code> columns. ImGui sizes
+      them; nothing can be placed behind something already drawn.</p>
+      <span class="refs">removes F1 F3 F4 F9</span>
+    </div>
+    <div class="fix">
+      <h4>Labels sit above fields, not beside them</h4>
+      <p>A label and its input never share a row, so a mis-measured label column
+      cannot exist. It also lets Devanagari and Bengali labels take the width
+      they need without stealing it from the field.</p>
+      <span class="refs">removes F2 F5</span>
+    </div>
+    <div class="fix">
+      <h4>Every measurement is guarded once</h4>
+      <p><code>V5.text_w</code> is the only text-measuring call site; it already
+      falls back to a per-character estimate when ReaImGui answers 0. Raw
+      <code>CalcTextSize</code> is banned outside it.</p>
+      <span class="refs">removes F6</span>
+    </div>
+    <div class="fix">
+      <h4>Density is derived from pixels, not from time</h4>
+      <p>Tick count is <code>floor(usable / (label_w + 12))</code>, then snapped
+      to the nearest nice step. A strip too narrow for two labels shows none and
+      keeps the bars.</p>
+      <span class="refs">removes F1</span>
+    </div>
+    <div class="fix">
+      <h4>Toolbars wrap; they never clip</h4>
+      <p>Button rows are measured and broken onto a second line, and secondary
+      actions collapse into one <code>⋯</code> menu below a threshold. Character
+      counts are computed on UTF-8 clusters, never bytes.</p>
+      <span class="refs">removes F7 F8</span>
+    </div>
+    <div class="fix">
+      <h4>Truncation is a visible decision</h4>
+      <p>Anything that can outgrow its column ends in a real ellipsis with the
+      full value on hover — filenames, model ids, voice names, chunk text.</p>
+      <span class="refs">removes F3 F4</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ MOCKUP 1 ═══════════ -->
+<section id="m1">
+  <div class="sechead"><span class="n">03</span><h2>Mockup one</h2></div>
+
+  <div class="mock">
+    <div class="mock-head">
+      <h3 class="mock-name" style="margin:0">Bridge</h3>
+      <span class="fixed" style="margin-left:auto">built</span><span class="mock-kind" style="margin-left:14px">ui_source_inputs · V5.fld · V5.cost_meter</span>
+    </div>
+    <p class="thesis">
+      The current architecture, taken seriously. Rail, form, run column — but the
+      form is a <strong>responsive field grid with labels above inputs</strong>,
+      so F2 and F5 have nowhere to occur, and every multi-column row (history,
+      the step plan, readiness) is a real table. The run column gains a
+      <strong>cost meter</strong> and a per-step value chip, so pressing Run is
+      never a guess about what it will spend.
+    </p>
+
+    <div class="stage">
+      <div class="pnl">
+        <div class="tb">
+          <span class="tt">Dub Pipeline</span><span class="tv">v0.25</span>
+          <div class="caps">
+            <div class="cap">—</div><div class="cap">▢</div><div class="cap x">✕</div>
+          </div>
+        </div>
+
+        <div class="m1">
+          <!-- rail -->
+          <nav class="rail">
+            <div class="brand">FAST SYNCS</div>
+            <div class="bver">v0.25.1</div>
+            <div class="nav on"><span class="gl">▶</span>Dub</div>
+            <div class="nav"><span class="gl">⇄</span>Sync</div>
+            <div class="nav"><span class="gl">✦</span>Tools</div>
+            <div class="nav"><span class="gl">≡</span>Log</div>
+            <div class="sep"></div>
+            <div class="nav"><span class="gl">⚙</span>Settings<span class="nag">•</span></div>
+            <div class="grow"></div>
+            <div class="cap-lbl" style="margin:0 0 4px 6px">this project</div>
+            <div class="mini" style="padding:0 6px 4px">Sadhguru_Aug19.rpp</div>
+          </nav>
+
+          <!-- form -->
+          <div class="form">
+            <div class="cap-lbl">Recent runs in this project</div>
+            <div class="hist">
+              <div class="hrow">
+                <span class="d" style="color:#FFCC55">●</span>
+                <span class="when">today 11:04</span>
+                <span class="file">Isha_Kriya_Intro_EN_master.wav</span>
+                <span class="lang">Hindi</span>
+                <span class="pill warn">paused</span>
+                <span class="btn sm job" style="width:104px">Resume</span>
+                <span class="kb">⋯</span>
+              </div>
+              <div class="hrow">
+                <span class="d" style="color:#7FD3A0">●</span>
+                <span class="when">yest. 18:22</span>
+                <span class="file">Darshan_2026_08_18_part2.wav</span>
+                <span class="lang">Malayalam</span>
+                <span class="pill info">your script</span>
+                <span class="btn sm job" style="width:104px">Import</span>
+                <span class="kb">⋯</span>
+              </div>
+              <div class="hrow">
+                <span class="d" style="color:#5F6873">●</span>
+                <span class="when">14 Aug 09:51</span>
+                <span class="file" style="color:#5F6873">Sathsang_evening_EN.wav</span>
+                <span class="lang" style="color:#5F6873">Bengali</span>
+                <span class="pill off">files gone</span>
+                <span class="btn sm" style="width:104px;color:#5A616A">Import</span>
+                <span class="kb">⋯</span>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+
+            <div class="fld">
+              <span class="lb">English source <span class="q">(?)</span></span>
+              <div class="row">
+                <div class="inp"><span class="val">D:\Projects\Isha\2026-08\Isha_Kriya_Intro_EN_master.wav</span></div>
+                <div class="iconbtn">🗀</div>
+              </div>
+            </div>
+
+            <div class="g2">
+              <div class="fld">
+                <span class="lb">Target language</span>
+                <div class="inp"><span class="val">Hindi</span><span style="margin-left:auto;color:#66707E">▾</span></div>
+              </div>
+              <div class="fld">
+                <span class="lb">Or lift it off a track</span>
+                <div class="row">
+                  <div class="inp ph"><span class="val">3: Guide VO (EN)</span><span style="margin-left:auto;color:#66707E">▾</span></div>
+                  <span class="btn" style="flex:0 0 auto">Use</span>
+                </div>
+              </div>
+              <div class="fld">
+                <span class="lb">Script</span>
+                <div class="seg"><span class="s">Translate with AI</span><span class="s on">I have a script</span></div>
+              </div>
+              <div class="fld">
+                <span class="lb">Review</span>
+                <div class="seg"><span class="s on">Pause to check</span><span class="s">Straight through</span></div>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+
+            <div class="fld" style="flex:1; min-height:0">
+              <span class="lb" style="align-items:baseline">
+                Your Hindi script
+                <span class="q">(?)</span>
+                <span style="margin-left:auto;font-family:var(--mono);font-size:10.5px;color:#8899AA">
+                  4 paragraphs · 1,847 characters · ~2:03 of speech
+                </span>
+              </span>
+              <div style="display:flex;gap:6px;margin-bottom:2px">
+                <span class="chip">Paste</span>
+                <span class="chip">Clear</span>
+                <span class="chip">Open in editor</span>
+                <span class="chip">⟲ Reload</span>
+              </div>
+              <div class="ta" style="flex:1">
+                <div class="ln">नमस्कार। ईशा क्रिया एक सरल और शक्तिशाली प्रक्रिया है।</div>
+                <div class="ln">आप आराम से बैठिए, आँखें बंद कीजिए और अपनी श्वास पर ध्यान दीजिए।</div>
+                <div class="ln">यह अभ्यास प्रतिदिन बारह मिनट का है — सुबह और शाम।</div>
+                <div class="ln dimln">जो कुछ भी घटित हो, उसे घटित होने दीजिए।</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- run column -->
+          <aside class="runcol">
+            <div class="btn go tall wide">▶&nbsp;&nbsp;Run pipeline</div>
+
+            <div>
+              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:5px">
+                <span class="cap-lbl" style="margin:0">Estimated cost</span>
+                <span style="margin-left:auto;font-family:var(--mono);font-size:11px;color:#C8CDD3">1,847 cr</span>
+              </div>
+              <div class="meter">
+                <i style="width:62%;background:#2A6699"></i>
+                <i style="width:24%;background:#3A5A8C"></i>
+                <i style="width:14%;background:#22262B"></i>
+              </div>
+              <div class="mini" style="margin-top:5px">TTS 1,142 · transcribe 438 · headroom 267</div>
+            </div>
+
+            <div class="hr"></div>
+
+            <div>
+              <div class="cap-lbl">What will happen</div>
+              <div class="steps">
+                <div class="step done"><span class="node"><i></i></span><span class="lb">Transcribe</span><span class="vl">ElevenLabs STT</span></div>
+                <div class="leg past"></div>
+                <div class="step skip"><span class="node"><i></i></span><span class="lb">Translate</span><span class="vl">your script</span></div>
+                <div class="leg"></div>
+                <div class="step cur"><span class="node"><i></i></span><span class="lb">Your check</span><span class="vl">pauses here</span></div>
+                <div class="leg"></div>
+                <div class="step"><span class="node"><i></i></span><span class="lb">TTS</span><span class="vl">Meera · eleven_v3</span></div>
+                <div class="leg"></div>
+                <div class="step"><span class="node"><i></i></span><span class="lb">Sync</span><span class="vl">match · clause</span></div>
+                <div class="leg"></div>
+                <div class="step"><span class="node"><i></i></span><span class="lb">Import</span><span class="vl">this project</span></div>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+
+            <div>
+              <div class="cap-lbl">Readiness</div>
+              <div class="rd y"><span class="m">ok</span><span class="t">LLM · gemini</span></div>
+              <div class="rd y"><span class="m">ok</span><span class="t">Voice · ElevenLabs</span></div>
+              <div class="rd y"><span class="m">ok</span><span class="t">Meera · Hindi</span></div>
+              <div class="rd y"><span class="m">ok</span><span class="t">English audio chosen</span></div>
+            </div>
+
+            <div class="grow"></div>
+
+            <div class="mini">Pauses before TTS so you can check the wording.
+              Nothing is charged until you approve it.</div>
+            <div style="display:flex;gap:6px">
+              <span class="btn" style="flex:1">🔍&nbsp;Preview sync</span>
+              <span class="btn" style="flex:0 0 62px">Close</span>
+            </div>
+          </aside>
+        </div>
+
+        <div class="sb">
+          <span class="ok">● keys ready</span>
+          <span>staged run · Hindi · eleven_v3</span>
+          <span class="push mono">1040 × 660</span>
+        </div>
+      </div>
+    </div>
+    <p class="stage-note">
+      Drawn at the panel's real 1040 × 660. Every row above is a table or a
+      <span style="font-family:var(--mono)">gap</span>-spaced flex line — there
+      is not one hand-counted x offset in the layout.
+    </p>
+
+    <div class="fixes">
+      <div class="fix">
+        <h4>History becomes a 7-column table</h4>
+        <p>Date, file, language, state, primary action, ⋯ — sized by ImGui.
+        The chip cannot reach the button and the filename cannot reach the date.</p>
+        <span class="refs">F3 F4</span>
+      </div>
+      <div class="fix">
+        <h4>Fields stack label-over-input</h4>
+        <p>The auto-fit grid pairs short controls two-up and drops to one column
+        under 190&nbsp;px per cell, so the label column that caused F2 and F5
+        simply does not exist.</p>
+        <span class="refs">F2 F5</span>
+      </div>
+      <div class="fix">
+        <h4>Counter moves into the field's own label row</h4>
+        <p>Right-aligned by the flex line rather than by a measured x, so a
+        zero-width measurement cannot push it off the pane.</p>
+        <span class="refs">F6</span>
+      </div>
+      <div class="fix">
+        <h4>New: a cost meter above the plan</h4>
+        <p>Splits the estimate into TTS, transcription and headroom before the
+        run starts. The green button is the only saturated thing on screen and it
+        sits directly under the number it commits to.</p>
+        <span class="refs">new</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ MOCKUP 2 ═══════════ -->
+<section id="m2">
+  <div class="sechead"><span class="n">04</span><h2>Mockup two</h2></div>
+
+  <div class="mock">
+    <div class="mock-head">
+      <h3 class="mock-name" style="margin:0">Console</h3>
+      <span class="fixed" style="margin-left:auto">built</span><span class="mock-kind" style="margin-left:14px">V5.ui_console · V5.pipe_rail</span>
+    </div>
+    <p class="thesis">
+      Turns the pipeline itself into the top-level chrome. Six nodes across the
+      full width, each carrying <strong>its own value and its own progress</strong>,
+      so the stage you are waiting on is legible from across the room and the
+      right column is freed for a real inspector. The script becomes the
+      centre of the screen rather than the leftover space under a form, and a
+      <strong>Ctrl-K command bar</strong> replaces the buttons that only existed to
+      be reachable — built, with a guard per command so nothing dead is ever
+      offered.
+    </p>
+
+    <div class="stage">
+      <div class="pnl">
+        <div class="tb">
+          <span class="tt">Dub Pipeline</span><span class="tv">v0.25</span>
+          <div class="cmdk">⌕&nbsp; Run a command <kbd>Ctrl</kbd><kbd>K</kbd></div>
+          <div class="caps" style="margin-left:12px">
+            <div class="cap">—</div><div class="cap">▢</div><div class="cap x">✕</div>
+          </div>
+        </div>
+
+        <div class="m2">
+          <!-- pipeline rail -->
+          <div class="pipe">
+            <div class="pipe-top">
+              <span style="color:#55AAFF;font-size:12.5px">◐&nbsp; Running</span>
+              <span style="font-family:var(--mono);font-size:11px;color:#8899AA">04:12</span>
+              <span style="color:#FFCC55;font-size:11.5px">S2d · speaking piece 14 of 31</span>
+              <span style="margin-left:auto;font-family:var(--mono);font-size:11px;color:#66707E">est. 3:40 left</span>
+              <span class="btn sm">≡ Log</span>
+              <span class="btn sm danger">Cancel</span>
+            </div>
+            <div class="bar"><i style="width:58%"></i></div>
+            <div class="pipe-nodes">
+              <div class="pn done">
+                <div class="h"><span class="ix">1</span><span class="nm">Transcribe</span></div>
+                <div class="v">ElevenLabs STT · 31 regions</div>
+              </div>
+              <div class="pn skip">
+                <div class="h"><span class="ix">2</span><span class="nm">Translate</span></div>
+                <div class="v">skipped — your script</div>
+              </div>
+              <div class="pn done">
+                <div class="h"><span class="ix">3</span><span class="nm">Your check</span></div>
+                <div class="v">approved 11:09</div>
+              </div>
+              <div class="pn cur">
+                <div class="h"><span class="ix">4</span><span class="nm">TTS</span></div>
+                <div class="v">Meera · eleven_v3</div>
+                <div class="bar" style="height:3px"><i style="width:45%"></i></div>
+              </div>
+              <div class="pn todo">
+                <div class="h"><span class="ix">5</span><span class="nm">Sync</span></div>
+                <div class="v">match · clause pieces</div>
+              </div>
+              <div class="pn todo">
+                <div class="h"><span class="ix">6</span><span class="nm">Import</span></div>
+                <div class="v">this REAPER project</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="body">
+            <!-- icon rail -->
+            <nav class="railmini">
+              <div class="mi on" title="Dub">▶</div>
+              <div class="mi" title="Sync">⇄</div>
+              <div class="mi" title="Tools">✦</div>
+              <div class="mi" title="Log">≡</div>
+              <div class="msep"></div>
+              <div class="mi" title="Settings">⚙</div>
+            </nav>
+
+            <!-- editor -->
+            <div class="editor">
+              <div class="etop">
+                <span class="cap-lbl" style="margin:0">Hindi script · locked while the run is out</span>
+                <span class="push"></span>
+                <span class="chip">📋 Copy</span>
+                <span class="chip">Open in editor</span>
+              </div>
+              <div class="ta" style="flex:1;font-size:13.5px;line-height:1.85">
+                <div class="ln">नमस्कार। ईशा क्रिया एक सरल और शक्तिशाली प्रक्रिया है।</div>
+                <div class="ln" style="color:#55AAFF">आप आराम से बैठिए, आँखें बंद कीजिए और अपनी श्वास पर ध्यान दीजिए। ◂ speaking</div>
+                <div class="ln">यह अभ्यास प्रतिदिन बारह मिनट का है — सुबह और शाम।</div>
+                <div class="ln">जो कुछ भी घटित हो, उसे घटित होने दीजिए। किसी भी अनुभव से चिपकिए नहीं।</div>
+                <div class="ln dimln">बारह मिनट के बाद धीरे-धीरे आँखें खोलिए।</div>
+                <div class="ln dimln">यह प्रक्रिया आपके भीतर एक दूरी बनाती है।</div>
+                <div class="ln dimln">शरीर और आप के बीच, मन और आप के बीच।</div>
+                <div class="ln dimln">इसे दिन में दो बार कीजिए — बस बारह मिनट।</div>
+                <div class="ln dimln">कुछ ही सप्ताह में आप अंतर महसूस करेंगे।</div>
+              </div>
+              <div style="display:flex;gap:10px;align-items:center">
+                <span class="mini">The engine reads config at launch, so these are read-only until the run ends.</span>
+                <span class="push" style="margin-left:auto"></span>
+                <span class="mini" style="font-family:var(--mono)">1,847 chars · 4 paragraphs</span>
+              </div>
+            </div>
+
+            <!-- inspector -->
+            <aside class="insp">
+              <div class="sect">
+                <div class="cap-lbl">Source<span class="push">rendered from track 3</span></div>
+                <div class="wave">
+                  <i style="height:22%"></i><i style="height:48%"></i><i style="height:71%" class="hot"></i>
+                  <i style="height:90%" class="hot"></i><i style="height:64%" class="hot"></i><i style="height:38%"></i>
+                  <i style="height:52%"></i><i style="height:80%"></i><i style="height:96%"></i><i style="height:70%"></i>
+                  <i style="height:44%"></i><i style="height:28%"></i><i style="height:58%"></i><i style="height:84%"></i>
+                  <i style="height:62%"></i><i style="height:36%"></i><i style="height:20%"></i><i style="height:46%"></i>
+                  <i style="height:74%"></i><i style="height:54%"></i><i style="height:30%"></i><i style="height:66%"></i>
+                  <i style="height:88%"></i><i style="height:50%"></i><i style="height:26%"></i><i style="height:42%"></i>
+                </div>
+                <dl class="kv">
+                  <dt>File</dt><dd class="val">Isha_Kriya_Intro_EN_master.wav</dd>
+                  <dt>Length</dt><dd class="mono">08:41.320 · 31 regions</dd>
+                </dl>
+              </div>
+
+              <div class="sect">
+                <div class="cap-lbl">Voice<span class="push">in use</span></div>
+                <dl class="kv">
+                  <dt>Voice</dt><dd>Meera — warm, mid</dd>
+                  <dt>Model</dt><dd class="mono">eleven_v3 · Hindi</dd>
+                </dl>
+              </div>
+
+              <div class="sect">
+                <div class="cap-lbl">Spend<span class="push">live</span></div>
+                <div class="meter">
+                  <i style="width:45%;background:#2A6699"></i>
+                  <i style="width:32%;background:#1F3A57"></i>
+                  <i style="width:23%;background:#22262B"></i>
+                </div>
+                <div class="mini" style="font-family:var(--mono)">
+                  <span style="color:#55AAFF">832 cr spent</span> · ~1,015 cr to come
+                </div>
+              </div>
+
+              <div class="foot">
+                <div class="rd y"><span class="m">ok</span><span class="t">Voice · ElevenLabs · LLM · gemini</span></div>
+                <div class="btn wide">≡&nbsp;&nbsp;Open the log</div>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <div class="sb">
+          <span style="color:#55AAFF">◐ running</span>
+          <span>S2d · TTS · piece 14/31</span>
+          <span class="warn">do not close REAPER</span>
+          <span class="push mono">04:12 elapsed</span>
+        </div>
+      </div>
+    </div>
+    <p class="stage-note">
+      Shown mid-run, which is the state the current panel spends the least design
+      on. Nothing moves between setup and running — the top rail changes fill, the
+      inspector changes numbers.
+    </p>
+
+    <div class="fixes">
+      <div class="fix">
+        <h4>Six equal grid columns replace the fixed value column</h4>
+        <p>Each node is <code>minmax(0,1fr)</code>, so its value truncates inside
+        its own card instead of running into whatever the next hard-coded offset
+        happened to be.</p>
+        <span class="refs">F9</span>
+      </div>
+      <div class="fix">
+        <h4>The inspector is a definition list</h4>
+        <p>A 76&nbsp;px key column and a stretch value column, both truncating.
+        Long model ids and voice names stop being a layout risk.</p>
+        <span class="refs">F2 F5</span>
+      </div>
+      <div class="fix">
+        <h4>Command bar absorbs the overflow toolbar</h4>
+        <p>The five-button review row that clips at narrow widths (F7) becomes two
+        visible chips plus everything else in Ctrl-K, which needs no width at all.</p>
+        <span class="refs">F7</span>
+      </div>
+      <div class="fix">
+        <h4>New: live spend and a speaking cursor</h4>
+        <p>The script marks the paragraph being spoken, and the meter separates
+        credits already spent from the estimate still to come — the answer to
+        "can I cancel yet" without opening the log.</p>
+        <span class="refs">new</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ MOCKUP 3 ═══════════ -->
+<section id="m3">
+  <div class="sechead"><span class="n">05</span><h2>Mockup three</h2></div>
+
+  <div class="mock">
+    <div class="mock-head">
+      <h3 class="mock-name" style="margin:0">Studio</h3>
+      <span class="fixed" style="margin-left:auto">built</span><span class="mock-kind" style="margin-left:14px">V5.ui_phase_plan · V5.plan_inspector</span>
+    </div>
+    <p class="thesis">
+      The densest screen, and the one that decides whether credits get spent. The
+      fit strip becomes the hero at full width with a
+      <strong>pixel-derived ruler</strong> — the direct fix for F1 — a chunk table
+      that sorts by overflow, and a docked inspector for the selected chunk. The
+      approval sits in a <strong>transport bar</strong>, so the panel reads as
+      part of REAPER instead of a dialog on top of it.
+    </p>
+
+    <div class="stage">
+      <div class="pnl">
+        <div class="tb">
+          <span class="tt">Dub Pipeline</span><span class="tv">v0.25</span>
+          <span style="color:#FFCC55;font-size:11.5px;margin-left:8px">Fit preview — nothing charged yet</span>
+          <div class="caps">
+            <div class="cap">—</div><div class="cap">▢</div><div class="cap x">✕</div>
+          </div>
+        </div>
+
+        <div class="m3">
+          <nav class="railmini">
+            <div class="mi on" title="Dub">▶</div>
+            <div class="mi" title="Sync">⇄</div>
+            <div class="mi" title="Tools">✦</div>
+            <div class="mi" title="Log">≡</div>
+            <div class="msep"></div>
+            <div class="mi" title="Settings">⚙</div>
+          </nav>
+
+          <div class="canvas">
+            <div class="ctop">
+              <span class="cap-lbl" style="margin:0">Fit across 31 chunks · Hindi</span>
+              <span class="pill ok">24 fit</span>
+              <span class="pill warn">5 eat pause</span>
+              <span class="pill" style="background:#33191A;color:#FF7A6E">2 overflow</span>
+              <span class="push"></span>
+              <span class="chip">Open HTML report</span>
+              <span class="chip">⟲ Re-plan</span>
+            </div>
+
+            <div class="strip">
+              <div class="ruler">
+                <span class="tk" style="left:0%"></span>      <span class="tl" style="left:0%">0:00</span>
+                <span class="tk" style="left:11.5%"></span>   <span class="tl" style="left:11.5%">1:00</span>
+                <span class="tk" style="left:23%"></span>     <span class="tl" style="left:23%">2:00</span>
+                <span class="tk" style="left:34.5%"></span>   <span class="tl" style="left:34.5%">3:00</span>
+                <span class="tk" style="left:46%"></span>     <span class="tl" style="left:46%">4:00</span>
+                <span class="tk" style="left:57.5%"></span>   <span class="tl" style="left:57.5%">5:00</span>
+                <span class="tk" style="left:69%"></span>     <span class="tl" style="left:69%">6:00</span>
+                <span class="tk" style="left:80.5%"></span>   <span class="tl" style="left:80.5%">7:00</span>
+                <span class="tk" style="left:92%"></span>     <span class="tl" style="left:92%">8:00</span>
+              </div>
+              <div class="lane">
+                <span class="b src" style="left:0.5%;width:5%"></span>   <span class="pz" style="left:5.5%;width:1.6%"></span>
+                <span class="b src" style="left:7.1%;width:7.4%"></span> <span class="pz" style="left:14.5%;width:1.2%"></span>
+                <span class="b src" style="left:15.7%;width:4.2%"></span><span class="pz" style="left:19.9%;width:2%"></span>
+                <span class="b src sel" style="left:21.9%;width:9%"></span><span class="pz" style="left:30.9%;width:1.4%"></span>
+                <span class="b src" style="left:32.3%;width:5.6%"></span><span class="pz" style="left:37.9%;width:1%"></span>
+                <span class="b src" style="left:38.9%;width:8.2%"></span><span class="pz" style="left:47.1%;width:1.8%"></span>
+                <span class="b src" style="left:48.9%;width:6%"></span>  <span class="pz" style="left:54.9%;width:1.2%"></span>
+                <span class="b src" style="left:56.1%;width:10.4%"></span><span class="pz" style="left:66.5%;width:1.6%"></span>
+                <span class="b src" style="left:68.1%;width:4.8%"></span><span class="pz" style="left:72.9%;width:1.4%"></span>
+                <span class="b src" style="left:74.3%;width:8.8%"></span><span class="pz" style="left:83.1%;width:1.2%"></span>
+                <span class="b src" style="left:84.3%;width:6.4%"></span><span class="pz" style="left:90.7%;width:1.8%"></span>
+                <span class="b src" style="left:92.5%;width:6.5%"></span>
+              </div>
+              <div class="lane">
+                <span class="b fits" style="left:0.5%;width:4.6%"></span>
+                <span class="b fits" style="left:7.1%;width:7%"></span>
+                <span class="b tight" style="left:15.7%;width:5.8%"></span>
+                <span class="b over sel" style="left:21.9%;width:11.4%"></span>
+                <span class="b fits" style="left:32.3%;width:5.2%"></span>
+                <span class="b fits" style="left:38.9%;width:7.8%"></span>
+                <span class="b short" style="left:48.9%;width:3.8%"></span>
+                <span class="b tight" style="left:56.1%;width:11.6%"></span>
+                <span class="b fits" style="left:68.1%;width:4.4%"></span>
+                <span class="b over" style="left:74.3%;width:11%"></span>
+                <span class="b fits" style="left:84.3%;width:6%"></span>
+                <span class="b fits" style="left:92.5%;width:6%"></span>
+              </div>
+              <div class="laneleg">
+                <span><i style="background:#5B6470"></i>source slot</span>
+                <span><i style="background:#55CC77"></i>fits</span>
+                <span><i style="background:#E8A13A"></i>eats pause</span>
+                <span><i style="background:#E5584A"></i>overflows</span>
+                <span><i style="background:#6FA8DC"></i>short</span>
+                <span style="margin-left:auto">ticks: 9 of a possible 12 — the strip is 812 px wide</span>
+              </div>
+            </div>
+
+            <div class="ctbl">
+              <div class="hd">
+                <span>#</span><span>at</span><span>Hindi text</span>
+                <span style="text-align:right">slot</span><span style="text-align:right">est</span>
+                <span style="text-align:right">rate</span><span style="text-align:right">fit ↓</span>
+              </div>
+              <div class="r on">
+                <span class="mono">04</span><span class="mono">1:54.20</span>
+                <span class="tx">जो कुछ भी घटित हो, उसे घटित होने दीजिए। किसी भी अनुभव से चिपकिए नहीं।</span>
+                <span class="num">4.68s</span><span class="num">5.94s</span>
+                <span class="num" style="color:#FF7A6E">1.27×</span>
+                <span class="vd"><span class="pill" style="background:#33191A;color:#FF7A6E">overflows</span></span>
+              </div>
+              <div class="r">
+                <span class="mono">10</span><span class="mono">6:27.05</span>
+                <span class="tx">बारह मिनट के बाद धीरे-धीरे आँखें खोलिए और कुछ क्षण रुकिए।</span>
+                <span class="num">4.58s</span><span class="num">5.72s</span>
+                <span class="num" style="color:#FF7A6E">1.25×</span>
+                <span class="vd"><span class="pill" style="background:#33191A;color:#FF7A6E">overflows</span></span>
+              </div>
+              <div class="r">
+                <span class="mono">03</span><span class="mono">1:21.60</span>
+                <span class="tx">यह अभ्यास प्रतिदिन बारह मिनट का है — सुबह और शाम।</span>
+                <span class="num">2.18s</span><span class="num">3.02s</span>
+                <span class="num" style="color:#E8A13A">1.09×</span>
+                <span class="vd"><span class="pill warn">eats pause</span></span>
+              </div>
+              <div class="r">
+                <span class="mono">08</span><span class="mono">4:52.10</span>
+                <span class="tx">यह प्रक्रिया आपके भीतर एक दूरी बनाती है — शरीर और आप के बीच।</span>
+                <span class="num">5.41s</span><span class="num">6.03s</span>
+                <span class="num" style="color:#E8A13A">1.06×</span>
+                <span class="vd"><span class="pill warn">eats pause</span></span>
+              </div>
+              <div class="r">
+                <span class="mono">07</span><span class="mono">4:14.85</span>
+                <span class="tx">श्वास को गिनिए नहीं, केवल देखिए।</span>
+                <span class="num">3.12s</span><span class="num">1.98s</span>
+                <span class="num">1.00×</span>
+                <span class="vd"><span class="pill info">short</span></span>
+              </div>
+              <div class="r">
+                <span class="mono">01</span><span class="mono">0:00.00</span>
+                <span class="tx">नमस्कार। ईशा क्रिया एक सरल और शक्तिशाली प्रक्रिया है।</span>
+                <span class="num">2.60s</span><span class="num">2.39s</span>
+                <span class="num">1.00×</span>
+                <span class="vd"><span class="pill ok">fits</span></span>
+              </div>
+              <div class="r">
+                <span class="mono">02</span><span class="mono">0:36.90</span>
+                <span class="tx">आप आराम से बैठिए, आँखें बंद कीजिए और अपनी श्वास पर ध्यान दीजिए।</span>
+                <span class="num">3.85s</span><span class="num">3.64s</span>
+                <span class="num">1.00×</span>
+                <span class="vd"><span class="pill ok">fits</span></span>
+              </div>
+            </div>
+          </div>
+
+          <aside class="insp">
+            <div class="itabs">
+              <div class="t on">Chunk 04</div><div class="t">Run</div><div class="t">Voice</div>
+            </div>
+            <div class="ibody">
+              <div>
+                <div class="cap-lbl">Verdict</div>
+                <div style="display:flex;align-items:baseline;gap:8px">
+                  <span style="color:#FF7A6E;font-size:16px;font-weight:640">Overflows</span>
+                  <span style="font-family:var(--mono);font-size:11px;color:#8899AA">by 1.26 s</span>
+                </div>
+                <div class="mini" style="margin-top:6px">The Hindi line is longer than
+                  the English slot plus its pause. Shorten it, or let the placer
+                  speed it to 1.27×.</div>
+              </div>
+
+              <div class="hr"></div>
+
+              <dl class="kv">
+                <dt>Slot</dt><dd class="mono">4.68 s</dd>
+                <dt>Pause</dt><dd class="mono">0.61 s</dd>
+                <dt>Estimate</dt><dd class="mono">5.94 s</dd>
+                <dt>Rate</dt><dd class="mono" style="color:#FF7A6E">1.27 ×</dd>
+                <dt>Chars</dt><dd class="mono">68 · 41 clusters</dd>
+              </dl>
+
+              <div class="hr"></div>
+
+              <div class="fld">
+                <span class="lb">Hindi text for this chunk</span>
+                <div class="ta" style="min-height:76px;font-size:12.5px;line-height:1.75">
+                  <div>जो कुछ भी घटित हो, उसे घटित होने दीजिए। किसी भी अनुभव से चिपकिए नहीं।</div>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:2px">
+                  <span class="chip">Shorten with AI</span>
+                  <span class="chip">Re-plan chunk</span>
+                </div>
+              </div>
+
+              <div class="grow"></div>
+
+              <div>
+                <div class="cap-lbl">English at 1:54.20</div>
+                <div class="mini" style="color:#99A3B0">Let whatever happens, happen.
+                  Don't hold on to any experience.</div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <div class="sb">
+          <span class="warn">● 2 chunks overflow</span>
+          <span>free preview — no audio generated</span>
+          <span class="push"></span>
+          <span class="btn sm" style="height:20px">Back to setup</span>
+          <span class="btn sm" style="height:20px">Export report</span>
+          <span class="btn sm go" style="height:20px">▶ Approve &amp; dub · 1,847 cr</span>
+        </div>
+      </div>
+    </div>
+    <p class="stage-note">
+      The ruler here draws 9 ticks because 812 px of strip divided by a 30 px
+      label plus 12 px of air allows 9 — not because 8:41 happens to divide by
+      60. That is the whole of F1's fix, and it is four lines of Lua.
+    </p>
+
+    <div class="fixes">
+      <div class="fix">
+        <h4>Ruler ticks are budgeted in pixels</h4>
+        <p><code>max_ticks = floor(usable / (V5.text_w(ctx,'0:00') + 12))</code>,
+        then the step snaps to the nearest nice value ≥ <code>total/max_ticks</code>.
+        Below two labels' worth of width the ruler drops out and the bars stay.</p>
+        <span class="refs">F1</span>
+      </div>
+      <div class="fix">
+        <h4>The chunk table is a real sorted table</h4>
+        <p>Seven ImGui columns, sorted by fit descending, so the two overflows are
+        the first thing you read instead of something to hunt for in a strip.</p>
+        <span class="refs">F1 F9</span>
+      </div>
+      <div class="fix">
+        <h4>Cluster counts, not byte counts</h4>
+        <p>The inspector reports <code>68 bytes · 41 clusters</code> from
+        <code>V5.clusters</code>, which is also what sizes every text box — the fix
+        for the three-times-too-tall review grid.</p>
+        <span class="refs">F8</span>
+      </div>
+      <div class="fix">
+        <h4>New: fix the overflow without leaving the gate</h4>
+        <p>Edit one chunk's text, shorten it with the LLM, re-plan just that
+        chunk. Today an overflow means going back to setup and re-running the
+        whole preview.</p>
+        <span class="refs">new</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ WHAT SHIPPED ═══════════ -->
+<section id="shipped">
+  <div class="sechead"><span class="n">06</span><h2>What went into the panel</h2></div>
+  <p class="subhead">
+    Every entry is a named function, so it is greppable. The primitives are new;
+    the rest are call sites that stopped counting pixels by hand.
+  </p>
+  <div class="what">
+    <dl>
+      <dt>V5.text_w — the only text measurement</dt>
+      <dd>Never answers 0. <span class="inline">V5.label</span> uses it to
+      measure the label <em>this</em> frame and takes
+      <span class="inline">max(column, this label)</span>, so a wide label pushes
+      its own control right instead of having it drawn through. The last raw
+      <span class="inline">CalcTextSize</span> call outside it is gone.</dd>
+
+      <dt>V5.room / V5.fit_w — how much space there actually is</dt>
+      <dd>An explicit pixel width is clamped to the room left on the row, and
+      the room stops at the grid cell's right edge — ImGui's own content region
+      measures to the window and knows nothing about the panel's cells.</dd>
+
+      <dt>V5.wrap_begin / V5.wrap_next — rows that wrap</dt>
+      <dd>A button row that does not fit breaks onto a second line and returns
+      to the x <em>the row</em> started at, not the window's margin. Used by
+      <span class="inline">V5.segmented</span>, the review toolbar and the
+      prompt editor's footer.</dd>
+
+      <dt>V5.cell — placed at the row's top</dt>
+      <dd>The cursor is set to (cell_x, row_top) rather than walked back with
+      <span class="inline">SameLine</span>, which returns to the last item's
+      line — the same thing as the row's top only while every cell is one line
+      tall, which stopped being true the moment cells could wrap.</dd>
+
+      <dt>V5.hist_row — measured columns and a forward-only pen</dt>
+      <dd>Laid out from the right edge inwards. Every column asks for its x and
+      gets <span class="inline">max(that, pen + gap)</span>; the two right-hand
+      columns are pinned so they cannot be pushed off the row. The date is
+      ellipsized like everything else.</dd>
+
+      <dt>V5.strip_step — density budgeted in pixels</dt>
+      <dd>Asks how many <span class="inline">m:ss</span> labels the width holds,
+      not how many fit the duration, and returns "no labels" when the answer is
+      under two.</dd>
+
+      <dt>V5.ellipsize — truncates for any budget</dt>
+      <dd>Cuts on a character boundary at <em>both</em> ends and honours small
+      budgets. It used to return the text untouched below 40 px — turning "no
+      room" into "draw all of it" — and could split a character off the tail,
+      which ImGui renders as a hollow box.</dd>
+
+      <dt>V5.cells — lengths in clusters, never bytes</dt>
+      <dd><span class="inline">_para_box_height</span> and the two character
+      counters. A Devanagari paragraph is a third as long as
+      <span class="inline">#</span> claims.</dd>
+
+      <dt>V5.fld / V5.fgrid — the stacked field</dt>
+      <dd>The label above its control, in a grid that pairs short ones two-up and
+      drops to one column when the width cannot hold two. This is what retires
+      the label column: a label and its control cannot collide when they never
+      share a row.</dd>
+
+      <dt>V5.pipe_rail / V5.pipe_card — the pipeline as chrome</dt>
+      <dd>Six cards, as many columns as the width holds and the rest wrapped,
+      each carrying its stage's value and the live one its own progress hairline.
+      Replaces a 288&nbsp;px column that carried the same information in the
+      narrowest space on the screen.</dd>
+
+      <dt>V5.plan_view / V5.plan_table / V5.plan_inspector</dt>
+      <dd>A sorted view of the chunks — never sorting
+      <span class="inline">P.rows</span>, whose order is the timeline's — a table
+      that shows each chunk's text, and an inspector for the selected one. Worst
+      fit first by default.</dd>
+
+      <dt>V5.commands / V5.pal_draw — the Ctrl-K palette</dt>
+      <dd>Every action in the panel by name, as data with a
+      <span class="inline">when</span> guard each, so a command this run cannot
+      do is not offered rather than offered and dead. Subsequence matching, so
+      <span class="inline">gtl</span> finds "Go to Log", with a word-start match
+      outranking a scattered one. The chosen command runs <em>after</em> the
+      window's Begin/End pair closes — several of them change the phase or launch
+      the engine, and doing that mid-frame loses the frame.</dd>
+
+      <dt>V5.cost_meter — the estimate, split by what spends it</dt>
+      <dd>TTS, transcription, headroom. Only the TTS share changes when you
+      shorten the script, so a single total was the one shape that could not
+      inform the decision. On the running screen it says plainly that it is an
+      estimate and not a live total, because the engine does not report credits
+      while it works.</dd>
+
+      <dt>auto_sync_pipeline.lua — the same three, fixed there too</dt>
+      <dd>The Sync tab carried a verbatim copy of the counter bug, a flat 104 px
+      label column, and a readiness dot pinned at
+      <span class="inline">windowWidth − 38</span> that could land inside the
+      header text it followed. It has its own
+      <span class="inline">_ui_text_w</span> and
+      <span class="inline">_ui_ellipsize</span> now.</dd>
+    </dl>
+  </div>
+
+  <h3>How it is verified</h3>
+  <p style="color:var(--ink-2);max-width:70ch;margin:0 0 18px">
+    A harness at
+    <span class="inline">dubbing/reaper/layout-harness/</span> loads both files
+    and <em>draws</em> them — no REAPER, no ReaImGui — recording a rectangle for
+    every item and every <span class="inline">DrawList_AddText</span>. A
+    rectangle landing on one already recorded is a failure. Every screen, pane
+    and phase is drawn at eleven widths under three
+    <span class="inline">CalcTextSize</span> regimes, plus an old-ReaImGui build
+    with the optional calls absent.
+  </p>
+  <div class="tblwrap">
+    <table>
+      <thead>
+        <tr><th>Suite</th><th>Draws</th><th>Result</th><th>Command</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>Dub panel</b></td><td class="pick">4,034</td>
+          <td class="pick"><span class="dot g"></span>0 findings</td>
+          <td class="pick"><span class="inline">WIDE=1 node run.js</span></td>
+        </tr>
+        <tr>
+          <td><b>Sync tab</b></td><td class="pick">48</td>
+          <td class="pick"><span class="dot g"></span>0 findings</td>
+          <td class="pick"><span class="inline">node run-sync.js</span></td>
+        </tr>
+        <tr>
+          <td><b>Syntax</b></td><td class="pick">both files</td>
+          <td class="pick"><span class="dot g"></span>luaparse 5.3 OK</td>
+          <td class="pick"><span class="inline">luaparse</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The two standards it holds to</h3>
+  <p style="color:var(--ink-2);max-width:70ch;margin:0">
+    <b>Collisions are never acceptable</b>, at any width — overprinted text is
+    unreadable, and it is what all nine defects produced.
+    <b>Clipping is a failure at or above 560&nbsp;px</b>, the panel's design floor
+    (a 138&nbsp;px rail, a usable form, and the 288&nbsp;px run column). Dragged
+    narrower than that the panel degrades, but it still never draws one thing
+    over another.
+  </p>
+
+  <h3>The palette, in one paragraph</h3>
+  <p style="color:var(--ink-2);max-width:72ch;margin:0 0 14px">
+    Every action in this panel lives on exactly one screen, which is right for
+    finding them and wrong for repeating them: opening the log while a run is out
+    means leaving the screen that shows the run. <b>Ctrl-K</b> (⌘K on macOS, via
+    <span class="inline">ImGui_Mod_Shortcut</span>) is the second route: 36
+    commands — 22 written out plus one per rail destination, settings pane and
+    chunk sort — nearly all guarded, filtered by subsequence, driven by the arrow
+    keys and Enter. It is also what lets a toolbar stop growing: the five-button review row
+    existed because there was nowhere else to put a fifth action. It is not an
+    ImGui popup — the panel opens none anywhere, and a palette wants the window
+    dimmed behind it, which is a draw-list rectangle over the content.
+  </p>
+
+  <h3>Two traps the build turned up</h3>
+  <p style="color:var(--ink-2);max-width:72ch;margin:0 0 14px">
+    Both are written into the primitives now, not into the call sites. A pending
+    <span class="inline">SetNextItemWidth</span> belongs to the <em>next widget
+    only</em> — so a stacked field's "fill the cell" width was eaten by the first
+    button of the segmented row under it, which then filled the cell alone and
+    pushed the second segment clean out of it.
+    <span class="inline">V5.segmented</span> and
+    <span class="inline">V5.chip</span> size themselves now. And after a
+    caption's line ends, ImGui puts the cursor at the <em>window's</em> left
+    margin, which inside a grid cell is not the cell's left edge — so the control
+    under the caption was drawn against the neighbouring column.
+  </p>
+  <p style="color:var(--ink-2);max-width:72ch;margin:0">
+    A third is a rule rather than a bug, and it came up twice: <b>never size a
+    container from a per-part budget when one of the parts can flex.</b> The plan
+    transport bar's height was a <span class="inline">V5.mh</span> measurement and
+    oscillated — tall canvas → short reserve → short canvas → tall reserve,
+    forever — so it is a fixed constant with a one-line ellipsized note. The
+    palette card was the same mistake from the other direction: computing its
+    height from query row + list + footer needed every part guessed right, and a
+    footer reserve 7&nbsp;px short made it overflow its own content on every draw.
+    The list is the flexible part now, so any arithmetic error becomes empty space
+    instead of a defect.
+  </p>
+</section>
+
+</div>
