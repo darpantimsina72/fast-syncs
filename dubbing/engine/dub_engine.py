@@ -82,12 +82,9 @@ import argparse
 import json
 import os
 import re
-import socket
 import sys
-import time
 import traceback
 import types
-import urllib.parse
 
 ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
 # DUB_STATUS_DIR is set by run_dub.py when the panel runs with a per-project
@@ -1493,7 +1490,6 @@ def _preflight_llm(pl):
     the LLM simply never got the same treatment.
     """
     provider, model = pl._active_provider_and_model()
-    _machine_note(pl, probe=False)
     _note(f"Checking the LLM is reachable ({provider}, {model})…")
     reply = pl._llm_generate(
         "Reply with the single word OK and nothing else.", model)
@@ -2142,96 +2138,6 @@ def _run_voice_change(args, manifest):
     _note(f"Voice-changed audio saved: {os.path.basename(out_wav)}")
 
 
-# ── Which machine is this? ──────────────────────────────────────────────────
-# v0.16.1: "Test connection" now names the PC and the local IP it would use to
-# reach the LLM, plus a raw TCP probe of the endpoint.
-#
-# The reason is network triage, not curiosity. When a site firewall blocks a
-# subnet from the LiteLLM host, the blocked machines are invisible from the
-# server side — their packets never arrive, so LiteLLM and Cloudflare log
-# nothing at all. The only place the failure is visible is the machine
-# itself, and the log people already send back is the cheapest way to collect
-# it. One pasteable line per PC is what the network team needs.
-#
-# The TCP probe is deliberately separate from the HTTP call: it separates
-# "this segment cannot reach the host" from "the host answered and the LLM
-# refused", which are different teams' problems.
-
-
-def _endpoint_host_port(pl):
-    """(host, port) of the configured LLM endpoint, or (None, None).
-
-    Only meaningful for the OpenAI-compatible provider — Vertex and the
-    Gemini API are Google endpoints, not a LAN host anyone firewalls.
-    """
-    try:
-        s = pl._get_llm_settings()
-        if (s.get("provider") or "") != pl.LLM_PROVIDER_OPENAI:
-            return None, None
-        base = (s.get("openai_base_url") or "").strip()
-        if not base:
-            return None, None
-        parts = urllib.parse.urlsplit(pl._openai_api_url(base))
-        port = parts.port or (443 if parts.scheme == "https" else 80)
-        return parts.hostname, port
-    except Exception:
-        return None, None
-
-
-def _local_ip_toward(host):
-    """The local IP the routing table would use to reach *host*.
-
-    A UDP connect() transmits nothing — it only asks the kernel to pick a
-    route — so this stays correct (and instant) even when the host is
-    firewalled off.
-    """
-    try:
-        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            sk.connect((host, 1))
-            return sk.getsockname()[0]
-        finally:
-            sk.close()
-    except Exception:
-        pass
-    try:
-        return socket.gethostbyname(socket.gethostname())
-    except Exception:
-        return "unknown"
-
-
-def _tcp_probe(host, port, timeout=6.0):
-    """Raw TCP connect verdict, independent of HTTP, TLS or any API key."""
-    t0 = time.time()
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return f"OK ({time.time() - t0:.2f}s)"
-    except socket.timeout:
-        return f"BLOCKED (no response in {int(timeout)}s)"
-    except OSError as e:
-        return f"BLOCKED ({e.__class__.__name__}: {e})"
-
-
-def _machine_note(pl, probe=True):
-    """Log one pasteable line identifying this machine.
-
-    probe=False skips the TCP connect — used on the pre-run check, where a
-    blocked endpoint would otherwise add its timeout to every run before the
-    LLM call fails for the same reason anyway.
-    """
-    name = socket.gethostname()
-    host, port = _endpoint_host_port(pl)
-    if not host:
-        _note(f"Machine: {name}")
-        return
-    ip = _local_ip_toward(host)
-    if not probe:
-        _note(f"Machine: {name} | local IP {ip} | endpoint {host}:{port}")
-        return
-    _note(f"Machine: {name} | local IP {ip} | endpoint {host}:{port} | "
-          f"TCP {_tcp_probe(host, port)}")
-
-
 def _run_test_llm(args, manifest):
     """--test-llm: one tiny call on the configured LLM provider.
 
@@ -2245,9 +2151,6 @@ def _run_test_llm(args, manifest):
     _note("Importing pipeline modules…")
     pl = _import_pipeline()
     _check_symbols(pl)
-    # Before _validate_llm_config: a broken settings file must not hide the
-    # line that says which machine this is.
-    _machine_note(pl)
     pl._validate_llm_config()
     provider, model = pl._active_provider_and_model()
     manifest["provider"], manifest["model"] = provider, model
