@@ -231,6 +231,28 @@ V5.MODEL_ROLES = {
 V5.model_roles = { translate = "", emotion = "", match = "", mapping = "",
                    sync_match = "" }
 
+-- v0.15.3: the model ids Test connection brought back, so each per-stage box
+-- can offer a list instead of being a free-text field nobody can spell from
+-- memory. Two lists on purpose: a shared gateway advertises the whole house
+-- catalogue (63 here) while the key may invoke only a few (9 here), and
+-- picking from the wrong one is how a run dies on its first LLM call. Only
+-- V5.models is offered; V5.models_all is the fallback when the permitted set
+-- could not be read.
+V5.models     = {}   -- ids this key may actually invoke
+V5.models_all = {}   -- everything the endpoint advertises
+
+-- Model ids never contain a comma, so the manifest ships them as one CSV
+-- string rather than a JSON array the panel's line-at-a-time reader would
+-- have to learn a new shape for.
+function V5._split_csv(str)
+  local out = {}
+  for piece in tostring(str or ""):gmatch("[^,]+") do
+    local id = piece:match("^%s*(.-)%s*$")
+    if id ~= "" then out[#out + 1] = id end
+  end
+  return out
+end
+
 -- v0.7: app version, read from the fast-syncs root VERSION file (kept
 -- current by the updater). Shown above the tab bar and in Settings.
 V5.APP_VERSION = (function()
@@ -1292,6 +1314,23 @@ local _regen_return_phase = "setup" -- phase to return to when regen ends
 -- v0.8: optional per-regen voice override ("" = the ⚙ Settings voice).
 -- V5 field, not a local — the main chunk sits at Lua's 200-local limit.
 V5.regen_voice            = ""
+
+-- v0.15.3: redoing SEVERAL chunks in one go, each in its own voice.
+-- Conversations are why this exists: alternating speakers need two voices
+-- across one selection, which the one-chunk-at-a-time tool could not express.
+-- Keyed by item GUID so a voice choice survives clicking around the arrange
+-- view. "" means the main voice from Settings, exactly as V5.regen_voice does,
+-- so a fresh selection redone straight away behaves like the old tool.
+-- V5 fields, not locals (this chunk is at Lua's 200-local limit).
+V5.regen_voice_of   = {}   -- guid -> voice id ("" = the main voice)
+V5.regen_open_of    = {}   -- guid -> is that row's voice picker revealed
+V5.regen_queue      = nil  -- { {guid=, text=, voice=}, ... } while a batch runs
+V5.regen_qi         = 0    -- index in V5.regen_queue currently running
+V5.regen_qstat      = nil  -- { done=, failed=, total=, errors={} }
+V5.regen_cur        = nil  -- entry being launched (kept across retries)
+V5.regen_next_due   = nil  -- time_precise() at which to try the next chunk
+V5.regen_next_tries = 0    -- launch retries spent on V5.regen_cur
+V5.regen_waited     = 0    -- seconds spent waiting for the old process to go
 
 -- v0.4 "I already have the translation": pasted script (in-memory only —
 -- written to <out_dir>/<base>_provided_translation.txt at launch).
@@ -3284,6 +3323,193 @@ local function apply_regen_result(wav)
   return true
 end
 
+-- ── v0.15.3: redoing several chunks in one go ──────────────────────────────
+-- Small helpers of their own rather than shared ones: this release line has
+-- no V5.COL / fmt_dur / ellipsis / credit_est, and adding them would mean
+-- touching code all over a panel that is meant to stay as it shipped.
+
+-- Truncate to *n* CHARACTERS without cutting a UTF-8 sequence in half (Indic
+-- text is three bytes a glyph — a byte-wise sub() produces mojibake).
+function V5._rg_trunc(str, n)
+  str = tostring(str or ''):gsub('%s+', ' '):match('^%s*(.-)%s*$')
+  local out, c = {}, 0
+  for ch in str:gmatch("[\1-\127\194-\244][\128-\191]*") do
+    c = c + 1
+    if c > n then return table.concat(out) .. '…' end
+    out[#out + 1] = ch
+  end
+  return table.concat(out)
+end
+
+function V5._rg_chars(str)
+  local c = 0
+  for _ in tostring(str or ''):gmatch("[\1-\127\194-\244][\128-\191]*") do
+    c = c + 1
+  end
+  return c
+end
+
+function V5._rg_dur(sec)
+  sec = tonumber(sec) or 0
+  return string.format('%.1fs', sec)
+end
+
+-- Where this item sits among the chunks on its own track, in timeline order.
+function V5._rg_index(item)
+  local tr = item and reaper.GetMediaItem_Track(item)
+  if not tr then return 0 end
+  local list = {}
+  for i = 0, reaper.CountTrackMediaItems(tr) - 1 do
+    list[#list + 1] = reaper.GetTrackMediaItem(tr, i)
+  end
+  table.sort(list, function(x, y)
+    return reaper.GetMediaItemInfo_Value(x, "D_POSITION")
+         < reaper.GetMediaItemInfo_Value(y, "D_POSITION")
+  end)
+  for i, it in ipairs(list) do if it == item then return i end end
+  return 0
+end
+
+-- The engine synthesizes ONE chunk per invocation, so a batch is a chain, not
+-- a fan-out: start chunk 1, and when its run reports back, start chunk 2.
+-- A batch STOPS at the first real failure — carrying on would spend
+-- ElevenLabs credits on a run that is already going wrong, and the cause
+-- (a dead gateway, a bad voice id) usually repeats for every chunk anyway.
+
+function V5.regen_queue_begin(entries)
+  if not entries or #entries == 0 then return false end
+  V5.regen_queue = entries
+  V5.regen_qi    = 0
+  V5.regen_qstat = { done = 0, failed = 0, total = #entries, errors = {} }
+  V5.regen_cur   = nil
+  V5.regen_queue_soon(0)   -- nothing is shutting down yet
+  return true
+end
+
+-- Waiting between chunks costs TIME, not money: nothing is sent anywhere
+-- until a launch succeeds, so these are deliberately generous.
+V5.REGEN_GAP      = 2.0   -- pause after a chunk finishes, before trying again
+V5.REGEN_RETRY    = 1.0   -- how often to re-test while the old process lingers
+V5.REGEN_PATIENCE = 120   -- seconds to wait before calling it genuinely stuck
+
+-- Ask for the next chunk a while from now, not right now. run_dub.py writes
+-- engine_done.txt and only THEN exits, so when the panel sees a chunk finish
+-- the previous launcher is usually still alive — and preflight_engine rightly
+-- refuses to launch into that gap ("a previous dub run is still shutting
+-- down"). Firing immediately would fail on nearly every batch.
+function V5.regen_queue_soon(delay)
+  V5.regen_next_due   = reaper.time_precise() + (delay or V5.REGEN_GAP)
+  V5.regen_next_tries = 0
+  V5.regen_waited     = 0
+end
+
+-- Has the previous engine process gone? This exists so the wait is CHEAP:
+-- preflight_engine is the real gate, but it also rewrites the config files
+-- and executes the interpreter to probe it, and doing that once a second
+-- would spawn a Python process every second. Same launcher scan preflight
+-- runs, and nothing else, so the two always agree. Windows has no ps, and
+-- preflight does not scan there either, so the attempt is its own test.
+function V5.regen_launcher_gone()
+  if _is_windows() then return true end
+  local probe = 'ps -axo command 2>/dev/null | grep -F run_dub.py | ' ..
+                'grep -F -- ' .. shellquote('--status-dir ' .. STATUS_DIR) ..
+                ' | grep -v grep'
+  local fh = io.popen(probe)
+  local out = fh and fh:read("*a") or ""
+  if fh then fh:close() end
+  return not out:match("%S")
+end
+
+-- Frame tick: start the next queued chunk once the previous launcher is gone.
+function V5.regen_queue_tick()
+  local q = V5.regen_queue
+  if not q or not V5.regen_next_due then return end
+  if reaper.time_precise() < V5.regen_next_due then return end
+
+  -- Choose the next entry once, then keep retrying THAT one — re-picking on
+  -- every retry would march through the queue while the engine is busy.
+  if not V5.regen_cur then
+    while true do
+      V5.regen_qi = V5.regen_qi + 1
+      local e = q[V5.regen_qi]
+      if not e then
+        V5.regen_next_due = nil
+        V5.regen_queue_finish()
+        return
+      end
+      if _find_item_by_guid(e.guid) then
+        V5.regen_cur = e
+        break
+      end
+      V5.regen_qstat.failed = V5.regen_qstat.failed + 1
+      V5.regen_qstat.errors[#V5.regen_qstat.errors + 1] =
+        string.format("chunk %d is no longer on the timeline", V5.regen_qi)
+    end
+  end
+
+  -- Lingering is normal, not a failure: keep waiting WITHOUT burning a retry.
+  if V5.regen_qi > 1 and not V5.regen_launcher_gone() then
+    V5.regen_waited   = (V5.regen_waited or 0) + V5.REGEN_RETRY
+    V5.regen_next_due = reaper.time_precise() + V5.REGEN_RETRY
+    if V5.regen_waited < V5.REGEN_PATIENCE then return end
+    V5.regen_qstat.failed = V5.regen_qstat.failed + 1
+    V5.regen_qstat.errors[#V5.regen_qstat.errors + 1] = string.format(
+      "chunk %d: the previous engine process never exited", V5.regen_qi)
+    V5.regen_cur      = nil
+    V5.regen_next_due = nil
+    V5.regen_queue_finish()
+    return
+  end
+
+  local e    = V5.regen_cur
+  local item = _find_item_by_guid(e.guid)
+  if item and start_regen(item, e.text, e.voice) then
+    V5.regen_cur      = nil
+    V5.regen_next_due = nil
+    V5.regen_waited   = 0
+    ui_clear_banner()
+    return
+  end
+
+  -- The launcher is gone and the launch STILL failed: a real problem (no
+  -- output folder, no venv, a bad voice id) that would meet every remaining
+  -- chunk. The FIRST chunk gets no grace — it must say so at once.
+  V5.regen_next_tries = V5.regen_next_tries + 1
+  if V5.regen_next_tries < ((V5.regen_qi <= 1) and 1 or 3) then
+    V5.regen_next_due = reaper.time_precise() + V5.REGEN_RETRY
+    return
+  end
+  V5.regen_qstat.failed = V5.regen_qstat.failed + 1
+  V5.regen_qstat.errors[#V5.regen_qstat.errors + 1] =
+    string.format("chunk %d could not be started", V5.regen_qi)
+  V5.regen_cur      = nil
+  V5.regen_next_due = nil
+  V5.regen_queue_finish()
+end
+
+-- Close a batch out and say what happened. Chunks that DID succeed are
+-- already swapped in: a partial batch is a partial result, not a rollback.
+function V5.regen_queue_finish()
+  local st = V5.regen_qstat
+  if st then
+    local msg = string.format("Redid %d of %d chunk(s).", st.done, st.total)
+    if st.failed > 0 then
+      msg = msg .. "  " .. st.failed .. " did not finish:\n  "
+                 .. table.concat(st.errors, "\n  ")
+      if st.done > 0 then
+        msg = msg .. "\n\nThe ones that did are already on the timeline."
+      end
+    end
+    ui_set_banner(st.failed > 0 and "warn" or "info", msg)
+  end
+  V5.regen_queue    = nil
+  V5.regen_qi       = 0
+  V5.regen_qstat    = nil
+  V5.regen_cur      = nil
+  V5.regen_next_due = nil
+  V5.regen_waited   = 0
+end
+
 -- ---------------------------------------------------------------------------
 -- v0.4 Track voice change — render a track, re-voice it with the ElevenLabs
 -- voice changer (speech-to-speech), import the result as a new track
@@ -3566,11 +3792,22 @@ local function _finish_run(exit_code)
     if cancelled then
       ui_set_banner("warn", "LLM connection test cancelled.")
     elseif m and m.status == "ok" and exit_code == 0 then
+      -- v0.15.3: the same manifest carries the model list.
+      V5.models     = V5._split_csv(m.models or "")
+      V5.models_all = V5._split_csv(m.models_all or "")
+      local extra = ""
+      if #V5.models > 0 then
+        extra = string.format("\n%d model(s) this key can use — pick them " ..
+                              "per stage in Settings.", #V5.models)
+      elseif #V5.models_all > 0 then
+        extra = string.format("\n%d model(s) advertised, but the permitted " ..
+                              "set could not be read.", #V5.models_all)
+      end
       ui_set_banner("info", string.format(
-        "LLM connection OK — %s (%s)\nReply: %s",
+        "LLM connection OK — %s (%s)\nReply: %s%s",
         (m.provider ~= "" and m.provider or "?"),
         (m.model ~= "" and m.model or "?"),
-        (m.reply ~= "" and m.reply or "(empty)")))
+        (m.reply ~= "" and m.reply or "(empty)"), extra))
     else
       ui_set_banner("error", "LLM connection test failed:\n" ..
                              _error_detail(600) .. "\n\nFull log: " .. LOG_PATH)
@@ -3701,14 +3938,35 @@ local function _finish_run(exit_code)
   -- phase it was started from and leaves the last run's manifest untouched.
   if _run_mode == "regen" then
     local back = _regen_return_phase or "setup"
+    -- v0.15.3: inside a batch the per-chunk outcome is TALLIED, not
+    -- announced — one banner per chunk would flash past and be replaced by
+    -- the next. The summary is written once, by regen_queue_finish.
+    local batch = V5.regen_queue ~= nil
+    local st    = V5.regen_qstat
     if cancelled then
       ui_set_banner("warn", "Chunk regeneration cancelled.")
+      if batch then
+        V5.regen_queue    = nil
+        V5.regen_qi       = 0
+        V5.regen_qstat    = nil
+        V5.regen_cur      = nil
+        V5.regen_next_due = nil
+        batch = false
+      end
     elseif m and m.status == "ok" and exit_code == 0
            and (m.regen_wav or "") ~= "" then
       local ok, why = apply_regen_result(m.regen_wav)
       if ok then
-        ui_set_banner("info", "Chunk regenerated and swapped in:\n"
-                              .. m.regen_wav)
+        if batch then
+          st.done = st.done + 1
+        else
+          ui_set_banner("info", "Chunk regenerated and swapped in:\n"
+                                .. m.regen_wav)
+        end
+      elseif batch then
+        st.failed = st.failed + 1
+        st.errors[#st.errors + 1] =
+          string.format("chunk %d: %s", V5.regen_qi, why or "the swap failed")
       else
         ui_set_banner("error", "Regen finished, but the item swap failed:\n"
                                .. (why or "(unknown)"))
@@ -3719,11 +3977,24 @@ local function _finish_run(exit_code)
         detail = read_all(LOG_PATH) or "(no output)"
         if #detail > 600 then detail = "...\n" .. detail:sub(-600) end
       end
-      ui_set_banner("error", "Chunk regeneration failed:\n" .. detail ..
-                             "\n\nFull log: " .. LOG_PATH)
+      if batch then
+        st.failed = st.failed + 1
+        st.errors[#st.errors + 1] =
+          string.format("chunk %d: %s", V5.regen_qi, detail)
+      else
+        ui_set_banner("error", "Chunk regeneration failed:\n" .. detail ..
+                               "\n\nFull log: " .. LOG_PATH)
+      end
     end
     _regen_pending = nil
+    -- Restore the phase BEFORE scheduling the next chunk: start_regen
+    -- captures _ui_phase as the phase to return to, and it must capture the
+    -- real one, not "running".
     _ui_phase = back
+    if batch then
+      if st.failed > 0 then V5.regen_queue_finish()
+      else                  V5.regen_queue_soon() end
+    end
     return
   end
 
@@ -3966,6 +4237,211 @@ end
 -- text box and offers "⟳ Regenerate". The out_dir comes from the last
 -- manifest this panel saw, the persisted per-project regen target, or a
 -- manually picked engine_done.json.
+-- v0.15.3: the several-chunks face of the Redo tool.
+--
+-- Rows, not a text editor. Redoing a group at once is a re-VOICING job — a
+-- conversation whose speakers need different voices — and in that job the
+-- words are already right, so each row shows the item's stored text and does
+-- not let you edit it. Select a single chunk when the WORDS are wrong; the
+-- one-line editor is still there, unchanged.
+--
+-- Every row starts on "" (the main Settings voice), so selecting five chunks
+-- and pressing Redo does exactly what redoing them one at a time would have
+-- done. A row only differs when you make it differ.
+function V5.ui_regen_multi(ctx, sel)
+  local main_id = VOICE_ID or ""
+  local main_nm = V5.voice_name(main_id)
+  if main_nm == "" then main_nm = main_id end
+  local running = V5.regen_queue ~= nil
+  local st      = V5.regen_qstat
+
+  -- While a batch runs the rows describe the QUEUE, not the live selection:
+  -- clicking elsewhere mid-run must not rewrite what is on screen.
+  local rows = sel
+  if running then
+    rows = {}
+    for _, e in ipairs(V5.regen_queue) do
+      rows[#rows + 1] = _find_item_by_guid(e.guid) or false
+    end
+  end
+
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  reaper.ImGui_Text(ctx, running
+    and string.format('%d chunks queued  ·  redone one after another',
+                      st and st.total or #rows)
+    or  string.format('%d chunks selected  ·  redone one after another, '
+                      .. 'in this order', #sel))
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
+  reaper.ImGui_Text(ctx, 'Main voice: ' .. (main_nm ~= "" and main_nm
+                    or 'none set — the engine picks one from your account'))
+  reaper.ImGui_PopStyleColor(ctx)
+
+  -- Two speakers is the common shape: select this speaker's lines, set them
+  -- all to voice A, select the other's, set them all to voice B.
+  if not running and V5.advanced(ctx, 'regenall',
+                                 'Set every selected chunk to one voice') then
+    reaper.ImGui_Indent(ctx, 12)
+    V5.regen_voice = V5.ui_voice_picker(ctx, 'regenall', V5.regen_voice,
+                                        'Voice')
+    if reaper.ImGui_SmallButton(ctx,
+        'Apply to all ' .. #sel .. '##rgapplyall') then
+      for _, it in ipairs(sel) do
+        V5.regen_voice_of[_item_guid(it)] = V5.regen_voice or ""
+      end
+      ui_set_banner("info", string.format('%d chunk(s) set.', #sel))
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Reset all to the main voice##rgreset')
+    then
+      for _, it in ipairs(sel) do
+        V5.regen_voice_of[_item_guid(it)] = nil
+      end
+      ui_set_banner("info", 'All ' .. #sel .. ' back on the main voice.')
+    end
+    reaper.ImGui_Unindent(ctx, 12)
+  end
+
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  reaper.ImGui_Separator(ctx)
+  local total_chars = 0
+  for i, it in ipairs(rows) do
+    if not it then
+      -- Queued, but the item has since been deleted. regen_queue_tick
+      -- records and skips it; say so rather than leaving a hole in the list.
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+      reaper.ImGui_Text(ctx, string.format(
+        '#%d  ·  this item is no longer on the timeline — it will be skipped',
+        i))
+      reaper.ImGui_PopStyleColor(ctx)
+      goto next_row
+    end
+    local g    = _item_guid(it)
+    local txt  = V5.get_item_text(it) or ''
+    local vo   = V5.regen_voice_of[g] or ''
+    local slot = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+    local idx  = V5._rg_index(it)
+    total_chars = total_chars + V5._rg_chars(txt)
+
+    local is_now = running and V5.regen_qi == i
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(),
+                                is_now and 0x55AAFFFF or 0x667788FF)
+    reaper.ImGui_Text(ctx, string.format('%s#%d  ·  %s',
+      is_now and (_spinner_glyph() .. '  ') or '',
+      idx > 0 and idx or i, V5._rg_dur(slot)))
+    reaper.ImGui_PopStyleColor(ctx)
+
+    reaper.ImGui_SameLine(ctx, 0, 10)
+    if txt == '' then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+      reaper.ImGui_Text(ctx, 'no text stored on this item — it is skipped')
+      reaper.ImGui_PopStyleColor(ctx)
+    else
+      reaper.ImGui_Text(ctx, V5._rg_trunc(txt, 56))
+    end
+
+    reaper.ImGui_Indent(ctx, 16)
+    local vname = V5.voice_name(vo)
+    local shown = (vo == "")
+      and ((main_nm ~= "" and main_nm or 'the default') .. '  (main voice)')
+      or  ((vname ~= "" and vname or vo) .. '  (just this chunk)')
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(),
+                                vo == "" and 0x667788FF or 0x88CC88FF)
+    reaper.ImGui_Text(ctx, 'voice: ' .. shown)
+    reaper.ImGui_PopStyleColor(ctx)
+
+    if not running then
+      reaper.ImGui_SameLine(ctx, 0, 8)
+      local open = V5.regen_open_of[g] and true or false
+      if reaper.ImGui_SmallButton(ctx,
+          (open and '▾ close' or '▸ change') .. '##rgv' .. g) then
+        V5.regen_open_of[g] = (not open) or nil
+      end
+      if vo ~= "" then
+        reaper.ImGui_SameLine(ctx, 0, 6)
+        if reaper.ImGui_SmallButton(ctx, 'use main##rgm' .. g) then
+          V5.regen_voice_of[g] = nil
+          V5.regen_open_of[g]  = nil
+        end
+      end
+      if open then
+        V5.regen_voice_of[g] =
+          V5.ui_voice_picker(ctx, 'rg' .. g, vo, 'Voice')
+        local rvi, typed = reaper.ImGui_InputText(
+          ctx, 'Voice id##rgid' .. g, V5.regen_voice_of[g] or '')
+        if rvi then V5.regen_voice_of[g] = typed end
+      end
+    end
+    reaper.ImGui_Unindent(ctx, 16)
+    reaper.ImGui_Dummy(ctx, 0, 2)
+    ::next_row::
+  end
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Dummy(ctx, 0, 4)
+
+  if running then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55AAFFFF)
+    -- Between chunks the panel is waiting for the previous engine process to
+    -- exit before it may launch the next. Say so, or the gap reads as a hang.
+    local waiting = V5.regen_next_due ~= nil
+    reaper.ImGui_Text(ctx, string.format('%s  %s', _spinner_glyph(),
+      waiting
+        and string.format('Chunk %d of %d done — waiting for that step to '
+                          .. 'close, then starting the next…',
+                          V5.regen_qi, st and st.total or #rows)
+        or  string.format('Redoing chunk %d of %d…',
+                          V5.regen_qi, st and st.total or #rows)))
+    reaper.ImGui_PopStyleColor(ctx)
+    _grey_hint(ctx, 'One chunk is synthesized at a time, and each waits for '
+                 .. 'the one before it to shut down fully — a few seconds of '
+                 .. 'pause between chunks is normal and costs nothing. '
+                 .. 'Finished chunks are already on the timeline.')
+    return
+  end
+
+  local can = _regen_out_dir ~= ""
+  _ui_begin_disabled(ctx, not can or _ui_phase == "running")
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x2A9945FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x44CC55FF)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x119911FF)
+  if reaper.ImGui_Button(ctx, string.format('⟳  Redo these %d chunks', #sel),
+                         230, 30) and can then
+    local entries = {}
+    for _, it in ipairs(sel) do
+      local txt = V5.get_item_text(it) or ''
+      if txt:match('%S') then
+        entries[#entries + 1] = { guid  = _item_guid(it),
+                                  text  = txt,
+                                  voice = V5.regen_voice_of[_item_guid(it)]
+                                          or '' }
+      end
+    end
+    if #entries == 0 then
+      ui_set_banner("error",
+        'None of the selected items has any text stored on it — there is '
+        .. 'nothing to synthesize.')
+    else
+      V5.regen_queue_begin(entries)
+    end
+  end
+  reaper.ImGui_PopStyleColor(ctx, 3)
+  _ui_end_disabled(ctx)
+  reaper.ImGui_SameLine(ctx)
+  if not can then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+    reaper.ImGui_Text(ctx, 'need an output folder')
+    reaper.ImGui_PopStyleColor(ctx)
+  else
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x667788FF)
+    reaper.ImGui_Text(ctx, string.format(
+      '~%d characters for all %d  ·  nothing overwritten', total_chars, #sel))
+    reaper.ImGui_PopStyleColor(ctx)
+  end
+  _grey_hint(ctx, 'Stops at the first chunk that fails, so a bad voice id or '
+               .. 'a dead connection cannot burn credits on the rest. Chunks '
+               .. 'already done stay done.')
+end
+
 local function ui_regen_section(ctx, default_open)
   V5.prefill_regen_target()
   local flags = 0
@@ -3997,17 +4473,34 @@ local function ui_regen_section(ctx, default_open)
     end
   end
 
-  local item = reaper.CountSelectedMediaItems(0) > 0
-               and reaper.GetSelectedMediaItem(0, 0) or nil
+  -- v0.15.3: every selected chunk, in timeline order — the order they are
+  -- heard, and the order they are redone. One selected keeps the original
+  -- one-line editor; several switches to the row view, where each chunk can
+  -- be given its own voice.
+  local sel = {}
+  for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
+    sel[#sel + 1] = reaper.GetSelectedMediaItem(0, i)
+  end
+  table.sort(sel, function(x, y)
+    return reaper.GetMediaItemInfo_Value(x, "D_POSITION")
+         < reaper.GetMediaItemInfo_Value(y, "D_POSITION")
+  end)
+  local item = sel[1]
   if not item then
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
     reaper.ImGui_TextWrapped(ctx,
       'Select a dub chunk item in the arrange view (on a "Dub Chunks" ' ..
-      'track) to edit its text and regenerate its audio.')
+      'track) to edit its text and regenerate its audio. Select several to ' ..
+      'redo them in one go, each in its own voice.')
     reaper.ImGui_PopStyleColor(ctx)
     _ui_begin_disabled(ctx, true)
     reaper.ImGui_Button(ctx, '⟳ Regenerate', 150, 30)
     _ui_end_disabled(ctx)
+  -- A batch keeps the row view on screen while it runs even though REAPER's
+  -- selection is untouched: otherwise the panel would flip back to the
+  -- one-line editor mid-run and lose the progress readout.
+  elseif #sel > 1 or V5.regen_queue then
+    V5.ui_regen_multi(ctx, sel)
   else
     -- Reload the text box from the item note whenever the selection changes
     -- (deliberately discards edits made for a different item).
@@ -5703,8 +6196,60 @@ function V5.ui_models_section(ctx, bare)
                   '). Use this to give the cheap mechanical stages a faster ' ..
                   'model and keep the good one for translation.')
   reaper.ImGui_Dummy(ctx, 0, 2)
+  -- v0.15.3: a list to pick from, filled by Test connection. The text box
+  -- stays beside it on purpose — a model this key gains tomorrow, or a
+  -- provider with no catalogue endpoint at all, must still be typeable.
+  local avail = (#V5.models > 0) and V5.models or V5.models_all
+  if #avail == 0 then
+    _grey_hint(ctx, 'Press "Test connection" above to list the models this ' ..
+                    'key can use; until then type the id by hand.')
+    reaper.ImGui_Dummy(ctx, 0, 2)
+  elseif #V5.models == 0 then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+    reaper.ImGui_TextWrapped(ctx, string.format(
+      'Showing all %d models the endpoint advertises — the list this key is ' ..
+      'actually allowed to use could not be read, so a pick here may still ' ..
+      'be refused.', #avail))
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_Dummy(ctx, 0, 2)
+  end
+
   for _, role in ipairs(V5.MODEL_ROLES) do
     local key, label, hint = role[1], role[2], role[3]
+    local cur = V5.model_roles[key] or ''
+    if #avail > 0 and reaper.ImGui_BeginCombo then
+      -- "" is a real choice, not an empty state: it means "use the Model set
+      -- above", which is what most stages should stay on.
+      local shown = (cur ~= '') and cur or '(the Model above)'
+      if reaper.ImGui_BeginCombo(ctx, label .. '##modelsel_' .. key, shown) then
+        if reaper.ImGui_Selectable(ctx, '(the Model above)##mnone_' .. key,
+                                   cur == '') then
+          V5.model_roles[key] = ''
+        end
+        for _, id in ipairs(avail) do
+          if reaper.ImGui_Selectable(ctx, id .. '##m_' .. key .. '_' .. id,
+                                     id == cur) then
+            V5.model_roles[key] = id
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+      -- A value typed earlier (or gained since the last Test connection)
+      -- that is not on the list would silently look like a mistake; say it
+      -- is fine rather than quietly dropping it.
+      if cur ~= '' then
+        local known = false
+        for _, id in ipairs(avail) do
+          if id == cur then known = true break end
+        end
+        if not known then
+          reaper.ImGui_SameLine(ctx)
+          reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+          reaper.ImGui_Text(ctx, 'not in the list')
+          reaper.ImGui_PopStyleColor(ctx)
+        end
+      end
+    end
     local rv, val = reaper.ImGui_InputText(ctx, label .. '##model_' .. key,
                                            V5.model_roles[key] or '')
     if rv then V5.model_roles[key] = val end
@@ -6531,6 +7076,9 @@ local function main()
       -- Poll OUTSIDE the tab bar: the run must keep progressing even
       -- while the user sits on the Log tab.
       if _ui_phase == "running" then poll_engine() end
+      -- v0.15.3: a multi-chunk batch waits here between chunks, so it keeps
+      -- moving whichever tab the user is looking at.
+      V5.regen_queue_tick()
       -- v0.5: the embedded Auto Sync run polls every frame too — it is
       -- independent of the dub run and of which tab is showing.
       if V5.SYNC then V5.SYNC.poll() end

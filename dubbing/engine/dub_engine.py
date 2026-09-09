@@ -247,7 +247,8 @@ REVIEW_MANIFEST_KEYS = ["status", "error", "audio", "language", "out_dir",
                         "en_srt", "en_text", "translation_text",
                         "final_script"]
 REGEN_MANIFEST_KEYS = ["status", "error", "regen_wav"]
-TEST_LLM_MANIFEST_KEYS = ["status", "error", "provider", "model", "reply"]
+TEST_LLM_MANIFEST_KEYS = ["status", "error", "provider", "model", "reply",
+                          "models", "models_all"]
 VOICES_MANIFEST_KEYS = ["status", "error", "voices"]
 VOICE_CHANGE_MANIFEST_KEYS = ["status", "error", "vc_wav"]
 
@@ -1562,6 +1563,8 @@ def _run_test_llm(args, manifest):
     manifest["provider"] = ""
     manifest["model"] = ""
     manifest["reply"] = ""
+    manifest["models"] = ""
+    manifest["models_all"] = ""
     _note("Importing pipeline modules…")
     pl = _import_pipeline()
     _check_symbols(pl)
@@ -1575,6 +1578,23 @@ def _run_test_llm(args, manifest):
     if not reply:
         raise RuntimeError("The LLM returned an empty reply.")
     manifest["reply"] = reply[:200]
+    # v0.15.3: the same trip that proves the connection also brings back the
+    # model list, so the panel's per-stage dropdowns have something real to
+    # offer instead of a free-text box. Best effort by design — a provider
+    # with no catalogue endpoint (Vertex, a bare Gemini key) simply reports
+    # none, and the boxes stay typeable. Never fails the test.
+    try:
+        found = pl._list_llm_models()
+    except Exception as e:
+        found = {"advertised": [], "permitted": []}
+        _note(f"Model list unavailable ({e}) — the model boxes stay free-text.")
+    manifest["models"] = ",".join(found.get("permitted") or [])
+    manifest["models_all"] = ",".join(found.get("advertised") or [])
+    n_p = len(found.get("permitted") or [])
+    n_a = len(found.get("advertised") or [])
+    if n_p or n_a:
+        _note(f"Models: {n_p} usable with this key, {n_a} advertised by the "
+              "endpoint.")
     _note(f"LLM reply: {manifest['reply']}")
 
 

@@ -489,6 +489,76 @@ def _llm_generate(prompt: str, model: str = GEMINI_DEFAULT_MODEL,
     return _genai_cached_generate(client, gm, static_prefix, prompt, use_cache)
 
 
+def _list_llm_models() -> dict:
+    """Model ids this install can actually name, for the panel's dropdowns.
+
+    Two different answers matter and they are rarely the same:
+
+      "advertised" — everything GET /v1/models returns. On a shared LiteLLM
+                     gateway that is the whole house catalogue.
+      "permitted"  — what THIS key may invoke. LiteLLM discloses the real
+                     list in the body of a user_model_access_denied error,
+                     which is the only reliable way to enumerate it (there
+                     is no endpoint for it). So we deliberately ask for a
+                     model that cannot exist and read the refusal.
+
+    On the office gateway the two differ by an order of magnitude (65 vs 9),
+    and picking from the advertised list is how you end up with a run that
+    dies on its first LLM call. The panel shows "permitted" and keeps
+    "advertised" only as a fallback.
+
+    Never raises: an empty result just means the dropdown falls back to a
+    free-text box, which is what every non-gateway provider gets anyway.
+    """
+    out = {"advertised": [], "permitted": []}
+    s = _get_llm_settings()
+    if s.get("provider") != LLM_PROVIDER_OPENAI:
+        return out          # no /v1/models on Vertex or a bare Gemini key
+    base = (s.get("openai_base_url") or "").strip()
+    if not base:
+        return out
+    api_key = (s.get("openai_api_key") or "").strip()
+    headers = {"User-Agent": _http_user_agent()}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    root = _openai_api_urls(base)[0].rsplit("/chat/completions", 1)[0]
+    try:
+        req = urllib.request.Request(root + "/models", headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        out["advertised"] = sorted({
+            str(m.get("id", "")).strip()
+            for m in (data.get("data") or [])
+            if str(m.get("id", "")).strip() and "*" not in str(m.get("id"))})
+    except Exception:
+        pass
+
+    # The refusal carries the permitted list. A name with characters no model
+    # id uses guarantees the refusal instead of an accidental match.
+    try:
+        payload = json.dumps({
+            "model": "__fast_syncs_probe__",
+            "messages": [{"role": "user", "content": "x"}],
+        }).encode("utf-8")
+        h = dict(headers)
+        h["Content-Type"] = "application/json"
+        req = urllib.request.Request(_openai_api_urls(base)[0], data=payload,
+                                     headers=h, method="POST")
+        try:
+            urllib.request.urlopen(req, timeout=30).read()
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")
+            m = re.search(r"models=\[(.*?)\]", body, re.DOTALL)
+            if m:
+                out["permitted"] = sorted({
+                    x.strip().strip("'\"")
+                    for x in m.group(1).split(",") if x.strip()})
+    except Exception:
+        pass
+    return out
+
+
 def _validate_llm_config() -> None:
     """Raise with a user-readable message if the active provider is unusable."""
     if not os.path.exists(LLM_SETTINGS_FILE):
