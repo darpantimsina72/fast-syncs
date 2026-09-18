@@ -428,9 +428,35 @@ end
 -- the Audoi_Syncing_V2 reference: AddMediaItemToTrack + AddTakeToMediaItem +
 -- a PCM source (here PCM_Source_CreateFromFile, one source per take) +
 -- SetMediaItemTake_Source. `length` nil = use the full source length.
+-- v0.15.4: this script has no defer loop, so peaks are built synchronously.
+-- Without it every imported item paints as a flat grey block until REAPER's
+-- background builder catches up (the "minimise and restore makes the waveform
+-- appear" report). Bounded so a pathological source cannot hang the import.
+local _peak_srcs = {}
+
+local function queue_peaks(src)
+  if not src or not reaper.PCM_Source_BuildPeaks then return end
+  local ok, need = pcall(reaper.PCM_Source_BuildPeaks, src, 0)
+  if ok and need and need ~= 0 then _peak_srcs[#_peak_srcs + 1] = src end
+end
+
+local function finish_peaks()
+  if not reaper.PCM_Source_BuildPeaks then return end
+  for i = 1, #_peak_srcs do
+    local src = _peak_srcs[i]
+    for _ = 1, 2000 do                      -- bound: never spin forever
+      local ok, left = pcall(reaper.PCM_Source_BuildPeaks, src, 1)
+      if not ok or not left or left == 0 then break end
+    end
+    pcall(reaper.PCM_Source_BuildPeaks, src, 2)
+  end
+  _peak_srcs = {}
+end
+
 local function add_file_item(track, path, position, length, startoffs, take_name)
   local src = reaper.PCM_Source_CreateFromFile(path)
   if not src then return nil end
+  queue_peaks(src)
   local item = reaper.AddMediaItemToTrack(track)
   local take = reaper.AddTakeToMediaItem(item)
   reaper.SetMediaItemTake_Source(take, src)
@@ -703,6 +729,7 @@ local function main()
   -- unreadable at normal zoom. Cues are still parsed -- they are the fallback
   -- source of the per-item chunk text above.
 
+  finish_peaks()
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
   reaper.Undo_EndBlock("Import dub results", -1)
