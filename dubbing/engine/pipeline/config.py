@@ -357,7 +357,7 @@ CUSTOM_LANGUAGES_FILE = os.path.join(CONFIG_DIR, "custom_languages.json")
 # why the non-ASCII range must start at an explicit \u0080.
 # Charset only -- length and edge-whitespace are checked in _lang_name_ok so
 # the rule stays readable and matches the Lua predicate exactly.
-_LANG_NAME_OK = re.compile("^[0-9A-Za-z \-_.()\u0080-\U0010FFFF]+$")
+_LANG_NAME_OK = re.compile(r"^[0-9A-Za-z \-_.()\u0080-\U0010FFFF]+$")
 
 
 # Unicode whitespace, rejected anywhere in a name. Mirrors
