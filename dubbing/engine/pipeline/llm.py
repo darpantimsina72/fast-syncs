@@ -24,10 +24,12 @@ Adaptations (everything else is verbatim):
     --test-llm manifest.
 """
 
+import http.client
 import json
 import os
 import re
 import socket
+import time
 import urllib.error
 import urllib.request
 from typing import Dict, List, Optional, Set, Tuple
@@ -326,14 +328,81 @@ def _gateway_needs_key(base: str) -> bool:
     return not _LOCAL_HOST_RE.match(_openai_host(base))
 
 
-def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
-    """Single-turn /v1/chat/completions call against the configured base URL."""
+# ── Transient-failure retry for the OpenAI-compatible path ──────────────────
+# The mapping call is the LAST thing a legacy dub does: it runs after the
+# ElevenLabs synthesis AND after the Scribe pass on the TTS audio. A gateway
+# that closes the socket mid-reply therefore threw away a fully paid-for run.
+# Seen on 2026-09-16: "ConnectionResetError: [WinError 10054] An existing
+# connection was forcibly closed by the remote host" at [S3c], on a run whose
+# start-of-run reachability probe had passed. A probe cannot predict a gateway
+# dying halfway, so the answer is to try again rather than to check harder.
+_LLM_ATTEMPTS      = 4
+_LLM_BACKOFF_SECS  = (5, 15, 45)          # waits after attempts 1, 2, 3
+_LLM_RETRY_STATUS  = (408, 409, 425, 429, 500, 502, 503, 504)
+
+
+def _llm_log(msg: str) -> None:
+    """Progress line for the LLM call.
+
+    Tagged [llm], NOT [Sxx]: this helper serves every stage that calls the
+    provider, and the REAPER panel takes the last "[Sxx]" tag it sees as the
+    current stage. Same reasoning as stt._stt_log.
+    """
+    print(f"[llm] {msg}", flush=True)
+
+
+def _llm_retryable(exc: BaseException) -> bool:
+    """Is this failure transient, so another attempt could plausibly succeed?
+
+    Typed walk over the exception, deliberately NOT a substring match on the
+    message: an HTTP reason phrase is server-supplied text and must never be
+    able to masquerade as a network fault. Same policy as
+    _is_endpoint_unreachable and config._is_cert_verify_error.
+
+    HTTPError is tested first because it subclasses URLError — a status code
+    proves a server answered, so only the overload/outage codes qualify.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in _LLM_RETRY_STATUS
+    # Reached the server, then the conversation broke: connection reset, a
+    # half-closed keep-alive socket, a truncated body, a read that timed out.
+    # urllib wraps only errors raised while SENDING in URLError; one raised
+    # while READING the reply propagates raw, which is exactly how the
+    # WinError 10054 above escaped every handler here.
+    if isinstance(exc, (ConnectionError, TimeoutError,
+                        http.client.HTTPException)):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        # DNS hiccup, refused, no route. Transient often enough to be worth a
+        # retry mid-run; the start-of-run probe is what catches a genuinely
+        # misconfigured endpoint, and it asks for a single attempt.
+        return True
+    return isinstance(exc, OSError)
+
+
+def _llm_wait(url: str, attempt: int, attempts: int, detail: str) -> None:
+    """Log a failed attempt and sleep before the next one."""
+    delay = _LLM_BACKOFF_SECS[min(attempt - 1, len(_LLM_BACKOFF_SECS) - 1)]
+    _llm_log(f"attempt {attempt}/{attempts} to {url} failed ({detail}) — "
+             f"retrying in {delay}s")
+    time.sleep(delay)
+
+
+def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
+                 attempts: Optional[int] = None) -> str:
+    """Single-turn /v1/chat/completions call against the configured base URL.
+
+    Transient network and 5xx failures are retried up to *attempts* times with
+    a growing backoff. Pass attempts=1 for a probe that should report a broken
+    configuration immediately instead of waiting out the backoff.
+    """
     s = _get_llm_settings()
     urls = _openai_api_urls(s.get("openai_base_url") or "")
     model = (model or "").strip()
     if not model:
         raise ValueError("Model name is empty — set it in config/llm_settings.json "
                          "(panel Settings).")
+    attempts = _LLM_ATTEMPTS if attempts is None else max(1, int(attempts))
     headers = {"Content-Type": "application/json",
                "User-Agent": _http_user_agent()}
     api_key = (s.get("openai_api_key") or "").strip()
@@ -345,58 +414,80 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0) -> str:
     }).encode("utf-8")
     raw = final_url = sent_url = None
     for i, url in enumerate(urls):
-        req = urllib.request.Request(url, data=payload, headers=headers,
-                                     method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw       = resp.read().decode("utf-8", "replace")
-                final_url = resp.geturl()
-            sent_url = url
-            break
-        except urllib.error.HTTPError as e:
-            body = ""
+        try_next_url = False
+        for attempt in range(1, attempts + 1):
+            # Rebuilt per attempt: a urllib Request is consumed by urlopen.
+            req = urllib.request.Request(url, data=payload, headers=headers,
+                                         method="POST")
             try:
-                body = e.read().decode("utf-8", "replace")[:400]
-            except Exception:
-                pass
-            # A base URL with a path is usually the API root, but it can also be
-            # a proxy mounted on a sub-path. Retry the versioned shape once when
-            # the endpoint simply isn't there.
-            if e.code in (404, 405) and i + 1 < len(urls):
-                continue
-            if e.code == 403 and "1010" in body:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    raw       = resp.read().decode("utf-8", "replace")
+                    final_url = resp.geturl()
+                sent_url = url
+                break
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", "replace")[:400]
+                except Exception:
+                    pass
+                # A base URL with a path is usually the API root, but it can
+                # also be a proxy mounted on a sub-path. Retry the versioned
+                # shape once when the endpoint simply isn't there.
+                if e.code in (404, 405) and i + 1 < len(urls):
+                    try_next_url = True
+                    break
+                if e.code == 403 and "1010" in body:
+                    raise RuntimeError(
+                        f'LLM endpoint {url} returned HTTP 403 with Cloudflare "error '
+                        'code: 1010" — the gateway is refusing this client\'s '
+                        "user-agent. The API key and model are not the problem. Set "
+                        '"http_user_agent" in config/llm_settings.json to override '
+                        "the agent string.") from e
+                # No key configured → no Authorization header was sent, so the
+                # gateway is rejecting an anonymous request. Its own wording for
+                # that ("No api key passed in.") reads like the key is wrong, which
+                # sends people re-pasting a key that was never stored.
+                if e.code in (401, 403) and not api_key:
+                    raise RuntimeError(
+                        f"LLM endpoint {url} returned HTTP {e.code} and this request "
+                        "carried NO API key: \"openai_api_key\" is empty in "
+                        "config/llm_settings.json. Enter the gateway key in the "
+                        "panel's Settings tab — the base URL and model are not the "
+                        f"problem. Gateway said: {body}") from e
+                if _llm_retryable(e) and attempt < attempts:
+                    _llm_wait(url, attempt, attempts, f"HTTP {e.code}")
+                    continue
+                raise RuntimeError(f"LLM endpoint {url} returned HTTP {e.code}: "
+                                   f"{body}") from e
+            except (OSError, http.client.HTTPException) as e:
+                # urllib.error.URLError is an OSError, so this arm covers both
+                # "never reached the server" and "the reply died in transit".
+                if _llm_retryable(e) and attempt < attempts:
+                    _llm_wait(url, attempt, attempts, type(e).__name__ + f": {e}")
+                    continue
+                if isinstance(e, urllib.error.URLError):
+                    raise RuntimeError(
+                        f"Cannot reach LLM endpoint {url} after {attempt} "
+                        f"attempt(s): {e.reason}") from e
                 raise RuntimeError(
-                    f'LLM endpoint {url} returned HTTP 403 with Cloudflare "error '
-                    'code: 1010" — the gateway is refusing this client\'s '
-                    "user-agent. The API key and model are not the problem. Set "
-                    '"http_user_agent" in config/llm_settings.json to override '
-                    "the agent string.") from e
-            # No key configured → no Authorization header was sent, so the
-            # gateway is rejecting an anonymous request. Its own wording for
-            # that ("No api key passed in.") reads like the key is wrong, which
-            # sends people re-pasting a key that was never stored.
-            if e.code in (401, 403) and not api_key:
-                raise RuntimeError(
-                    f"LLM endpoint {url} returned HTTP {e.code} and this request "
-                    "carried NO API key: \"openai_api_key\" is empty in "
-                    "config/llm_settings.json. Enter the gateway key in the "
-                    "panel's Settings tab — the base URL and model are not the "
-                    f"problem. Gateway said: {body}") from e
-            raise RuntimeError(f"LLM endpoint {url} returned HTTP {e.code}: "
-                               f"{body}") from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"Cannot reach LLM endpoint {url}: {e.reason}") from e
+                    f"Lost the connection to the LLM endpoint {url} after "
+                    f"{attempt} attempt(s): {type(e).__name__}: {e}") from e
+        if sent_url:
+            break
+        if not try_next_url:
+            break
     url = sent_url or urls[-1]
     try:
         data = json.loads(raw)
     except ValueError:
         # A web-UI base URL (…/ui) redirects a POST to the login page, so the
         # body is HTML instead of JSON. Say that, rather than a parse error.
-        if raw.lstrip()[:1] == "<":
+        if (raw or "").lstrip()[:1] == "<":
             raise ValueError(f"{url} returned an HTML page, not JSON (request "
                              f"ended at {final_url}) — the base URL looks like a "
                              f"web-UI path. {_BASE_URL_HINT}") from None
-        raise ValueError(f"Unexpected response from {url}: {raw[:400]}") from None
+        raise ValueError(f"Unexpected response from {url}: {str(raw)[:400]}") from None
     try:
         return data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError):
@@ -463,7 +554,8 @@ def _model_for(role: Optional[str], fallback: str) -> str:
 
 def _llm_generate(prompt: str, model: str = GEMINI_DEFAULT_MODEL,
                   static_prefix: Optional[str] = None,
-                  role: Optional[str] = None) -> str:
+                  role: Optional[str] = None,
+                  attempts: Optional[int] = None) -> str:
     """Provider-agnostic text generation. All pipeline LLM calls go through here.
 
     *static_prefix* is the reusable part (the per-language prompt file); *prompt*
@@ -473,14 +565,19 @@ def _llm_generate(prompt: str, model: str = GEMINI_DEFAULT_MODEL,
     which also relies on the static prefix coming first in the request.
 
     *role* (v0.7) names what this call is for — "translate", "emotion",
-    "match", "mapping" — so the panel can point that stage at its own model."""
+    "match", "mapping" — so the panel can point that stage at its own model.
+
+    *attempts* caps the transient-failure retries on the OpenAI-compatible
+    path. Leave it None for real work; pass 1 from a probe that should report
+    a broken configuration at once instead of waiting out the backoff."""
     s = _get_llm_settings()
     if s.get("provider") == LLM_PROVIDER_SERVER:
         raise ValueError(_SERVER_MODE_ERROR)
     if s.get("provider") == LLM_PROVIDER_OPENAI:
         return _openai_chat(
             (static_prefix or "") + prompt,
-            _model_for(role, (s.get("openai_model") or "").strip() or model))
+            _model_for(role, (s.get("openai_model") or "").strip() or model),
+            attempts=attempts)
     # Vertex / Gemini-key providers: the configured gemini_model overrides the
     # caller's default so the panel's Model field controls these providers too.
     gm = _model_for(role, (s.get("gemini_model") or "").strip() or model)
