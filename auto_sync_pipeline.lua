@@ -1,6 +1,6 @@
 -- @description Fast Syncs — AI dubbing sync for REAPER
 -- @author darpantimsina72
--- @version 0.15.3
+-- @version 0.15.4
 -- @about
 --   Transcribes your Dialogue VO and Dub tracks, asks Gemini which dubbed clip
 --   means the same thing as which English clip, and moves each dubbed clip to
@@ -439,6 +439,9 @@ local _LANG_TO_SCRIPT = {
   bn = "Bengali", ta = "Tamil", te = "Telugu",
   kn = "Kannada", ml = "Malayalam", gu = "Gujarati",
   pa = "Gurmukhi",
+  -- v0.15.4: Assamese and Odia were missing, so both fell through to the
+  -- Devanagari default and their log text rendered as empty boxes.
+  as = "Bengali", ["or"] = "Oriya",
 }
 
 -- Attach a font that covers the configured DUB_LANGUAGE script so Indic log
@@ -1169,6 +1172,23 @@ end
 -- READ SUMMARY FROM RESULTS JSON
 -- ═══════════════════════════════════════════════════════════
 
+-- v0.15.4: pull the worker's problem list out of the results JSON.
+-- The worker writes them as flat strings precisely so this stays a gmatch
+-- over one bracketed block rather than real JSON parsing.
+local function read_problems(content)
+  local out = {}
+  local block = content:match('"problems"%s*:%s*%[(.-)%]')
+  if not block then return out end
+  for entry in block:gmatch('"(.-)"') do
+    local sev, code, msg = entry:match("^([A-Z]+)|([A-Z_]+)|(.*)$")
+    if sev then
+      out[#out + 1] = { severity = sev, code = code, message = msg }
+    end
+  end
+  return out
+end
+
+
 local function read_summary(results_path)
   local c = read_file(results_path)
   if not c then return nil end
@@ -1180,6 +1200,10 @@ local function read_summary(results_path)
     model     = c:match('"model"%s*:%s*"([^"]+)"') or "?",
     language  = c:match('"language"%s*:%s*"([^"]+)"') or "?",
     backend   = c:match('"backend"%s*:%s*"([^"]+)"') or "?",
+    -- v0.15.4: worker-reported problems, flat "SEVERITY|CODE|message"
+    -- strings inside a "problems": [ ... ] array. Absent in older result
+    -- files, which is why this is a separate, failure-tolerant pass.
+    problems  = read_problems(c),
   }
 end
 
@@ -1790,6 +1814,15 @@ local function on_python_done(success)
       elapsed, s.total_en, s.matched, s.total_dub,
       s.unmatched, TRACK_UNSYNC,
       s.model, s.language, s.backend)
+
+    -- Problems the worker found go ABOVE the tip, where they are read.
+    if s.problems and #s.problems > 0 then
+      local probs = { "", "── Problems found ──" }
+      for _, pr in ipairs(s.problems) do
+        probs[#probs + 1] = string.format("[%s] %s", pr.severity, pr.message)
+      end
+      msg = msg .. "\n" .. table.concat(probs, "\n")
+    end
   else
     msg = string.format(
       "Done in %ds!\n\nMoved: %d\nUnmatched: %d\n\n" ..

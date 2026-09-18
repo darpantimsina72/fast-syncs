@@ -77,6 +77,7 @@ reported as a WARNING, not a failure.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -99,7 +100,7 @@ LANGUAGES = ["Bengali", "Hindi", "Kannada", "Malayalam", "Tamil", "Telugu",
 # See run_dub.py for why all four readers carry the same rule.
 # Charset only -- length and edge-whitespace are checked in _lang_name_ok so
 # the rule stays readable and matches the Lua predicate exactly.
-_LANG_NAME_OK = re.compile("^[0-9A-Za-z \-_.()\u0080-\U0010FFFF]+$")
+_LANG_NAME_OK = re.compile(r"^[0-9A-Za-z \-_.()\u0080-\U0010FFFF]+$")
 
 
 # Unicode whitespace, rejected anywhere in a name. Mirrors
@@ -625,6 +626,54 @@ def _read_text(path):
         return f.read()
 
 
+# ── Reusing a paid synthesis after a late failure ───────────────────────────
+# A legacy dub pays ElevenLabs for the speech and Scribe for transcribing it,
+# and only THEN makes the LLM mapping call. A gateway that drops that call
+# used to throw both purchases away: the re-run synthesized and transcribed
+# the very same audio again. This sidecar records what was synthesized so an
+# identical re-run can skip straight to the part that failed.
+_TTS_STATE_SUFFIX = "_tts_state.json"
+
+
+def _dub_fingerprint(tts_text, voice_id, el_model):
+    """Identity of one synthesis. Change any part and the old wav is stale."""
+    h = hashlib.sha1()
+    for part in (tts_text or "", voice_id or "", el_model or ""):
+        h.update(part.encode("utf-8", "replace"))
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
+def _reusable_tts(base, fingerprint, te_srt_path):
+    """A previous run's TTS wav this run may reuse, or None to redo the work.
+
+    Returns a path ONLY when the recorded fingerprint matches exactly — same
+    enriched text, same voice, same ElevenLabs model — and both the wav and
+    its transcribed target SRT are still on disk. Every other case redoes the
+    synthesis, because reusing a wav that no longer matches the script would
+    dub the wrong words silently, which is far worse than paying twice.
+    """
+    try:
+        state = json.loads(_read_text(base + _TTS_STATE_SUFFIX))
+    except Exception:
+        return None
+    if not isinstance(state, dict) or state.get("fingerprint") != fingerprint:
+        return None
+    wav = state.get("tts_wav") or ""
+    if not (wav and os.path.isfile(wav) and os.path.isfile(te_srt_path)):
+        return None
+    return wav
+
+
+def _remember_tts(base, fingerprint, tts_path):
+    """Record what was synthesized so a later identical re-run can skip it."""
+    try:
+        _write_text(base + _TTS_STATE_SUFFIX, json.dumps(
+            {"fingerprint": fingerprint, "tts_wav": tts_path}, indent=2))
+    except Exception:
+        pass            # a missing sidecar only costs one re-synthesis
+
+
 def _resolve_voice(pl, api_key, language, cli_voice_id):
     """Return (voice_id, description) for the dub voice.
 
@@ -1088,18 +1137,31 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
         _say("S2d", "Emotion enrichment disabled (--no-emotion / settings) "
                     "— sending the bare punctuated text to TTS.")
 
-    _say("S2d", f"Synthesizing {language} speech (voice {voice_id}, "
-                f"model {args.el_model})…")
-    tts_path = os.path.join(
-        out_dir, pl._tts_output_name(language, audio_path, "_tts"))
-    # synthesize_tts_elevenlabs may divert to a "-2" name when the previous
-    # wav is still locked (open REAPER project) — use the returned path.
-    tts_path = pl.synthesize_tts_elevenlabs(
-        tts_text, tts_path, api_key=api_key, voice_id=voice_id,
-        model_id=args.el_model,
-        status_cb=lambda m: _say("S2d", m))
+    # Everything from here to the end of S3b is paid work. If the previous
+    # run got this far and then died later — the mapping call at S3c is the
+    # usual culprit — the same audio and the same transcription are already
+    # on disk, and redoing them buys nothing but a second bill.
+    te_srt_path = base + "_sync_te.srt"
+    fingerprint = _dub_fingerprint(tts_text, voice_id, args.el_model)
+    reused_tts = _reusable_tts(base, fingerprint, te_srt_path)
+    if reused_tts:
+        tts_path = reused_tts
+        _say("S2d", "Reusing the speech from the previous run — same script, "
+                    "same voice, same model: "
+                    f"{os.path.basename(tts_path)}")
+    else:
+        _say("S2d", f"Synthesizing {language} speech (voice {voice_id}, "
+                    f"model {args.el_model})…")
+        tts_path = os.path.join(
+            out_dir, pl._tts_output_name(language, audio_path, "_tts"))
+        # synthesize_tts_elevenlabs may divert to a "-2" name when the previous
+        # wav is still locked (open REAPER project) — use the returned path.
+        tts_path = pl.synthesize_tts_elevenlabs(
+            tts_text, tts_path, api_key=api_key, voice_id=voice_id,
+            model_id=args.el_model,
+            status_cb=lambda m: _say("S2d", m))
+        _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)}")
     manifest["tts_wav"] = tts_path
-    _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)}")
 
     # ── [S3a] English sync SRT ──────────────────────────────────────────────
     en_sync_path = base + "_sync_en.srt"
@@ -1115,24 +1177,32 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
         _say("S3a", "English sync SRT saved.")
 
     # ── [S3b] Target-language SRT from the TTS audio ───────────────────────
-    _say("S3b", "Loading TTS audio and detecting regions…")
-    # tts_path is a WAV this pipeline just wrote (tts.py exports format="wav"),
-    # so the shared loader handles it — same mono float32 at the native rate
-    # that librosa.load(sr=None, mono=True) returned here before.
-    te_y, te_sr = pl._load_audio_any(tts_path)
-    te_regions = pl._detect_regions_from_audio(
-        te_y, te_sr, pl.DEFAULT_BN_THR_DB, pl.DEFAULT_BN_HYS_DB,
-        pl.DEFAULT_BN_MIN_MS)
-    if not te_regions:
-        raise RuntimeError("No regions detected in the TTS audio.")
-    _say("S3b", f"Transcribing TTS audio ({len(te_regions)} regions)…")
-    te_result = pl._transcribe_audio(tts_path, api_key)
-    te_words = te_result.get("words", [])
-    if not te_words:
-        raise RuntimeError("No word data from ElevenLabs for the TTS audio.")
-    te_srt = pl._build_target_subtitle_srt(te_regions, te_words)
-    _write_text(base + "_sync_te.srt", te_srt)
-    _say("S3b", f"{language} sync SRT saved.")
+    if reused_tts:
+        te_srt = _read_text(te_srt_path)
+        _say("S3b", f"Reusing the {language} sync SRT from the previous run "
+                    "— no second Scribe pass.")
+    else:
+        _say("S3b", "Loading TTS audio and detecting regions…")
+        # tts_path is a WAV this pipeline just wrote (tts.py exports format="wav"),
+        # so the shared loader handles it — same mono float32 at the native rate
+        # that librosa.load(sr=None, mono=True) returned here before.
+        te_y, te_sr = pl._load_audio_any(tts_path)
+        te_regions = pl._detect_regions_from_audio(
+            te_y, te_sr, pl.DEFAULT_BN_THR_DB, pl.DEFAULT_BN_HYS_DB,
+            pl.DEFAULT_BN_MIN_MS)
+        if not te_regions:
+            raise RuntimeError("No regions detected in the TTS audio.")
+        _say("S3b", f"Transcribing TTS audio ({len(te_regions)} regions)…")
+        te_result = pl._transcribe_audio(tts_path, api_key)
+        te_words = te_result.get("words", [])
+        if not te_words:
+            raise RuntimeError("No word data from ElevenLabs for the TTS audio.")
+        te_srt = pl._build_target_subtitle_srt(te_regions, te_words)
+        _write_text(te_srt_path, te_srt)
+        _say("S3b", f"{language} sync SRT saved.")
+        # Written only now: both paid calls are done and their outputs are on
+        # disk, so a re-run that fails later can pick up from here.
+        _remember_tts(base, fingerprint, tts_path)
 
     # ── [S3c] LLM subtitle mapping ──────────────────────────────────────────
     _say("S3c", "Calling the LLM for EN <-> target subtitle mapping…")
@@ -1274,8 +1344,11 @@ def _preflight_llm(pl):
     """
     provider, model = pl._active_provider_and_model()
     _note(f"Checking the LLM is reachable ({provider}, {model})…")
+    # attempts=1: a probe must report a broken configuration straight away.
+    # Real calls retry transient faults with a backoff; waiting that out here
+    # would just delay the message that tells the user what to fix.
     reply = pl._llm_generate(
-        "Reply with the single word OK and nothing else.", model)
+        "Reply with the single word OK and nothing else.", model, attempts=1)
     if not (reply or "").strip():
         raise RuntimeError(
             f"The LLM at {provider} ({model}) accepted the connection but "

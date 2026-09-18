@@ -83,3 +83,6 @@ feedback_outbox/
 # copy against the new one to delete files a release no longer ships. It only
 # appears in ZIP/release installs, never in a git checkout.
 .fast-syncs-manifest
+
+# Agent deliverables for the author — never committed
+reports/

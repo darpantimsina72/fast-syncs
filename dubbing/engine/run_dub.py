@@ -97,7 +97,7 @@ LANGUAGES = ["Bengali", "Hindi", "Kannada", "Malayalam", "Tamil", "Telugu",
 # Unicode, which quietly re-admits ';', '|' and other metacharacters.
 # Charset only -- length and edge-whitespace are checked in _lang_name_ok so
 # the rule stays readable and matches the Lua predicate exactly.
-_LANG_NAME_OK = re.compile("^[0-9A-Za-z \-_.()\u0080-\U0010FFFF]+$")
+_LANG_NAME_OK = re.compile(r"^[0-9A-Za-z \-_.()\u0080-\U0010FFFF]+$")
 
 
 # Unicode whitespace, rejected anywhere in a name. Mirrors

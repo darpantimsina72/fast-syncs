@@ -2038,9 +2038,58 @@ local function append_named_track(name)
   return tr
 end
 
+-- ── v0.15.4: build waveform peaks for API-inserted media ───────────────────
+-- REAPER draws a waveform from a .reapeaks sidecar file. Adding media through
+-- the UI queues a peak build; adding it through the API
+-- (PCM_Source_CreateFromFile + SetMediaItemTake_Source) does NOT. The engine
+-- has just written these wavs, so no .reapeaks exists yet and every imported
+-- item paints as a flat grey block. UpdateArrange() only repaints — it does
+-- not build peaks. Minimising and restoring REAPER appeared to "fix" it only
+-- because the background builder had caught up by then.
+--
+-- REAPER's own API help for PCM_Source_BuildPeaks:
+--   "call PCM_Source_BuildPeaks(src,0), and if that returns nonzero, call
+--    PCM_Source_BuildPeaks(src,1) periodically until it returns zero (it
+--    returns the percentage of the file remaining), then call
+--    PCM_Source_BuildPeaks(src,2) to finalize."
+-- So: start here, pump from the defer loop, never block the UI.
+V5.peak_srcs = V5.peak_srcs or {}
+
+function V5.queue_peaks(src)
+  if not src then return end
+  if not reaper.PCM_Source_BuildPeaks then return end   -- very old REAPER
+  local ok, need = pcall(reaper.PCM_Source_BuildPeaks, src, 0)
+  if ok and need and need ~= 0 then
+    V5.peak_srcs[#V5.peak_srcs + 1] = src
+  end
+end
+
+-- Called once per defer frame. Advances every queued build a slice, finalises
+-- the ones that finished, and repaints the arrange view when the queue drains
+-- so the waveforms appear without the user touching the window.
+function V5.pump_peaks()
+  local q = V5.peak_srcs
+  if not q or #q == 0 then return end
+  if not reaper.PCM_Source_BuildPeaks then V5.peak_srcs = {} return end
+  local still = {}
+  for i = 1, #q do
+    local ok, left = pcall(reaper.PCM_Source_BuildPeaks, q[i], 1)
+    if not ok then
+      -- source went away (project closed, item deleted) — drop it
+    elseif left and left ~= 0 then
+      still[#still + 1] = q[i]
+    else
+      pcall(reaper.PCM_Source_BuildPeaks, q[i], 2)
+    end
+  end
+  V5.peak_srcs = still
+  if #still == 0 then reaper.UpdateArrange() end
+end
+
 local function add_file_item(track, path, position, length, startoffs, take_name)
   local src = reaper.PCM_Source_CreateFromFile(path)
   if not src then return nil end
+  V5.queue_peaks(src)
   local item = reaper.AddMediaItemToTrack(track)
   local take = reaper.AddTakeToMediaItem(item)
   reaper.SetMediaItemTake_Source(take, src)
@@ -3306,6 +3355,7 @@ local function apply_regen_result(wav)
   if not src then
     return false, "REAPER could not open the media file:\n" .. wav
   end
+  V5.queue_peaks(src)
 
   reaper.Undo_BeginBlock()
   reaper.SetMediaItemTake_Source(take, src)
@@ -3726,6 +3776,7 @@ local function apply_voice_change_result(wav)
   if not src then
     return false, "REAPER could not open the media file:\n" .. wav
   end
+  V5.queue_peaks(src)
 
   reaper.Undo_BeginBlock()
   local orig = _find_track_by_guid(p.guid)
@@ -5285,6 +5336,7 @@ function V5.tts_import(wav)
   if not src then
     return false, "REAPER could not open the media file:\n" .. wav
   end
+  V5.queue_peaks(src)
   local tr = V5.find_or_append_track("TTS")
   local pos = reaper.GetCursorPosition()
   reaper.Undo_BeginBlock()
@@ -7162,6 +7214,8 @@ local function main()
     -- v0.13: the settings window is a sibling top-level window, drawn after
     -- the main one closes its Begin/End pair. Closing it never closes the app.
     V5.ui_settings_window(_ui_ctx)
+
+    V5.pump_peaks()
 
     _ui_window_open = _ui_window_open and open
     if _ui_window_open then
