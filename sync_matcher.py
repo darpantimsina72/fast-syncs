@@ -181,8 +181,14 @@ _USE_PROXY = bool(_API_BASE)
 # Auto-detect is usually most accurate, but misfires on some scripts (e.g.
 # Kannada 'kn' detected as Nepali/Hindi). Set SYNC_ELEVENLABS_FORCE_LANG=1
 # to pass the known language through. Works in both direct and proxy mode.
+# v0.15.4: this now defaults to ON. The user always picks the dub language in
+# the UI, so Scribe never needs to guess — and when it guesses wrong (Kannada
+# read as Nepali, Hindi read as Nepali: both Devanagari) every transcript on the
+# track is wrong, Gemini cannot match anything, and the clips end up on the
+# Un sync track. That is the "works for some languages, not others" report.
+# Set SYNC_ELEVENLABS_FORCE_LANG=0 to go back to auto-detect.
 _ELEVENLABS_FORCE_LANG = os.environ.get(
-    "SYNC_ELEVENLABS_FORCE_LANG", "").strip().lower() in ("1", "true", "yes", "on")
+    "SYNC_ELEVENLABS_FORCE_LANG", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _proxy_post(path, json_body=None, multipart=None, timeout=180):
@@ -234,6 +240,46 @@ try:
     HAS_SOUNDFILE = True
 except ImportError:
     HAS_SOUNDFILE = False
+
+
+# ── Problem collector ────────────────────────────────────────────────────
+# Everything that degrades a run but does not stop it used to be a [WARN]
+# printed into sync_python_log.txt — a file nobody opens. So a run could
+# silently transcribe the whole source file for every clip and still report
+# "RESULT: 28/40 matched" as though that were normal.
+#
+# Problems are collected here, printed as a block at the end of the run, and
+# written into sync_results.json as a "problems" array of flat
+# "SEVERITY|CODE|message" strings. Flat strings, not objects: the Lua reads
+# that file with line-wise pattern matching, and strings are the one shape it
+# cannot get wrong.
+_PROBLEMS = []
+_PROBLEM_SEEN = set()
+
+
+def report_problem(severity, code, message, once_key=None):
+    """Record a user-visible problem. severity: ERROR | WARN | INFO."""
+    key = once_key or (severity, code, message)
+    if key in _PROBLEM_SEEN:
+        return
+    _PROBLEM_SEEN.add(key)
+    _PROBLEMS.append({"severity": severity, "code": code, "message": message})
+
+
+def problems_as_strings():
+    return [f'{p["severity"]}|{p["code"]}|{p["message"]}' for p in _PROBLEMS]
+
+
+def print_problems():
+    if not _PROBLEMS:
+        return
+    order = {"ERROR": 0, "WARN": 1, "INFO": 2}
+    print(f"\n{'=' * 60}")
+    print(f"  PROBLEMS FOUND: {len(_PROBLEMS)}")
+    print(f"{'=' * 60}")
+    for p in sorted(_PROBLEMS, key=lambda x: order.get(x["severity"], 9)):
+        print(f'  [{p["severity"]}] {p["code"]}: {p["message"]}')
+    print(f"{'=' * 60}")
 
 # Vertex AI (google-genai) — preferred path: no free-tier rate limits,
 # no 503 overload storms, no 404 model-shopping. Install with:
@@ -357,10 +403,53 @@ def extract_chunk_soundfile(wav_path, take_offset, duration, out_path):
     return out_path
 
 
+def _find_ffmpeg():
+    """Locate ffmpeg: PATH first, then the places the installers put it.
+
+    Mirrors dubbing/engine/pipeline/config.py:_find_ffmpeg(). Auto Sync used a
+    bare "ffmpeg" here, so on Windows — where setup_windows.bat drops the binary
+    into dubbing/ffmpeg/ or WinGet Links rather than onto the PATH REAPER hands
+    its child processes — the ffmpeg slice backend was unreachable and AAC-family
+    sources (.m4a/.mp4/.aac) silently fell back to whole-file transcription.
+    """
+    import shutil as _shutil
+    exe = "ffmpeg.exe" if _IS_WINDOWS else "ffmpeg"
+    found = _shutil.which("ffmpeg")
+    if found:
+        return found
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(here, "ffmpeg", "bin", exe),
+        os.path.join(here, "ffmpeg", exe),
+        os.path.join(here, "dubbing", "ffmpeg", "bin", exe),
+        os.path.join(here, "dubbing", "ffmpeg", exe),
+    ]
+    if _IS_WINDOWS:
+        candidates += [
+            os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe"),
+            os.path.expandvars(r"%ProgramFiles%\ffmpeg\bin\ffmpeg.exe"),
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+        ]
+    else:
+        candidates += ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg",
+                       "/usr/bin/ffmpeg"]
+    for c in candidates:
+        if c and os.path.isfile(c):
+            return c
+    return None
+
+
+FFMPEG_PATH = _find_ffmpeg()
+
+
 def extract_chunk_ffmpeg(wav_path, take_offset, duration, out_path):
     """Extract audio slice using ffmpeg subprocess (fallback)."""
+    if not FFMPEG_PATH:
+        raise RuntimeError(
+            "ffmpeg not found (checked PATH, ffmpeg/, dubbing/ffmpeg/ and the "
+            "standard install locations) — cannot slice this audio format")
     cmd = [
-        "ffmpeg", "-y",
+        FFMPEG_PATH, "-y",
         "-i", wav_path,
         "-ss", str(take_offset),
         "-t",  str(duration),
@@ -419,18 +508,38 @@ def extract_chunk_wave(wav_path, take_offset, duration, out_path):
 
 def _extract_slice(wav_path, take_offset, duration, out_path):
     """Slice an audio chunk using the best available backend, in order:
-      1. soundfile  — any format, mono downmix (only if installed)
+      1. soundfile  — most formats, mono downmix (only if installed)
       2. stdlib wave — PCM .wav, zero deps (thin-client default)
       3. ffmpeg      — any format, if the binary is on PATH
     Raises only if all backends fail.
+
+    EVERY backend is tried in turn. soundfile is built on libsndfile, which
+    cannot decode AAC-family containers (.m4a / .mp4 / .aac / .wma) and chokes
+    on some .ogg files. Before this loop existed, an installed soundfile
+    returned early, its exception escaped to the caller, and the caller fell
+    back to transcribing the WHOLE source file — so every clip on the track
+    got identical text and semantic matching collapsed into "unmatched".
+    ffmpeg handles those formats; it must stay reachable.
     """
+    errors = []
+
     if HAS_SOUNDFILE:
-        return extract_chunk_soundfile(wav_path, take_offset, duration, out_path)
+        try:
+            return extract_chunk_soundfile(wav_path, take_offset, duration, out_path)
+        except Exception as e:
+            errors.append(f"soundfile: {e}")
+
     try:
         return extract_chunk_wave(wav_path, take_offset, duration, out_path)
-    except Exception:
-        pass
-    return extract_chunk_ffmpeg(wav_path, take_offset, duration, out_path)
+    except Exception as e:
+        errors.append(f"wave: {e}")
+
+    try:
+        return extract_chunk_ffmpeg(wav_path, take_offset, duration, out_path)
+    except Exception as e:
+        errors.append(f"ffmpeg: {e}")
+
+    raise RuntimeError("all slice backends failed — " + " | ".join(errors))
 
 
 def get_audio_for_item(item_id, wav_path, take_offset, duration):
@@ -481,6 +590,12 @@ def get_audio_for_item(item_id, wav_path, take_offset, duration):
             except Exception as e:
                 print(f"    [WARN] Could not extract first chunk for item {item_id}: {e}")
                 print(f"    [WARN] Falling back to full source file (accuracy may suffer)")
+                report_problem(
+                    "ERROR", "SLICE_FAILED",
+                    f"Could not cut item {item_id} out of "
+                    f"{os.path.basename(wav_path)} ({e}). The WHOLE file was "
+                    f"transcribed instead, so this clip's text is wrong.",
+                    once_key=("SLICE_FAILED", wav_path))
         return wav_path
 
     # Need to extract the slice
@@ -494,6 +609,13 @@ def get_audio_for_item(item_id, wav_path, take_offset, duration):
     except Exception as e:
         print(f"    [WARN] Could not extract chunk for item {item_id}: {e}")
         print(f"    [WARN] Falling back to full source file (accuracy may suffer)")
+        report_problem(
+            "ERROR", "SLICE_FAILED",
+            f"Could not cut clips out of {os.path.basename(wav_path)} ({e}). "
+            f"The WHOLE file was transcribed for every affected clip, so their "
+            f"text is identical and matching cannot work. Convert the track's "
+            f"media to .wav, or install ffmpeg.",
+            once_key=("SLICE_FAILED", wav_path))
         return wav_path
 
 
@@ -1660,6 +1782,16 @@ def _place_with_springs(en_items, dub_items, sections, unmatched_dub_ids,
         print(f"\n  Order-preserving push fixes : {order_pushes}")
     if order_unsynced:
         print(f"  Order violations → Unsync   : {order_unsynced}")
+        # These clips WERE matched correctly — they are taken off the Dub track
+        # only because the dubbed audio is longer than the English slot. From
+        # the timeline that is indistinguishable from "the sync threw my dub
+        # away", so it must be reported rather than left in the log.
+        report_problem(
+            "WARN", "DROPPED_FOR_OVERFLOW",
+            f"{order_unsynced} clip(s) were matched correctly but moved to the "
+            f"Un sync track because the dubbed audio does not fit the English "
+            f"slot (dub ids: "
+            f"{', '.join(str(i) for i in sorted(unsync_positions))}).")
     if not order_pushes and not order_unsynced:
         print("\n  DUB order already correct — no fixes needed.")
 
@@ -1824,6 +1956,49 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
         print(f"  [WARN] Many empty transcripts (EN {en_empty}/{len(en_items)}, "
               f"DUB {dub_empty}/{len(dub_items)}) — match quality will suffer; "
               "check ASR errors above")
+        report_problem("WARN", "ASR_MOSTLY_EMPTY",
+                       f"More than half the clips transcribed to nothing "
+                       f"(EN {en_empty}/{len(en_items)}, "
+                       f"DUB {dub_empty}/{len(dub_items)}).")
+
+    # ── Identical-transcript gate ────────────────────────────
+    # The failure mode the empty-gate above cannot see: slicing failed, every
+    # clip on the track was transcribed from the WHOLE source file, so every
+    # transcript is the same non-empty string. Gemini then has nothing to tell
+    # the clips apart and the run ends with most clips on the Un sync track —
+    # which is what "the sync throws my dub away" looks like from the timeline.
+    def _dup_ratio(items):
+        texts = [(i.get("transcript") or "").strip() for i in items]
+        texts = [t for t in texts if t]
+        if len(texts) < 3:
+            return 0.0, 0, 0
+        from collections import Counter
+        top_text, top_n = Counter(texts).most_common(1)[0]
+        return top_n / float(len(texts)), top_n, len(texts)
+
+    for _label, _items in (("EN", en_items), ("DUB", dub_items)):
+        _ratio, _n, _tot = _dup_ratio(_items)
+        if _ratio >= 0.9:
+            print(f"\n  [ERROR] {_n}/{_tot} {_label} clips produced the SAME "
+                  f"transcript.")
+            print("          Per-clip audio slicing failed, so every clip was "
+                  "transcribed from the whole source file.")
+            print("          Matching cannot work on identical text. NOT "
+                  "proceeding.")
+            print("          Fix: convert the track's media to .wav, or install "
+                  "ffmpeg so non-WAV formats can be sliced.")
+            report_problem("ERROR", "IDENTICAL_TRANSCRIPTS",
+                           f"{_n} of {_tot} {_label} clips transcribed to the "
+                           f"same text — per-clip slicing failed. Convert the "
+                           f"media to .wav or install ffmpeg.")
+            print_problems()
+            raise SystemExit(1)
+        if _ratio >= 0.5:
+            print(f"  [WARN] {_n}/{_tot} {_label} clips share one transcript — "
+                  "slicing may be partly failing.")
+            report_problem("WARN", "REPEATED_TRANSCRIPTS",
+                           f"{_n} of {_tot} {_label} clips share one "
+                           f"transcript; matching accuracy will be poor.")
 
     # Resolve dubbing script (optional — boosts Gemini's grouping accuracy)
     script_text = _load_script_text(script_text, script_path)
@@ -2126,6 +2301,10 @@ def transcribe(filepath, task="transcribe", language=None,
         "nep": "ne", "hin": "hi", "tam": "ta", "tel": "te", "kan": "kn",
         "mal": "ml", "ben": "bn", "guj": "gu", "mar": "mr", "pan": "pa",
         "urd": "ur", "eng": "en", "zho": "zh", "jpn": "ja", "kor": "ko",
+        # v0.15.4: Assamese and Odia are in the supported-language list
+        # but were missing here, so "asm"/"ori" reached the STT provider
+        # unnormalised and were not valid ISO 639-1 language codes.
+        "asm": "as", "ori": "or", "ory": "or", "ori_orya": "or",
     }
     if language:
         language = _LANG_NORMALIZE.get(language.lower(), language.lower())
@@ -2604,6 +2783,9 @@ def main():
             "backend": matcher_backend,
             "asr": asr_label,
         },
+        # v0.15.4: flat "SEVERITY|CODE|message" strings so the Lua importer can
+        # read them with one gmatch. Additive — older importers ignore the key.
+        "problems": problems_as_strings(),
     }
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -2615,6 +2797,16 @@ def main():
     _total_elapsed = time.time() - _t_total
     _mins = int(_total_elapsed // 60)
     _secs = int(_total_elapsed % 60)
+    if n_unmatched and len(dub_items):
+        _pct = 100.0 * n_unmatched / len(dub_items)
+        if _pct >= 25.0:
+            report_problem(
+                "WARN", "MANY_UNMATCHED",
+                f"{n_unmatched} of {len(dub_items)} dub clips "
+                f"({_pct:.0f}%) ended on the Un sync track.")
+
+    print_problems()
+
     print(f"\n{'=' * 60}")
     print(f"  RESULT: {n_matched}/{len(dub_items)} matched, "
           f"{n_unmatched} unmatched")
