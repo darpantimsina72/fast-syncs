@@ -44,6 +44,89 @@ def _srt_ts(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
+# ── Speech regions when the loudness gate cannot work (v0.15.5) ────────────
+#
+# _detect_regions_from_audio opens on anything above a FIXED level (-42 dBFS)
+# and closes when it drops below. That is right for a clean voice recording and
+# wrong for a talk with a music bed under it: the bed never falls below the
+# gate, so the gate never closes, and the whole file comes back as ONE region.
+#
+# It fails silently — one region is not zero regions, so nothing raises. The
+# damage shows up much later: one English cue for the entire talk, every dub
+# piece but one loses the competition for that single slot, and the rest are
+# chained onto the Un sync track at the far end of the timeline. "It threw the
+# whole dub away" is what this looks like from REAPER.
+#
+# The transcriber already returns a start and end time for every word, and a
+# music bed cannot confuse those — they come from recognised speech, not from
+# loudness. So when the gate has plainly collapsed, the words become the
+# authority instead.
+
+# A gap between words long enough to be a real pause rather than a breath.
+# 350 ms is the value the analysis format already treats as an audible gap.
+WORD_REGION_GAP_S = 0.35
+# Anything shorter than this is a fragment, not a line worth its own cue.
+WORD_REGION_MIN_S = 0.30
+# One region covering at least this much of the audio means the gate collapsed.
+REGION_COLLAPSE_SHARE = 0.80
+
+
+def regions_from_words(words, gap_s=WORD_REGION_GAP_S, min_s=WORD_REGION_MIN_S):
+    """Speech regions built from word timings alone. Immune to a music bed.
+
+    Consecutive words are joined into one region until a gap longer than
+    *gap_s* appears. Regions shorter than *min_s* are dropped, because a single
+    stray word is not a line. Returns the same (start_s, end_s) shape as
+    _detect_regions_from_audio, so callers cannot tell the two apart.
+    """
+    timed = []
+    for w in words or []:
+        if w.get("type", "word") != "word":
+            continue
+        if not (w.get("text") or "").strip():
+            continue
+        try:
+            start = float(w.get("start", 0.0))
+            end = float(w.get("end", start))
+        except (TypeError, ValueError):
+            continue
+        if end < start:
+            end = start
+        timed.append((start, end))
+    if not timed:
+        return []
+
+    timed.sort(key=lambda p: p[0])
+    regions = []
+    cur_start, cur_end = timed[0]
+    for start, end in timed[1:]:
+        if start - cur_end > gap_s:
+            regions.append((cur_start, cur_end))
+            cur_start, cur_end = start, end
+        else:
+            cur_end = max(cur_end, end)
+    regions.append((cur_start, cur_end))
+    return [(s, e) for (s, e) in regions if (e - s) >= min_s]
+
+
+def regions_collapsed(regions, audio_dur):
+    """True when the loudness gate produced one block covering most of the audio.
+
+    Two separate symptoms, both meaning the same thing: no regions at all, or a
+    single region swallowing the file. A genuinely continuous monologue can also
+    land here — that is why the caller warns rather than failing, and why the
+    word-timing rebuild is used only when it finds MORE regions than this did.
+    """
+    if not regions:
+        return True
+    if len(regions) > 1:
+        return False
+    if not audio_dur or audio_dur <= 0:
+        return False
+    start, end = regions[0]
+    return (end - start) >= REGION_COLLAPSE_SHARE * float(audio_dur)
+
+
 def _build_subtitle_srt(regions, words) -> str:
     if not regions:
         return ""
