@@ -131,7 +131,7 @@ local V5 = {
   -- v0.13 UI state. Declared here because load_settings() runs long before
   -- the UI helpers are defined and must not have its values overwritten.
   adv           = {},        -- "Show advanced" reveal key -> true
-  settings_open = false,     -- the settings window (own window, not a tab)
+  settings_open = false,     -- v0.15.7: "select the Settings tab next frame"
   settings_pane = "connection",
   tool          = "tts",     -- Tools tab: tts | regen | voice
 }
@@ -6830,7 +6830,10 @@ function V5.ui_settings_body(ctx)
   _ui_begin_disabled(ctx, locked)
 
   -- Sidebar. A child window so the pane beside it can scroll on its own.
-  if reaper.ImGui_BeginChild(ctx, '##panes', 132, -38) then
+  -- Room under the panes for the Save row (and, inside the main window,
+  -- for the status bar below the tab bar too).
+  local bottom = V5.settings_bottom or 38
+  if reaper.ImGui_BeginChild(ctx, '##panes', 132, -bottom) then
     for _, pane in ipairs(V5.PANES) do
       local on = (V5.settings_pane == pane[1])
       reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),
@@ -6851,7 +6854,7 @@ function V5.ui_settings_body(ctx)
   end
 
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_BeginChild(ctx, '##pane_body', -1, -38) then
+  if reaper.ImGui_BeginChild(ctx, '##pane_body', -1, -bottom) then
     local drawn = false
     for _, pane in ipairs(V5.PANES) do
       if V5.settings_pane == pane[1] then pane[3](ctx); drawn = true end
@@ -6888,8 +6891,11 @@ function V5.ui_settings_body(ctx)
   _ui_end_disabled(ctx)
 end
 
--- Its own top-level window, so it can be moved, resized and closed without
--- disturbing the work surface behind it.
+-- v0.15.7: Settings is a TAB of the main window now (see the tab bar in
+-- main()). As its own top-level window it opened floating on a fresh
+-- machine, had to be dragged around, and docking it into the main window or
+-- a REAPER docker could leave no obvious way back to the other tabs. This
+-- separate window survives only for ReaImGui builds without tab support.
 function V5.ui_settings_window(ctx)
   if not V5.settings_open then return end
   reaper.ImGui_SetNextWindowSize(ctx, 620, 470,
@@ -6947,7 +6953,9 @@ function V5.ui_header(ctx)
   local ww = reaper.ImGui_GetWindowWidth(ctx)
   reaper.ImGui_SameLine(ctx, math.max(220, ww - 122))
   if reaper.ImGui_Button(ctx, '⚙  Settings', 104, 22) then
-    V5.settings_open = not V5.settings_open
+    -- Selects the Settings tab on the next frame (or opens the fallback
+    -- window on a ReaImGui without tabs).
+    V5.settings_open = true
   end
 end
 
@@ -7418,11 +7426,28 @@ local function main()
           _render_log_child(_ui_ctx, -34)
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
+        -- v0.15.7: Settings lives here, as the fifth tab. The header's gear
+        -- jumps to it. One window: nothing to drag, dock or lose.
+        local sflags = 0
+        if V5.settings_open and reaper.ImGui_TabItemFlags_SetSelected then
+          sflags = reaper.ImGui_TabItemFlags_SetSelected()
+        end
+        V5.settings_open = false
+        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Settings  ', nil, sflags) then
+          V5.settings_bottom = 72   -- Save row + the status bar below
+          reaper.ImGui_PushStyleVar(_ui_ctx, reaper.ImGui_StyleVar_ItemSpacing(), 10.0, 8.0)
+          reaper.ImGui_PushStyleVar(_ui_ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
+          reaper.ImGui_PushStyleVar(_ui_ctx, reaper.ImGui_StyleVar_FramePadding(), 8.0, 5.0)
+          V5.ui_settings_body(_ui_ctx)
+          reaper.ImGui_PopStyleVar(_ui_ctx, 3)
+          reaper.ImGui_EndTabItem(_ui_ctx)
+        end
         reaper.ImGui_EndTabBar(_ui_ctx)
       else
         -- Very old ReaImGui without tab support: the Dub phase inline. The
         -- settings window is a separate window, so the header's gear still
         -- reaches everything else.
+        V5.no_tabs = true
         render_phase()
         if _ui_phase == "setup" then ui_settings_section(_ui_ctx, false) end
         if _ui_phase == "running" then _render_log_child(_ui_ctx, -34) end
@@ -7437,7 +7462,10 @@ local function main()
 
     -- v0.13: the settings window is a sibling top-level window, drawn after
     -- the main one closes its Begin/End pair. Closing it never closes the app.
-    V5.ui_settings_window(_ui_ctx)
+    if V5.no_tabs then
+      V5.settings_bottom = 38
+      V5.ui_settings_window(_ui_ctx)
+    end
 
     V5.pump_peaks()
 
