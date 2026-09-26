@@ -31,6 +31,10 @@ Nothing reaches a user until you merge into `production`.
    - `VERSION` — a single line, e.g. `0.14.0`
    - the `-- @version` header at the top of `auto_sync_pipeline.lua`
 
+   Also add the new version as a line in `rollback_versions.txt`, so later
+   releases offer it in Settings > About > Roll back. Never list 0.16.x — that
+   line was abandoned.
+
 2. **Merge `main` into `production`.**
 
    ```bash
@@ -80,7 +84,14 @@ whatever branch the clone is on. If you cloned before this change you are on
 
 ## Rolling back
 
-Something shipped broken? Two ways, no repo access needed:
+Something shipped broken? Three ways, no repo access needed:
+
+**In the app (0.15.6+):** Settings > About > pick a version > **Roll back…**.
+It runs `update.sh --version X.Y.Z` / `update.bat --version X.Y.Z`, which
+installs that exact release ZIP. The Update button returns to the newest one.
+On a git checkout the roll-back overlays the ZIP too (git can only move
+forward), which leaves the checkout dirty — fine for users, not for a
+developer's working copy.
 
 **Any user, right now:** download the previous `fast-syncs.zip` from the
 [Releases page](https://github.com/darpantimsina72/fast-syncs/releases) and

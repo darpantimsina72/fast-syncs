@@ -24,17 +24,19 @@ Adaptations (everything else is verbatim):
     --test-llm manifest.
 """
 
+import hashlib
 import http.client
 import json
 import os
 import re
 import socket
+import threading
 import time
 import urllib.error
 import urllib.request
 from typing import Dict, List, Optional, Set, Tuple
 
-from .config import (CONFIG_DIR, GEMINI_DEFAULT_MODEL, LLM_DEFAULT_BASE_URL,
+from .config import (CONFIG_DIR, DATA_DIR, GEMINI_DEFAULT_MODEL, LLM_DEFAULT_BASE_URL,
                      LLM_PROVIDER_GEMINI, LLM_PROVIDER_OPENAI,
                      LLM_PROVIDER_SERVER, LLM_PROVIDER_VERTEX,
                      LLM_PROVIDERS, LLM_SETTINGS_FILE,
@@ -552,10 +554,92 @@ def _model_for(role: Optional[str], fallback: str) -> str:
     return fallback
 
 
+# ─── On-disk reply cache for the mechanical LLM calls ───────────────────────
+# A dub that fails late (TTS quota, a dropped gateway, a locked wav) used to
+# pay for — and wait for — every LLM call again on the re-run. For the
+# MECHANICAL roles an identical request now reuses the reply it got before:
+#
+#   match    script <-> English section matching, and line shortening
+#   emotion  Step-4 emotion tags (also lets the legacy TTS-reuse fingerprint,
+#            which covers the enriched text, actually match on a re-run)
+#   mapping  legacy EN <-> target subtitle mapping
+#
+# NOT cached: "translate" (Step 1-3). Re-running the translate stage is how a
+# user asks for a fresh translation variant, so it must stay a live call.
+# Also never cached: probes / --test-llm (no role, or attempts= given) — they
+# exist to prove the endpoint works right now.
+#
+# Key = sha256 over provider, resolved model, gateway base URL, the static
+# prompt prefix, the per-request prompt and the generation parameters (none
+# are sent today; the slot keeps old entries from matching if some ever are).
+# Any change to the script, prompt files, model or provider is a miss. A
+# missing, unreadable or corrupt entry is a miss too — it silently falls back
+# to a live call. Lives in dubbing/data/ (gitignored). DUB_LLM_CACHE=0
+# switches it off.
+_LLM_CACHE_DIR = os.path.join(DATA_DIR, "llm_cache")
+_LLM_CACHE_ROLES = ("match", "emotion", "mapping")
+_LLM_CACHE_VERSION = 1
+
+
+def _llm_cache_enabled() -> bool:
+    return (os.environ.get("DUB_LLM_CACHE", "1").strip().lower()
+            not in ("0", "false", "no", "off"))
+
+
+def _llm_cache_key(provider: str, model: str, base_url: str,
+                   static_prefix: Optional[str], prompt: str,
+                   params: Optional[dict] = None) -> str:
+    blob = json.dumps({"v": _LLM_CACHE_VERSION, "provider": provider or "",
+                       "model": model or "", "base_url": base_url or "",
+                       "static_prefix": static_prefix or "",
+                       "prompt": prompt or "", "params": params or {}},
+                      ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _llm_reply_nonempty(reply) -> bool:
+    return isinstance(reply, str) and bool(reply.strip())
+
+
+def _llm_cache_get(key: str, ok=None) -> Optional[str]:
+    """Cached reply for *key*, or None (missing / corrupt / fails *ok*)."""
+    try:
+        with open(os.path.join(_LLM_CACHE_DIR, key + ".json"), "r",
+                  encoding="utf-8") as f:
+            data = json.load(f)
+        reply = data.get("reply") if isinstance(data, dict) else None
+        if data.get("key") != key or not _llm_reply_nonempty(reply):
+            return None
+        if ok is not None and not ok(reply):
+            return None
+        return reply
+    except Exception:
+        return None
+
+
+def _llm_cache_put(key: str, reply, role: str, model: str, ok=None) -> None:
+    """Store a reply — only a usable one, so a garbage answer can never be
+    replayed forever. Best effort and atomic; failure is silent."""
+    try:
+        if not _llm_reply_nonempty(reply) or (ok is not None and not ok(reply)):
+            return
+        os.makedirs(_LLM_CACHE_DIR, exist_ok=True)
+        path = os.path.join(_LLM_CACHE_DIR, key + ".json")
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"key": key, "role": role, "model": model,
+                       "saved": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                       "reply": reply}, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
 def _llm_generate(prompt: str, model: str = GEMINI_DEFAULT_MODEL,
                   static_prefix: Optional[str] = None,
                   role: Optional[str] = None,
-                  attempts: Optional[int] = None) -> str:
+                  attempts: Optional[int] = None,
+                  cache_ok=None) -> str:
     """Provider-agnostic text generation. All pipeline LLM calls go through here.
 
     *static_prefix* is the reusable part (the per-language prompt file); *prompt*
@@ -569,21 +653,46 @@ def _llm_generate(prompt: str, model: str = GEMINI_DEFAULT_MODEL,
 
     *attempts* caps the transient-failure retries on the OpenAI-compatible
     path. Leave it None for real work; pass 1 from a probe that should report
-    a broken configuration at once instead of waiting out the backoff."""
+    a broken configuration at once instead of waiting out the backoff.
+
+    *cache_ok* (optional) is a predicate a reply must pass to be stored in, or
+    replayed from, the on-disk reply cache (see _LLM_CACHE_ROLES above). Only
+    the mechanical roles are cached; everything else is always live."""
     s = _get_llm_settings()
-    if s.get("provider") == LLM_PROVIDER_SERVER:
+    provider = s.get("provider")
+    if provider == LLM_PROVIDER_SERVER:
         raise ValueError(_SERVER_MODE_ERROR)
-    if s.get("provider") == LLM_PROVIDER_OPENAI:
-        return _openai_chat(
-            (static_prefix or "") + prompt,
-            _model_for(role, (s.get("openai_model") or "").strip() or model),
-            attempts=attempts)
-    # Vertex / Gemini-key providers: the configured gemini_model overrides the
-    # caller's default so the panel's Model field controls these providers too.
-    gm = _model_for(role, (s.get("gemini_model") or "").strip() or model)
-    client = _make_genai_client()
-    use_cache = s.get("prompt_caching", "1") == "1"
-    return _genai_cached_generate(client, gm, static_prefix, prompt, use_cache)
+    if provider == LLM_PROVIDER_OPENAI:
+        eff_model = _model_for(role, (s.get("openai_model") or "").strip() or model)
+        base_url = (s.get("openai_base_url") or "").strip()
+    else:
+        # Vertex / Gemini-key providers: the configured gemini_model overrides
+        # the caller's default so the panel's Model field controls these
+        # providers too.
+        eff_model = _model_for(role, (s.get("gemini_model") or "").strip() or model)
+        base_url = ""
+
+    key = None
+    if role in _LLM_CACHE_ROLES and attempts is None and _llm_cache_enabled():
+        key = _llm_cache_key(provider, eff_model, base_url, static_prefix,
+                             prompt)
+        hit = _llm_cache_get(key, cache_ok)
+        if hit is not None:
+            _llm_log(f"reusing the saved {role} reply from an identical "
+                     f"earlier request ({eff_model}) — no new LLM call.")
+            return hit
+
+    if provider == LLM_PROVIDER_OPENAI:
+        reply = _openai_chat((static_prefix or "") + prompt, eff_model,
+                             attempts=attempts)
+    else:
+        client = _make_genai_client()
+        use_cache = s.get("prompt_caching", "1") == "1"
+        reply = _genai_cached_generate(client, eff_model, static_prefix,
+                                       prompt, use_cache)
+    if key:
+        _llm_cache_put(key, reply, role, eff_model, cache_ok)
+    return reply
 
 
 def _list_llm_models() -> dict:
@@ -1006,8 +1115,9 @@ def _run_emotion_enrichment(text: str,
         if status_cb:
             status_cb(f"Step4: Emotion enrichment ({language})…")
         prompt = _load_lang_prompt("Step4_Emotion_Prompt", language)
-        enriched = _llm_generate(f"\n\n{text}", model, static_prefix=prompt,
-                                 role="emotion") or ""
+        enriched = _llm_generate(
+            f"\n\n{text}", model, static_prefix=prompt, role="emotion",
+            cache_ok=lambda r: bool(_strip_code_fence(r).strip())) or ""
         enriched = _strip_code_fence(enriched).strip()
         if not enriched:
             if strict:
@@ -1036,6 +1146,27 @@ def _read_syncing_prompt(language: str = TTS_DEFAULT_LANGUAGE) -> str:
     return _load_lang_prompt("SyncingPrompt", language)
 
 
+def _mapping_json_str(raw: str) -> str:
+    """The JSON object inside a mapping reply (fenced block first, else the
+    outermost {...}). Raises ValueError when there is none."""
+    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+    if json_match:
+        return json_match.group(1)
+    json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not json_match:
+        raise ValueError("No JSON found in Gemini mapping response.")
+    return json_match.group(0)
+
+
+def _mapping_reply_ok(raw: str) -> bool:
+    """Would _call_gemini_mapping be able to parse this reply? Gate for the
+    reply cache, so an unusable answer is never stored or replayed."""
+    try:
+        return isinstance(json.loads(_mapping_json_str(raw)), dict)
+    except Exception:
+        return False
+
+
 def _call_gemini_mapping(en_srt: str, te_srt: str, script_text: str,
                          model: str = GEMINI_DEFAULT_MODEL,
                          language: str = TTS_DEFAULT_LANGUAGE) -> str:
@@ -1048,18 +1179,9 @@ def _call_gemini_mapping(en_srt: str, te_srt: str, script_text: str,
         f"=== Video Script ===\n{script_text}"
     )
     raw = _llm_generate(dynamic, model, static_prefix=base_prompt,
-                        role="mapping")
+                        role="mapping", cache_ok=_mapping_reply_ok)
 
-    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-    if json_match:
-        json_str = json_match.group(1)
-    else:
-        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not json_match:
-            raise ValueError("No JSON found in Gemini mapping response.")
-        json_str = json_match.group(0)
-
-    data     = json.loads(json_str)
+    data     = json.loads(_mapping_json_str(raw))
     detailed = data.get("detailed", [])
     tag      = TTS_LANGUAGES.get(language, {}).get("tag", "BN")
     lang_key = language.lower()

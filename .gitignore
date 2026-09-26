@@ -79,6 +79,13 @@ Thumbs.db
 github_token.txt
 feedback_outbox/
 
+# Run logs of UNSAVED REAPER projects (saved projects keep theirs in
+# <project folder>/FastSyncs_Logs/)
+logs/
+
+# Version this install had before its last update (Settings > Roll back)
+.previous-version
+
 # File list shipped inside each release archive; the updaters diff the previous
 # copy against the new one to delete files a release no longer ships. It only
 # appears in ZIP/release installs, never in a git checkout.

@@ -370,6 +370,10 @@ def _get_vertex_client():
         print(f"[VERTEX] Init failed ({e}) — REST fallback will be used")
         return None
 
+# Concurrent transcription requests for EN + DUB together (one shared pool
+# in match_gemini). Keeps both tracks busy without hammering ASR rate limits.
+TRANSCRIBE_WORKERS = 12
+
 _temp_dir = None
 
 def _cleanup_temp():
@@ -542,9 +546,24 @@ def _extract_slice(wav_path, take_offset, duration, out_path):
     raise RuntimeError("all slice backends failed — " + " | ".join(errors))
 
 
-def get_audio_for_item(item_id, wav_path, take_offset, duration):
+def _chunk_name(item_id, side=None):
+    """Temp file name for one clip's extracted audio.
+
+    EN and DUB clips are numbered independently (both start at 1), so the
+    name MUST carry the side: without it EN clip 1 and DUB clip 1 share
+    "chunk_0001.wav" and, now that both sides are sliced before either is
+    transcribed, the DUB slice overwrites the EN one on disk.
+    """
+    prefix = f"{side}_" if side else ""
+    return f"{prefix}chunk_{item_id:04d}.wav"
+
+
+def get_audio_for_item(item_id, wav_path, take_offset, duration, side=None):
     """
     Return the path to a WAV file containing ONLY the audio for this item.
+
+    side: "en" / "dub" — goes into the temp file name so the two tracks'
+    slices never collide (see _chunk_name).
 
     If take_offset is near 0 and duration covers the whole file, return
     the original path directly (no extraction needed — item IS the file).
@@ -583,7 +602,7 @@ def get_audio_for_item(item_id, wav_path, take_offset, duration):
         if needs_extract:
             temp_path = os.path.join(
                 get_temp_dir(),
-                f"chunk_{item_id:04d}.wav"
+                _chunk_name(item_id, side)
             )
             try:
                 return _extract_slice(wav_path, 0.0, duration, temp_path)
@@ -601,7 +620,7 @@ def get_audio_for_item(item_id, wav_path, take_offset, duration):
     # Need to extract the slice
     temp_path = os.path.join(
         get_temp_dir(),
-        f"chunk_{item_id:04d}.wav"
+        _chunk_name(item_id, side)
     )
 
     try:
@@ -1857,17 +1876,27 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
     _ANTHROPIC_KEY    = anthropic_key
     print(f"  [MATCHER] Provider = {_MATCHER_PROVIDER}")
 
-    MAX_PARALLEL = 8   # concurrent API calls (avoid rate-limits)
+    # ONE shared pool transcribes EN and DUB clips together. The two sides
+    # used to run back to back with 8 workers each, so the DUB step could not
+    # start until the slowest EN clip came back. 12 total keeps the combined
+    # request rate modest (rate limits) while keeping both sides busy.
+    MAX_PARALLEL = TRANSCRIBE_WORKERS
 
     # ── Helper: prepare audio paths (sequential, fast) ───────
-    def _prepare_items(items):
-        """Extract audio chunks and return {id: audio_path} map."""
+    def _prepare_items(items, side):
+        """Extract audio chunks and return {id: audio_path} map.
+
+        side ("en"/"dub") keeps the two tracks' temp slices apart on disk —
+        both are numbered from 1 and both are sliced before either side is
+        transcribed.
+        """
         paths = {}
         for item in items:
             wav         = item["wav_path"]
             take_offset = item.get("take_offset", 0.0)
             duration    = item.get("duration", 0.0)
-            audio_path  = get_audio_for_item(item["id"], wav, take_offset, duration)
+            audio_path  = get_audio_for_item(item["id"], wav, take_offset,
+                                             duration, side=side)
             if audio_path:
                 paths[item["id"]] = audio_path
             else:
@@ -1886,53 +1915,71 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
             gemini_key=gemini_key,
         )
 
-    # ── Step 1: Transcribe ALL EN clips (parallel) ───────────
+    # ── Steps 1+2: Transcribe EN and DUB clips in one pool ───
+    # The Lua progress bar is driven by the log: "STEP 1" / "STEP 2" headers
+    # switch its phase, and each line shaped like  [ 12] "text"  counts one
+    # clip for the CURRENT phase (EN in phase 1, DUB in phase 2). So the log
+    # keeps the old shape even though the work overlaps: EN clip lines stream
+    # under STEP 1 as they finish; DUB clip lines are held back and printed
+    # under STEP 2 once every EN clip is done, then stream live from there.
     print(f"\n{'=' * 60}")
     print(f"  STEP 1: Transcribing {len(en_items)} EN clips "
-          f"({MAX_PARALLEL} parallel)")
+          f"({MAX_PARALLEL} parallel, shared with DUB)")
     print(f"{'=' * 60}")
     _t1 = time.time()
 
-    en_paths = _prepare_items(en_items)
-    en_by_id = {item["id"]: item for item in en_items}
-
-    with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
-        futures = {
-            pool.submit(_transcribe_one, iid, path, "en"): iid
-            for iid, path in en_paths.items()
-        }
-        for future in as_completed(futures):
-            iid, result = future.result()
-            item = en_by_id[iid]
-            item["transcript"]   = result["text"]
-            item["speech_start"] = result["speech_start"]
-            print(f'  [{iid:3d}] "{result["text"][:70]}"')
-
-    print(f"  ✓ Done in {time.time() - _t1:.1f}s")
-
-    # ── Step 2: Transcribe ALL DUB clips (parallel) ──────────
-    print(f"\n{'=' * 60}")
-    print(f"  STEP 2: Transcribing {len(dub_items)} DUB clips "
-          f"({dub_language}, {MAX_PARALLEL} parallel)")
-    print(f"{'=' * 60}")
-    _t2 = time.time()
-
-    dub_paths = _prepare_items(dub_items)
+    en_paths  = _prepare_items(en_items, "en")
+    dub_paths = _prepare_items(dub_items, "dub")
+    en_by_id  = {item["id"]: item for item in en_items}
     dub_by_id = {item["id"]: item for item in dub_items}
 
+    def _print_step2_header():
+        print(f"  ✓ Done in {time.time() - _t1:.1f}s")
+        print(f"\n{'=' * 60}")
+        print(f"  STEP 2: Transcribing {len(dub_items)} DUB clips "
+              f"({dub_language}, {MAX_PARALLEL} parallel, shared with EN)")
+        print(f"{'=' * 60}")
+
+    _t2 = None               # set when the STEP 2 header goes out
+    dub_held = []            # DUB clip lines finished before STEP 2 header
+    en_left  = len(en_paths)
+    if en_left == 0:
+        _print_step2_header()
+        _t2 = time.time()
+
     with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
-        futures = {
-            pool.submit(_transcribe_one, iid, path, dub_language): iid
-            for iid, path in dub_paths.items()
-        }
+        # EN first: the pool starts work in submit order, so EN clips tend
+        # to finish first and STEP 1 closes as early as possible.
+        futures = {}
+        for iid, path in en_paths.items():
+            futures[pool.submit(_transcribe_one, iid, path, "en")] = "en"
+        for iid, path in dub_paths.items():
+            futures[pool.submit(_transcribe_one, iid, path, dub_language)] = "dub"
+
         for future in as_completed(futures):
+            side = futures[future]
             iid, result = future.result()
-            item = dub_by_id[iid]
+            item = (en_by_id if side == "en" else dub_by_id)[iid]
             item["transcript"]   = result["text"]
             item["speech_start"] = result["speech_start"]
-            print(f'  [{iid:3d}] "{result["text"][:70]}"')
+            line = f'  [{iid:3d}] "{result["text"][:70]}"'
+            if side == "en":
+                print(line)
+                en_left -= 1
+                if en_left == 0:
+                    _print_step2_header()
+                    _t2 = time.time()
+                    for held in dub_held:
+                        print(held)
+                    dub_held = []
+            elif _t2 is None:
+                dub_held.append(line)
+            else:
+                print(line)
 
-    print(f"  ✓ Done in {time.time() - _t2:.1f}s")
+    # "Done in" for STEP 2 covers the whole shared pool (EN + DUB overlap),
+    # which is the real wall-clock cost of transcription.
+    print(f"  ✓ Done in {time.time() - _t1:.1f}s")
 
     # ── ASR sanity gate ──────────────────────────────────────
     # transcribe() returns "" on every failure (bad key, HTTP 401, network,
@@ -2229,11 +2276,21 @@ class TranscriptCache:
                 self._data = {}
 
     def _key(self, filepath, task, lang, model):
+        # Hash the WHOLE file. This used to hash only the first 64 KB (about
+        # 0.7 s of 44.1 kHz stereo audio) plus the size, so two clips of the
+        # same length that open with the same sound (silence, a room-tone
+        # lead-in) shared a key and got each other's transcript. Clips are
+        # small, so reading them fully costs nothing next to the ASR call.
+        # The key string keeps its old "<digest>_<size>__task__lang__model"
+        # shape, so sync_cache.json loads unchanged; entries written by the
+        # old 64 KB scheme simply miss once and get re-transcribed.
         p = Path(filepath)
         size = p.stat().st_size
+        h = hashlib.sha256()
         with open(p, "rb") as f:
-            head = f.read(65536)
-        digest = hashlib.sha256(head).hexdigest()[:16]
+            for block in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(block)
+        digest = h.hexdigest()[:16]
         return f"{digest}_{size}__{task}__{lang}__{model}"
 
     def get(self, filepath, task, lang, model):
@@ -2403,7 +2460,8 @@ def match_items(en_items, dub_items, dub_language, cache, mode="duration",
         take_offset = item.get("take_offset", 0.0)
         duration    = item.get("duration", 0.0)
 
-        audio_path = get_audio_for_item(item["id"], wav, take_offset, duration)
+        audio_path = get_audio_for_item(item["id"], wav, take_offset, duration,
+                                        side="en")
         if not audio_path:
             print(f"  SKIP (file missing): {wav}")
             item["transcript"] = ""
@@ -2441,7 +2499,8 @@ def match_items(en_items, dub_items, dub_language, cache, mode="duration",
         dub_pos     = dub["position"]
         dub_dur     = dub["duration"]
 
-        audio_path = get_audio_for_item(dub["id"], wav, take_offset, dub_dur)
+        audio_path = get_audio_for_item(dub["id"], wav, take_offset, dub_dur,
+                                        side="dub")
         if not audio_path:
             results.append({"dub_id": dub["id"], "status": "missing_file",
                             "match": None, "score": 0, "dub_duration": dub_dur})
@@ -2742,89 +2801,97 @@ def main():
 
     cache = TranscriptCache(args.cache)
 
-    if args.mode == "gemini":
-        results = match_gemini(en_items, dub_items, args.language, gemini_key,
-                               cache=cache, asr_provider=args.asr,
-                               elevenlabs_key=elevenlabs_key,
-                               openai_key=openai_key,
-                               anthropic_key=anthropic_key,
-                               matcher_provider=matcher_prov,
-                               script_text=script_text,
-                               script_path=script_path)
-    else:
-        results = match_items(en_items, dub_items, args.language, cache,
-                              mode=args.mode, asr_provider=args.asr,
-                              elevenlabs_key=elevenlabs_key,
-                              gemini_key=gemini_key)
+    # Everything after the cache exists runs inside try/finally so the
+    # transcripts we already paid for are saved even when the run fails —
+    # SystemExit from a gate or a matcher failure, the zero-match hard
+    # failure below, or an unexpected exception. flush() is a no-op when
+    # nothing changed, so the normal-path flush further down stays harmless.
+    try:
+        if args.mode == "gemini":
+            results = match_gemini(en_items, dub_items, args.language, gemini_key,
+                                   cache=cache, asr_provider=args.asr,
+                                   elevenlabs_key=elevenlabs_key,
+                                   openai_key=openai_key,
+                                   anthropic_key=anthropic_key,
+                                   matcher_provider=matcher_prov,
+                                   script_text=script_text,
+                                   script_path=script_path)
+        else:
+            results = match_items(en_items, dub_items, args.language, cache,
+                                  mode=args.mode, asr_provider=args.asr,
+                                  elevenlabs_key=elevenlabs_key,
+                                  gemini_key=gemini_key)
 
-    # Summary
-    n_matched = sum(1 for r in results if r["status"] == "matched")
-    n_unmatched = sum(1 for r in results if r["status"] == "unmatched")
+        # Summary
+        n_matched = sum(1 for r in results if r["status"] == "matched")
+        n_unmatched = sum(1 for r in results if r["status"] == "unmatched")
 
-    # Record what actually produced the matches — not just the ASR label.
-    # (Both "model" and "backend" used to hold the ASR string, so the output
-    # carried no trace of which matcher/backend ran.)
-    if matcher_prov == "gemini":
-        matcher_backend = ("proxy" if _USE_PROXY else _GEMINI_BACKEND)
-        matcher_model   = _GEMINI_MATCHER_MODEL
-    else:
-        matcher_backend = matcher_prov
-        matcher_model   = matcher_prov
+        # Record what actually produced the matches — not just the ASR label.
+        # (Both "model" and "backend" used to hold the ASR string, so the output
+        # carried no trace of which matcher/backend ran.)
+        if matcher_prov == "gemini":
+            matcher_backend = ("proxy" if _USE_PROXY else _GEMINI_BACKEND)
+            matcher_model   = _GEMINI_MATCHER_MODEL
+        else:
+            matcher_backend = matcher_prov
+            matcher_model   = matcher_prov
 
-    output = {
-        "results": results,
-        "summary": {
-            "total_en": len(en_items),
-            "total_dub": len(dub_items),
-            "matched": n_matched,
-            "unmatched": n_unmatched,
-            "model": matcher_model,
-            "language": args.language,
-            "backend": matcher_backend,
-            "asr": asr_label,
-        },
-        # v0.15.4: flat "SEVERITY|CODE|message" strings so the Lua importer can
-        # read them with one gmatch. Additive — older importers ignore the key.
-        "problems": problems_as_strings(),
-    }
+        output = {
+            "results": results,
+            "summary": {
+                "total_en": len(en_items),
+                "total_dub": len(dub_items),
+                "matched": n_matched,
+                "unmatched": n_unmatched,
+                "model": matcher_model,
+                "language": args.language,
+                "backend": matcher_backend,
+                "asr": asr_label,
+            },
+            # v0.15.4: flat "SEVERITY|CODE|message" strings so the Lua importer can
+            # read them with one gmatch. Additive — older importers ignore the key.
+            "problems": problems_as_strings(),
+        }
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(output, f, ensure_ascii=False, indent=2)
 
-    # Flush cached transcriptions to disk
-    cache.flush()
+        # Flush cached transcriptions to disk
+        cache.flush()
 
-    _total_elapsed = time.time() - _t_total
-    _mins = int(_total_elapsed // 60)
-    _secs = int(_total_elapsed % 60)
-    if n_unmatched and len(dub_items):
-        _pct = 100.0 * n_unmatched / len(dub_items)
-        if _pct >= 25.0:
-            report_problem(
-                "WARN", "MANY_UNMATCHED",
-                f"{n_unmatched} of {len(dub_items)} dub clips "
-                f"({_pct:.0f}%) ended on the Un sync track.")
+        _total_elapsed = time.time() - _t_total
+        _mins = int(_total_elapsed // 60)
+        _secs = int(_total_elapsed % 60)
+        if n_unmatched and len(dub_items):
+            _pct = 100.0 * n_unmatched / len(dub_items)
+            if _pct >= 25.0:
+                report_problem(
+                    "WARN", "MANY_UNMATCHED",
+                    f"{n_unmatched} of {len(dub_items)} dub clips "
+                    f"({_pct:.0f}%) ended on the Un sync track.")
 
-    print_problems()
+        print_problems()
 
-    print(f"\n{'=' * 60}")
-    print(f"  RESULT: {n_matched}/{len(dub_items)} matched, "
-          f"{n_unmatched} unmatched")
-    print(f"  Total time: {_mins}m {_secs}s")
-    print(f"  Output: {output_path}")
-    print(f"{'=' * 60}\n")
+        print(f"\n{'=' * 60}")
+        print(f"  RESULT: {n_matched}/{len(dub_items)} matched, "
+              f"{n_unmatched} unmatched")
+        print(f"  Total time: {_mins}m {_secs}s")
+        print(f"  Output: {output_path}")
+        print(f"{'=' * 60}\n")
 
-    # Zero matches in gemini mode means the run FAILED, whatever the exit
-    # path above thought: an all-unmatched timeline is never a success the
-    # user asked for. Results were written for debugging, but exit non-zero
-    # so the front-end shows the failure instead of applying it silently.
-    if args.mode == "gemini" and dub_items and n_matched == 0:
-        print("  [ERROR] 0 clips matched — treating the run as FAILED.")
-        print("          Results were written for inspection, but they will "
-              "not be applied.")
-        print("          Scroll up for the first [ERROR]/[WARN] — usually "
-              "ASR key/network, wrong tracks, or a matcher backend problem.")
-        raise SystemExit(1)
+        # Zero matches in gemini mode means the run FAILED, whatever the exit
+        # path above thought: an all-unmatched timeline is never a success the
+        # user asked for. Results were written for debugging, but exit non-zero
+        # so the front-end shows the failure instead of applying it silently.
+        if args.mode == "gemini" and dub_items and n_matched == 0:
+            print("  [ERROR] 0 clips matched — treating the run as FAILED.")
+            print("          Results were written for inspection, but they will "
+                  "not be applied.")
+            print("          Scroll up for the first [ERROR]/[WARN] — usually "
+                  "ASR key/network, wrong tracks, or a matcher backend problem.")
+            raise SystemExit(1)
+    finally:
+        cache.flush()
 
 
 if __name__ == "__main__":

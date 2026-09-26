@@ -76,6 +76,7 @@ manifest_protected() {
         *.pem|*.key)                                               return 0 ;;
         .direct-mode)                                              return 0 ;;
         github_token.txt|*/github_token.txt)                       return 0 ;;
+        .previous-version)                                         return 0 ;;
         # The manifest itself: the new one has just been written and is what
         # the NEXT update will diff against.
         "$MANIFEST"|*/"$MANIFEST")                                 return 0 ;;
@@ -271,7 +272,30 @@ zip_update() {
 main() {
     cd "$(dirname "$0")"
 
-    if [ -d .git ] && command -v git >/dev/null 2>&1; then
+    # Roll back: `update.sh --version X.Y.Z` installs that exact published
+    # release instead of the latest (the "Roll back" button in the dub
+    # panel's Settings). Digits and dots only — checked before use.
+    local pin=""
+    if [ "${1:-}" = "--version" ]; then
+        pin="${2:-}"
+        if ! printf '%s' "$pin" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "[update] ERROR: --version needs a version number like 0.15.4"
+            return 1
+        fi
+        # Exported so zip_update never swaps in a different version.
+        export FAST_SYNCS_ZIP_URL="https://github.com/darpantimsina72/fast-syncs/releases/download/v$pin/fast-syncs.zip"
+        ZIP_URL="$FAST_SYNCS_ZIP_URL"
+        echo "[update] Rolling back to version $pin …"
+    fi
+
+    # Remember the version we are leaving, for the Settings roll-back button.
+    [ -f VERSION ] && cp VERSION .previous-version 2>/dev/null || true
+
+    if [ -n "$pin" ]; then
+        # A roll-back always installs the release ZIP, even on a git
+        # checkout: `git pull` can only move forward.
+        zip_update
+    elif [ -d .git ] && command -v git >/dev/null 2>&1; then
         echo "[update] Pulling latest changes…"
         # --ff-only aborts on a diverged / locally-modified checkout. Don't
         # let that fail the whole update (set -e) — fall back to the ZIP

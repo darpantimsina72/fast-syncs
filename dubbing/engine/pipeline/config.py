@@ -618,3 +618,72 @@ def _prepare_output_dir(audio_path: str) -> str:
         pass
 
     return out_dir
+
+
+# ─── Bounded parallelism for independent paid requests ──────────────────────
+# ElevenLabs speech and the LLM shortening calls used to run strictly one
+# after another even though no request depends on another's answer. This
+# runs them a few at a time. Results always come back in the ORIGINAL order,
+# so the audio / text assembled from them is identical to a one-at-a-time run.
+
+def _env_int(name: str, default: int, lo: int, hi: int) -> int:
+    """Integer from the environment, clamped to [lo, hi]; *default* when unset
+    or unparsable. Same override style as DUB_HTTP_USER_AGENT."""
+    try:
+        v = int(str(os.environ.get(name, "")).strip())
+    except ValueError:
+        return default
+    return max(lo, min(hi, v))
+
+
+def _run_parallel(tasks, workers: int, on_done=None) -> list:
+    """Run zero-argument callables *tasks* with up to *workers* threads.
+
+    Returns their results as a list in the SAME order as *tasks*.
+
+    on_done(index, result) — optional, called on the CALLING thread as each
+    task finishes (completion order, not list order). Callers use it to
+    save paid audio the moment it arrives, so a later failure does not throw
+    finished work away.
+
+    On failure: tasks not yet started are cancelled, tasks already running
+    are allowed to finish (their results still reach on_done — they are paid
+    for), then the error of the LOWEST-index failed task is raised, so the
+    reported error does not depend on thread timing.
+
+    workers <= 1 (or a single task) runs everything inline, one at a time,
+    exactly like the old loops."""
+    tasks = list(tasks)
+    n = len(tasks)
+    results = [None] * n
+    if workers <= 1 or n <= 1:
+        for i, t in enumerate(tasks):
+            results[i] = t()
+            if on_done:
+                on_done(i, results[i])
+        return results
+
+    import concurrent.futures as _cf
+    errors = {}
+    ex = _cf.ThreadPoolExecutor(max_workers=min(workers, n))
+    try:
+        fut_idx = {ex.submit(t): i for i, t in enumerate(tasks)}
+        for fut in _cf.as_completed(fut_idx):
+            i = fut_idx[fut]
+            if fut.cancelled():
+                continue
+            exc = fut.exception()
+            if exc is not None:
+                if not errors:
+                    for other in fut_idx:
+                        other.cancel()        # only affects not-yet-started
+                errors[i] = exc
+                continue
+            results[i] = fut.result()
+            if on_done:
+                on_done(i, results[i])
+    finally:
+        ex.shutdown(wait=True)
+    if errors:
+        raise errors[min(errors)]
+    return results
