@@ -1776,6 +1776,10 @@ local MANIFEST_KEYS = {
   -- v0.3: --test-llm manifest fields ("voices" from --list-voices is an
   -- array and is parsed separately by parse_voices_json).
   "provider", "model", "reply",
+  -- v0.15.3: --test-llm also reports the model list (comma-separated ids).
+  -- These two were missing here, so the list was read and then dropped and
+  -- every Model dropdown stayed empty (fixed v0.15.6).
+  "models", "models_all",
   -- v0.4: --voice-change manifest field.
   "vc_wav",
   -- v0.7: match sync mode (texts sidecar for the item text + chunk counts).
