@@ -432,6 +432,9 @@ def flush_outbox() -> int:
                 payload = json.load(f)
         except (OSError, ValueError):
             continue
+        # A report queued before feedback_config.json had a team code (or
+        # before the code changed) carries the old one — use today's.
+        payload["team_code"] = str(_endpoint_config().get("team_code") or "")
         try:
             _post_endpoint(payload)
         except Exception:

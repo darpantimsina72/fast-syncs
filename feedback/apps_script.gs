@@ -16,7 +16,7 @@
 
 var CONFIG = {
   TEAM_CODE: 'CHANGE-ME',          // same value as "team_code" in feedback_config.json
-  NOTIFY_EMAIL: 'you@example.org', // who gets an email for bad runs
+  NOTIFY_EMAIL: '',                // who gets an email for bad runs ('' = the script's owner)
   FOLDER_NAME: 'Fast Syncs Reports',
   MAX_BODY_BYTES: 12 * 1024 * 1024, // reject anything bigger (log tail is ~1.5 MB)
   MAX_PER_HOUR: 60                  // flood guard across all senders
@@ -67,8 +67,9 @@ function doPost(e) {
         r.stars || '', str_(r.contact), str_(r.message).slice(0, 2000), str_(r.os), folder.getUrl()]);
 
       var bad = (r.stars && r.stars <= 3) || /fail/i.test(String(r.status || '')) || r.kind === 'feedback';
-      if (bad && CONFIG.NOTIFY_EMAIL.indexOf('@') > 0) {
-        MailApp.sendEmail(CONFIG.NOTIFY_EMAIL,
+      var notify = CONFIG.NOTIFY_EMAIL || Session.getEffectiveUser().getEmail();
+      if (bad && notify.indexOf('@') > 0) {
+        MailApp.sendEmail(notify,
           '[Fast Syncs] ' + (r.stars ? r.stars + '★ ' : '') + str_(r.pipeline || r.kind) + ' — ' + str_(r.status),
           summary + '\n\nFiles: ' + folder.getUrl());
       }

@@ -9,7 +9,7 @@ for bad runs. It can only add reports — nobody can read reports through it.
 2. Delete the sample code and paste all of `feedback/apps_script.gs`.
 3. At the top, set:
    - `TEAM_CODE` — any long random word, e.g. `fs-7Qk2-mango-41`.
-   - `NOTIFY_EMAIL` — where "bad run" emails should go.
+   - `NOTIFY_EMAIL` — where "bad run" emails go (leave empty = the account that owns the script).
 4. Choose the `setup` function in the toolbar → **Run** → allow the access it
    asks for (Drive, Sheets, send email as you). This creates the
    `Fast Syncs Reports` folder and its index Sheet.
