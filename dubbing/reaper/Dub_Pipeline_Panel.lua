@@ -2801,6 +2801,12 @@ local function preflight_engine(need_llm)
     -- SIGKILLed / crash / logout) plus PID recycling would otherwise make
     -- this guard refuse forever on an unrelated process.
     if pid_is_engine(prev_pid) then
+      if V5.reattach_running and V5.reattach_running() then
+        ui_set_banner("warn",
+          "A run started earlier was still going — it is shown again now. " ..
+          "Wait for it to finish, or press Cancel.")
+        return nil
+      end
       ui_set_banner("error",
         "A previous dub run is still in progress (worker pid " .. prev_pid ..
         ") — Cancel it first, or wait for it to finish before starting " ..
@@ -2899,6 +2905,55 @@ local function launch_engine(cmd, mode, header_lines)
   _poll_start_time = os.time()
   _ui_phase        = "running"
   if V5.fb_card and not UTIL_MODES[mode] then V5.fb_card:reset() end
+  return true
+end
+
+-- v0.15.7: pick up an engine run that is still going in the background.
+-- Closing the panel mid-run keeps the engine running on purpose, but the
+-- reopened panel used to know nothing about it: no progress, no Cancel, and
+-- every new launch refused with "A previous dub run is still in progress".
+-- Now the panel re-attaches to it — polls its log/done files like any run it
+-- started itself, so Cancel works again. Returns true when a live run was
+-- found and handled.
+function V5.reattach_running()
+  if _ui_phase ~= "setup" then return false end
+  local prev = read_all(PID_PATH)
+  local pid = prev and prev:match("(%d+)")
+  if not pid or not pid_is_engine(pid) then return false end
+  -- run_dub.py writes its own launch line first; the flags name the mode.
+  local head = (read_all(LOG_PATH) or ""):match("^[^\r\n]*") or ""
+  local mode = (head:find("--test-llm", 1, true) and "test_llm")
+               or (head:find("--list-voices", 1, true) and "list_voices")
+               or head:match("%-%-steps%s+(%a+)")
+  if mode ~= "full" and mode ~= "translate" and mode ~= "dub"
+     and mode ~= "test_llm" and mode ~= "list_voices" then
+    -- A voice-tool run (chunk regen, voice change, preview): applying its
+    -- result needs details this reopened window no longer has. Offer to
+    -- stop it instead of leaving it unreachable.
+    local r = reaper.MB("A voice tool job started before this window was " ..
+      "closed is still running (pid " .. pid .. ").\n\nStop it now?",
+      "Earlier job still running", 4)
+    if r == 6 then _try_cancel_kill() end
+    return true
+  end
+  V5.run_project = reaper.EnumProjects(-1, "")
+  _log_buffer = {}
+  log_append("[panel] Picked up a run that was still going (worker pid " ..
+             pid .. ") — Cancel works again.")
+  _run_mode          = mode
+  _util_return_phase = "setup"
+  _ui_stage_tag      = nil
+  _ui_progress       = 0.02
+  _ui_cancelled      = false
+  _cancel_pending    = false
+  if not UTIL_MODES[mode] then
+    _manifest, _import_summary, _imported = nil, nil, false
+    _review, _resume_manifest = nil, nil
+  end
+  _poll_last_size  = 0       -- re-read the whole log from the start
+  _poll_partial    = ""
+  _poll_start_time = os.time()
+  _ui_phase        = "running"
   return true
 end
 
@@ -6930,14 +6985,9 @@ end
 -- One readiness light for the whole app, instead of each tab working it out
 -- again when you press Start.
 function V5.ui_header(ctx)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-  reaper.ImGui_Text(ctx, 'Fast Syncs'
-    .. (V5.APP_VERSION ~= '' and ('  v' .. V5.APP_VERSION) or ''))
-  reaper.ImGui_PopStyleColor(ctx)
-
+  -- v0.15.7: the version moved into the top tab's label.
   local why = V5.llm_creds_error()
   local no_voice_key = (EL_KEY or '') == ''
-  reaper.ImGui_SameLine(ctx, 0, 16)
   if why or no_voice_key then
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
     reaper.ImGui_Text(ctx, '●  needs setup')
@@ -7359,6 +7409,12 @@ local function main()
       _ensure_lang_font(_ui_ctx)
       -- Poll OUTSIDE the tab bar: the run must keep progressing even
       -- while the user sits on the Log tab.
+      -- v0.15.7: once per launch, pick up a run the previous window left
+      -- going in the background (closing the panel never stops the engine).
+      if not V5.reattach_checked then
+        V5.reattach_checked = true
+        V5.reattach_running()
+      end
       if _ui_phase == "running" then poll_engine() end
       -- v0.15.3: a multi-chunk batch waits here between chunks, so it keeps
       -- moving whichever tab the user is looking at.
@@ -7394,46 +7450,60 @@ local function main()
       -- entirely, into the settings window the header opens. What used to be
       -- "Paste Translation" is a Script mode on the Dub tab, and the three
       -- utility tabs are a segmented row inside Tools.
-      V5.ui_header(_ui_ctx)
-      reaper.ImGui_Dummy(_ui_ctx, 0, 2)
-
+      -- v0.15.7: tabs at the very top, like browser/terminal tabs:
+      --   [Fast Syncs vX]  [Log]  [Settings]
+      -- The first holds the work (Dub / Sync / Tools). Log and Settings are
+      -- their own top-level tabs, so you can flip to the log or the settings
+      -- mid-run and back — the run keeps going (it is polled above, outside
+      -- every tab). All three live in ONE window: nothing floats, nothing
+      -- has to be docked, and it looks the same on every machine.
       if reaper.ImGui_BeginTabBar
-         and reaper.ImGui_BeginTabBar(_ui_ctx, '##tabs') then
-        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Dub  ') then
-          render_phase()
-          reaper.ImGui_EndTabItem(_ui_ctx)
-        end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Sync  ') then
-          V5.load_sync()
-          if V5.SYNC then
-            V5.SYNC.render(_ui_ctx, close_window)
-          else
-            reaper.ImGui_Dummy(_ui_ctx, 0, 8)
-            reaper.ImGui_PushStyleColor(_ui_ctx, reaper.ImGui_Col_Text(),
-                                        0xFFAA55FF)
-            reaper.ImGui_TextWrapped(_ui_ctx,
-              V5.sync_err or 'Sync module is not loaded.')
-            reaper.ImGui_PopStyleColor(_ui_ctx)
-          end
-          reaper.ImGui_EndTabItem(_ui_ctx)
-        end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Tools  ') then
-          reaper.ImGui_Dummy(_ui_ctx, 0, 4)
-          V5.ui_tools_tab(_ui_ctx)
-          reaper.ImGui_EndTabItem(_ui_ctx)
-        end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Log  ') then
-          _render_log_child(_ui_ctx, -34)
-          reaper.ImGui_EndTabItem(_ui_ctx)
-        end
-        -- v0.15.7: Settings lives here, as the fifth tab. The header's gear
-        -- jumps to it. One window: nothing to drag, dock or lose.
+         and reaper.ImGui_BeginTabBar(_ui_ctx, '##toptabs') then
         local sflags = 0
         if V5.settings_open and reaper.ImGui_TabItemFlags_SetSelected then
           sflags = reaper.ImGui_TabItemFlags_SetSelected()
         end
         V5.settings_open = false
-        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Settings  ', nil, sflags) then
+        local main_label = 'Fast Syncs'
+          .. (V5.APP_VERSION ~= '' and ('  v' .. V5.APP_VERSION) or '')
+          .. '###top_main'
+        if reaper.ImGui_BeginTabItem(_ui_ctx, main_label) then
+          V5.ui_header(_ui_ctx)
+          reaper.ImGui_Dummy(_ui_ctx, 0, 2)
+          if reaper.ImGui_BeginTabBar(_ui_ctx, '##tabs') then
+            if reaper.ImGui_BeginTabItem(_ui_ctx, '  Dub  ') then
+              render_phase()
+              reaper.ImGui_EndTabItem(_ui_ctx)
+            end
+            if reaper.ImGui_BeginTabItem(_ui_ctx, '  Sync  ') then
+              V5.load_sync()
+              if V5.SYNC then
+                V5.SYNC.render(_ui_ctx, close_window)
+              else
+                reaper.ImGui_Dummy(_ui_ctx, 0, 8)
+                reaper.ImGui_PushStyleColor(_ui_ctx, reaper.ImGui_Col_Text(),
+                                            0xFFAA55FF)
+                reaper.ImGui_TextWrapped(_ui_ctx,
+                  V5.sync_err or 'Sync module is not loaded.')
+                reaper.ImGui_PopStyleColor(_ui_ctx)
+              end
+              reaper.ImGui_EndTabItem(_ui_ctx)
+            end
+            if reaper.ImGui_BeginTabItem(_ui_ctx, '  Tools  ') then
+              reaper.ImGui_Dummy(_ui_ctx, 0, 4)
+              V5.ui_tools_tab(_ui_ctx)
+              reaper.ImGui_EndTabItem(_ui_ctx)
+            end
+            reaper.ImGui_EndTabBar(_ui_ctx)
+          end
+          reaper.ImGui_EndTabItem(_ui_ctx)
+        end
+        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Log  ###top_log') then
+          _render_log_child(_ui_ctx, -34)
+          reaper.ImGui_EndTabItem(_ui_ctx)
+        end
+        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Settings  ###top_settings',
+                                     nil, sflags) then
           V5.settings_bottom = 72   -- Save row + the status bar below
           reaper.ImGui_PushStyleVar(_ui_ctx, reaper.ImGui_StyleVar_ItemSpacing(), 10.0, 8.0)
           reaper.ImGui_PushStyleVar(_ui_ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
