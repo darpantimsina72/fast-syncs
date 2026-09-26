@@ -2518,6 +2518,32 @@ function V5.run_updater()
             "this manually:\n  " .. cmd, "Updating", 0)
 end
 
+-- v0.15.6: the model list "Test connection" / "Fetch models" gets from the
+-- provider is kept on disk, so the Model dropdowns work in every later
+-- session without testing again. One id per line, "p:" = this key may call
+-- it, "a:" = the endpoint advertises it. Gitignored (per machine, per key).
+V5.MODEL_CACHE = SCRIPT_DIR .. SEP .. "model_cache.txt"
+
+function V5.save_model_cache()
+  local f = io.open(V5.MODEL_CACHE, "wb")
+  if not f then return end
+  for _, id in ipairs(V5.models) do f:write("p:", id, "\n") end
+  for _, id in ipairs(V5.models_all) do f:write("a:", id, "\n") end
+  f:close()
+end
+
+function V5.load_model_cache()
+  local text = read_all(V5.MODEL_CACHE)
+  if not text then return end
+  local p, a = {}, {}
+  for line in text:gmatch("[^\r\n]+") do
+    local kind, id = line:match("^([pa]):%s*(%S+)%s*$")
+    if kind == "p" then p[#p + 1] = id elseif kind == "a" then a[#a + 1] = id end
+  end
+  V5.models, V5.models_all = p, a
+end
+V5.load_model_cache()
+
 -- v0.15.6: roll back to an earlier release (Settings > About). The updater
 -- takes `--version X.Y.Z` and installs exactly that published release.
 -- Choices = the version this install had before its last update
@@ -3916,6 +3942,7 @@ local function _finish_run(exit_code)
       -- v0.15.3: the same manifest carries the model list.
       V5.models     = V5._split_csv(m.models or "")
       V5.models_all = V5._split_csv(m.models_all or "")
+      V5.save_model_cache()
       local extra = ""
       if #V5.models > 0 then
         extra = string.format("\n%d model(s) this key can use — pick them " ..
@@ -5895,6 +5922,37 @@ function V5.pane_connection(ctx)
 
   V5.field(ctx, 'Model', 260)
   rv, LLM_MODEL = reaper.ImGui_InputText(ctx, '##llmmodel', LLM_MODEL or '')
+  -- v0.15.6: pick from the models this key can use instead of typing. The
+  -- text box above stays: a provider without a model list, or a model the
+  -- key gained since the last fetch, must still be typeable.
+  do
+    local avail = (#V5.models > 0) and V5.models or V5.models_all
+    if #avail > 0 and reaper.ImGui_BeginCombo then
+      V5.field(ctx, '', 260)
+      if reaper.ImGui_BeginCombo(ctx, '##llmmodel_pick',
+                                 string.format('Choose from %d models…',
+                                               #avail)) then
+        for _, id in ipairs(avail) do
+          if reaper.ImGui_Selectable(ctx, id .. '##llmpick_' .. id,
+                                     id == LLM_MODEL) then
+            LLM_MODEL = id
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+    end
+    if LLM_PROVIDER ~= 'server' then
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, (#avail > 0) and 'Refresh list'
+                                  or 'Fetch models', 110, 0) then
+        start_test_llm()
+      end
+      if #avail == 0 then
+        V5.hint(ctx, 'Fill in the key below, then press Fetch models to ' ..
+                     'choose from a list instead of typing.')
+      end
+    end
+  end
   if LLM_PROVIDER == 'openai' then
     V5.hint(ctx, 'Model id your gateway serves, e.g. gemini-3-flash-preview.')
   elseif LLM_PROVIDER == 'server' then
