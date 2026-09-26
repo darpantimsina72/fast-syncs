@@ -264,6 +264,16 @@ V5.APP_VERSION = (function()
   return v or ""
 end)()
 
+-- v0.15.6: per-video run logs + the "How did this run go?" star card, shared
+-- with Auto Sync (fast-syncs root/feedback_kit.lua). Lives on V5 — this chunk
+-- has no locals to spare. nil when the kit is missing: every use is guarded.
+V5.APP_ROOT = BASE_DIR:match("^(.*)[/\\][^/\\]*$") or BASE_DIR
+V5.FB = (function()
+  local ok, mod = pcall(dofile, V5.APP_ROOT .. SEP .. "feedback_kit.lua")
+  if ok and type(mod) == "table" then return mod end
+  return nil
+end)()
+
 local ENGINE_SETTINGS_PATH = ENGINE_DIR .. SEP .. "engine_settings.json"
 local PANEL_SETTINGS_PATH  = SCRIPT_DIR .. SEP .. "dub_panel_settings.json"
 
@@ -2508,6 +2518,65 @@ function V5.run_updater()
             "this manually:\n  " .. cmd, "Updating", 0)
 end
 
+-- v0.15.6: roll back to an earlier release (Settings > About). The updater
+-- takes `--version X.Y.Z` and installs exactly that published release.
+-- Choices = the version this install had before its last update
+-- (.previous-version, written by the updater) + rollback_versions.txt,
+-- keeping only versions OLDER than the running one, newest first.
+function V5.ver_parts(v)
+  local a, b, c = tostring(v or ""):match("^(%d+)%.(%d+)%.(%d+)$")
+  if not a then return nil end
+  return { tonumber(a), tonumber(b), tonumber(c) }
+end
+
+function V5.ver_less(x, y)
+  local a, b = V5.ver_parts(x), V5.ver_parts(y)
+  if not a or not b then return false end
+  for i = 1, 3 do
+    if a[i] ~= b[i] then return a[i] < b[i] end
+  end
+  return false
+end
+
+function V5.rollback_choices()
+  local seen, out = {}, {}
+  local function add(v)
+    v = (v or ""):match("^%s*(.-)%s*$")
+    if V5.ver_parts(v) and not seen[v]
+       and (V5.APP_VERSION == "" or V5.ver_less(v, V5.APP_VERSION)) then
+      seen[v] = true
+      out[#out + 1] = v
+    end
+  end
+  add((read_all(V5.FS_ROOT .. SEP .. ".previous-version") or ""):match("^[^\r\n]*"))
+  for line in (read_all(V5.FS_ROOT .. SEP .. "rollback_versions.txt") or "")
+              :gmatch("[^\r\n]+") do
+    if not line:match("^%s*#") then add(line) end
+  end
+  table.sort(out, function(x, y) return V5.ver_less(y, x) end)
+  return out
+end
+
+function V5.run_rollback(ver)
+  -- Digits and dots only: this value goes onto a command line.
+  if not V5.ver_parts(ver) then return end
+  local p = V5.updater_path()
+  if not p then return end
+  local ret = reaper.MB(
+    "Roll back Fast Syncs from v" .. V5.APP_VERSION .. " to v" .. ver ..
+    "?\n\nThis installs that older release over this folder. Your " ..
+    "settings, keys and projects are kept.\n\nYou can come back to the " ..
+    "newest version any time with the Update button.",
+    "Roll back to v" .. ver, 4)
+  if ret ~= 6 then return end
+  local cmd = V5.run_in_terminal(p, "--version " .. ver)
+  if not cmd then return end
+  reaper.MB("The roll-back is running in a separate terminal window.\n\n" ..
+            "When it says 'Update complete', close this window and run the " ..
+            "script again.\n\nIf no window appeared, run this manually:\n  "
+            .. cmd, "Rolling back", 0)
+end
+
 -- Offer to run the one-time dubbing setup (creates dubbing/venv/ and
 -- installs the engine deps) when the venv is missing at launch time.
 function V5.offer_run_setup(reason)
@@ -2799,6 +2868,7 @@ local function launch_engine(cmd, mode, header_lines)
   _poll_partial    = ""
   _poll_start_time = os.time()
   _ui_phase        = "running"
+  if V5.fb_card and not UTIL_MODES[mode] then V5.fb_card:reset() end
   return true
 end
 
@@ -4091,6 +4161,65 @@ local function _finish_run(exit_code)
   _ui_phase   = "failure"
 end
 
+-- v0.15.6: after _finish_run has settled the phase, copy this run's log next
+-- to its REAPER project (run_dub.py wipes the live log at the next launch —
+-- a Test connection click used to erase a failed dub's only log) and, for the
+-- two real pipelines, arm the star card on the success/failure screen.
+V5.QUIET_OK = { test_llm = true, list_voices = true, preview = true }
+function V5.after_run(exit_code)
+  if not V5.FB then return end
+  local mode = _run_mode
+  local status
+  if _ui_cancelled or _cancel_pending then status = "cancelled"
+  elseif _ui_phase == "failure" then status = "failed"
+  elseif _ui_phase == "review" then status = "review"
+  elseif _ui_phase == "success" then status = "ok"
+  else status = (exit_code == 0) and "ok" or "failed" end
+  -- Successful quick checks would only bury the logs that matter.
+  if status == "ok" and V5.QUIET_OK[mode] then return end
+
+  local pipeline_run = (mode == "full" or mode == "translate" or mode == "dub")
+  local own = (SCRIPT_MODE == "have")
+  local tag
+  if pipeline_run then
+    tag = (own and "DubOwnScript" or "DubFull")
+          .. ((mode == "translate") and "-translate"
+              or (mode == "dub") and "-voice" or "")
+  else
+    tag = "Dub-" .. tostring(mode)
+  end
+  local extra = (_ui_failure and status ~= "ok") and _ui_failure.error_tail
+                or nil
+  local saved = V5.FB.archive_log({
+    app_root = V5.APP_ROOT, pipeline = tag, status = status,
+    log_path = LOG_PATH, started = _poll_start_time,
+    version = V5.APP_VERSION, project = V5.run_project, extra = extra,
+  })
+  if saved then log_append("[panel] Log saved: " .. saved) end
+
+  -- The card belongs to the end of a pipeline, not to a review pause or a
+  -- utility tool, and a cancelled run was the user's own choice.
+  if not pipeline_run or status == "review" or status == "cancelled" then
+    return
+  end
+  if not V5.fb_card then
+    V5.fb_card = V5.FB.new_card({
+      app_root = V5.APP_ROOT,
+      get_python = function() return find_python() end,
+    })
+  end
+  local pfn = ""
+  if V5.run_project and reaper.ValidatePtr
+     and reaper.ValidatePtr(V5.run_project, "ReaProject*") then
+    pfn = reaper.GetProjectName(V5.run_project, "") or ""
+  end
+  V5.fb_card:start({
+    pipeline = own and "Dubbing — own script" or "Dubbing — full pipeline",
+    status = status, log = saved, started = _poll_start_time,
+    finished = os.time(), version = V5.APP_VERSION, project_name = pfn,
+  })
+end
+
 -- Incremental log tail: track the last read size, read only new bytes,
 -- carry any incomplete trailing line to the next poll.
 local function poll_engine()
@@ -4141,6 +4270,7 @@ local function poll_engine()
     log_append(string.format(
       "──── engine finished in %ds (exit code %d) ────", elapsed, exit_code))
     _finish_run(exit_code)
+    V5.after_run(exit_code)
     return
   end
 
@@ -4160,6 +4290,7 @@ local function poll_engine()
       log_path = LOG_PATH,
     }
     _ui_phase = "failure"
+    V5.after_run(1)
   end
 end
 
@@ -6576,6 +6707,33 @@ function V5.pane_about(ctx)
     end
     V5.hint(ctx, 'Updates the whole fast-syncs install — the sync tool AND ' ..
                  'this dubbing app.')
+
+    -- v0.15.6: roll back when a new version misbehaves.
+    reaper.ImGui_Dummy(ctx, 0, 10)
+    local choices = V5.rollback_choices()
+    if #choices > 0 and reaper.ImGui_BeginCombo then
+      if not V5.rollback_pick or not V5.ver_parts(V5.rollback_pick)
+         or not V5.ver_less(V5.rollback_pick, V5.APP_VERSION) then
+        V5.rollback_pick = choices[1]
+      end
+      reaper.ImGui_SetNextItemWidth(ctx, 150)
+      if reaper.ImGui_BeginCombo(ctx, '##rollback_ver',
+                                 'v' .. V5.rollback_pick) then
+        for _, v in ipairs(choices) do
+          if reaper.ImGui_Selectable(ctx, 'v' .. v .. '##rb_' .. v,
+                                     v == V5.rollback_pick) then
+            V5.rollback_pick = v
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, 'Roll back…', 150, 0) then
+        V5.run_rollback(V5.rollback_pick)
+      end
+      V5.hint(ctx, 'Went wrong after an update? Go back to an earlier ' ..
+                   'version. Settings and keys are kept.')
+    end
   else
     _grey_hint(ctx, 'No fast-syncs updater found above dubbing/ — this ' ..
                     'looks like a standalone install.')
@@ -6901,6 +7059,8 @@ local function ui_phase_success(ctx, on_close)
     'Re-voice a whole track: "Track Voice" tab.')
   reaper.ImGui_PopStyleColor(ctx)
 
+  if V5.fb_card then V5.fb_card:render(ctx) end
+
   reaper.ImGui_Dummy(ctx, 0, 10)
   reaper.ImGui_Separator(ctx)
   if reaper.ImGui_Button(ctx, 'Close', 120, 32) then on_close() end
@@ -6955,6 +7115,8 @@ local function ui_phase_failure(ctx, on_close)
     reaper.ImGui_TextWrapped(ctx, _import_summary)
     reaper.ImGui_PopStyleColor(ctx)
   end
+
+  if V5.fb_card then V5.fb_card:render(ctx) end
 
   reaper.ImGui_Dummy(ctx, 0, 10)
   reaper.ImGui_Separator(ctx)

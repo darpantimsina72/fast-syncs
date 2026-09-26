@@ -22,6 +22,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -783,6 +784,64 @@ def _stt_error_detail(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def _flac_for_upload(audio_path: str) -> Optional[str]:
+    """Lossless, smaller copy of a PCM .wav for the Scribe upload, or None.
+
+    Mono FLAC at the SAME sample rate: FLAC is lossless and no resampling
+    happens, so every sample — and therefore every word timing Scribe
+    returns — is where it was in the wav. A 16-bit wav typically shrinks to
+    well under half (stereo to about a quarter), which is what makes the
+    upload faster. The transcript cache key stays on the ORIGINAL file.
+
+    Only uncompressed integer PCM wav (8/16/24-bit) is converted. Anything
+    else (mp3, m4a, float or 32-bit wav…) is uploaded untouched: decoding a
+    lossy file could shift its start by the codec's padding, and the rest
+    would not be strictly lossless. Any doubt — ffmpeg missing, a failed or
+    slow conversion, a FLAC that is not smaller, a length that does not
+    match — returns None and the original goes up exactly as before.
+    Returns the temp file's path; the caller deletes it."""
+    if not FFMPEG_PATH or not audio_path.lower().endswith(".wav"):
+        return None
+    try:
+        with wave.open(audio_path, "rb") as w:
+            rate, width = w.getframerate(), w.getsampwidth()
+            frames = w.getnframes()
+        if not rate or width not in (1, 2, 3) or frames <= 0:
+            return None
+    except Exception:
+        return None             # float / extensible / not a wav: leave as is
+    src_seconds = frames / float(rate)
+    fd, tmp = tempfile.mkstemp(prefix="dub_stt_", suffix=".flac")
+    os.close(fd)
+    try:
+        proc = subprocess.run(
+            [FFMPEG_PATH, "-nostdin", "-hide_banner", "-loglevel", "error",
+             "-y", "-i", audio_path, "-vn", "-ac", "1", "-ar", str(rate),
+             "-c:a", "flac", tmp],
+            capture_output=True, timeout=max(120.0, src_seconds),
+            creationflags=_NO_WINDOW_FLAGS)
+        size = os.path.getsize(tmp) if os.path.isfile(tmp) else 0
+        if proc.returncode != 0 or size <= 0 \
+                or size >= os.path.getsize(audio_path):
+            raise RuntimeError("conversion failed or did not shrink the file")
+        probe = _ffprobe_path()
+        if probe:
+            out = subprocess.run(
+                [probe, "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", tmp],
+                capture_output=True, text=True, timeout=20,
+                creationflags=_NO_WINDOW_FLAGS)
+            if abs(float((out.stdout or "").strip()) - src_seconds) > 0.01:
+                raise RuntimeError("FLAC length differs from the wav")
+        return tmp
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return None
+
+
 def _transcribe_audio(audio_path, api_key, use_cache: bool = True):
     """Transcribe *audio_path* with ElevenLabs Scribe. Returns the Scribe JSON.
 
@@ -805,13 +864,33 @@ def _transcribe_audio(audio_path, api_key, use_cache: bool = True):
 
     _stt_preflight(audio_path, api_key)
 
-    with open(audio_path, "rb") as f:
-        audio_data = f.read()
-    mime, _ = mimetypes.guess_type(audio_path)
-    mime = mime or "audio/mpeg"
+    # Smaller upload, same samples: a PCM wav goes up as lossless mono FLAC
+    # at its own sample rate. Falls back to the original file on any doubt.
+    flac_tmp = _flac_for_upload(audio_path)
+    try:
+        upload_path = flac_tmp or audio_path
+        with open(upload_path, "rb") as f:
+            audio_data = f.read()
+    finally:
+        if flac_tmp:
+            try:
+                os.remove(flac_tmp)
+            except OSError:
+                pass
+    if flac_tmp:
+        mime = "audio/flac"
+        upload_name = os.path.splitext(os.path.basename(audio_path))[0] + ".flac"
+        _stt_log(f"compressed for upload: "
+                 f"{os.path.getsize(audio_path) / 1048576.0:.1f} MB wav -> "
+                 f"{len(audio_data) / 1048576.0:.1f} MB mono FLAC (lossless, "
+                 "same sample rate — timings unchanged).")
+    else:
+        mime, _ = mimetypes.guess_type(audio_path)
+        mime = mime or "audio/mpeg"
+        upload_name = os.path.basename(audio_path)
     body, boundary = _multipart_body(
         fields=[("model_id", "scribe_v2")],
-        files=[("file", os.path.basename(audio_path), mime, audio_data)],
+        files=[("file", upload_name, mime, audio_data)],
     )
     del audio_data          # the multipart copy is the only one the retries need
 

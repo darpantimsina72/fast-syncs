@@ -46,6 +46,20 @@ def _parse_match_json(raw: str) -> Optional[dict]:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _match_reply_ok(raw: str) -> bool:
+    """Would call_match_sections accept this reply — at least one section
+    with usable en/tr ids? Same test as its parsing loop, so a reply that
+    loop would reject is never cached (the retry must stay a live call)."""
+    parsed = _parse_match_json(raw)
+    if not parsed:
+        return False
+    for s in parsed.get("sections") or []:
+        if isinstance(s, dict) and (_int_ids(s.get("en"))
+                                    or _int_ids(s.get("tr"))):
+            return True
+    return False
+
+
 def _int_ids(seq) -> List[int]:
     return [int(x) for x in (seq or [])
             if isinstance(x, (int, float, str)) and str(x).lstrip("-").isdigit()]
@@ -117,8 +131,11 @@ def call_match_sections(en_entries: Sequence[Tuple[float, float, str]],
 
     last_err = "empty reply"
     for attempt in (1, 2):
+        # cache_ok: only a reply that parses into sections may be stored in
+        # (or replayed from) the reply cache — a bad cached answer can never
+        # block the retry below.
         raw = _llm_generate(dynamic, model, static_prefix=_MATCH_RULES_PREFIX,
-                            role="match")
+                            role="match", cache_ok=_match_reply_ok)
         parsed = _parse_match_json(raw)
         if parsed is None:
             last_err = f"unparsable reply ({(raw or '')[:120]!r}…)"

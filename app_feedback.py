@@ -49,7 +49,41 @@ FEEDBACK_REPO = "darpantimsina72/app-feedback"   # owner/repo of the inbox
 FEEDBACK_BRANCH = "feedback"                     # attachments branch
 MAX_ATTACHMENT_MB = 20
 
-_SSL_CTX = ssl._create_unverified_context()      # fallback for broken cert stores
+MAX_LOG_CHARS = 1_500_000                       # tail of a run log we send
+
+
+def _verified_context():
+    """Certificate-checking TLS context. Uses certifi's bundle when the venv
+    has it (Windows Python often ships without usable roots)."""
+    try:
+        import certifi  # noqa: WPS433 — optional, present in both venvs
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
+def _is_cert_failure(exc) -> bool:
+    """True only for a genuine certificate-verification failure. Classified by
+    exception TYPE, never by message text — URLError.reason can be a string
+    the server chose (same policy as sync_matcher.py / pipeline/config.py)."""
+    reason = getattr(exc, "reason", exc)
+    return isinstance(reason, ssl.SSLCertVerificationError)
+
+
+def _urlopen(req, timeout=60):
+    """Verify first; relax ONLY after a real certificate failure, so a
+    TLS-inspecting office proxy still works without turning verification off
+    for everyone else."""
+    try:
+        return urllib.request.urlopen(req, timeout=timeout,
+                                      context=_verified_context())
+    except urllib.error.URLError as e:
+        if not _is_cert_failure(e):
+            raise
+    except ssl.SSLCertVerificationError:
+        pass
+    return urllib.request.urlopen(req, timeout=timeout,
+                                  context=ssl._create_unverified_context())
 
 
 def _app_dir() -> str:
@@ -101,15 +135,8 @@ def _api(url: str, payload=None, method: str = "GET") -> dict:
         data = json.dumps(payload).encode("utf-8")
         h["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=h, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except urllib.error.URLError as e:
-        # Corporate proxies / broken cert stores: retry without verification.
-        if isinstance(getattr(e, "reason", None), ssl.SSLError):
-            with urllib.request.urlopen(req, timeout=60, context=_SSL_CTX) as r:
-                return json.loads(r.read().decode("utf-8"))
-        raise
+    with _urlopen(req, timeout=60) as r:
+        return json.loads(r.read().decode("utf-8"))
 
 
 def _ensure_branch():
@@ -157,6 +184,36 @@ def send_feedback(app_name: str, app_version: str, kind: str, sender: str,
     import datetime
     attachments = attachments or []
     notify = progress or (lambda s: None)
+
+    # Team inbox first: when feedback_config.json names an endpoint, the
+    # Send Feedback window uses the same private drop-box as the in-app
+    # "Send report" button, and no GitHub token is needed at all.
+    if _endpoint():
+        notify("Sending to the team inbox…")
+        known = _known_secrets()
+        cfg = _endpoint_config()
+        files = []
+        for p in attachments:
+            try:
+                if os.path.getsize(p) > MAX_ATTACHMENT_MB * 1024 * 1024:
+                    continue
+                with open(p, "rb") as f:
+                    files.append({"name": os.path.basename(p),
+                                  "b64": base64.b64encode(f.read())
+                                  .decode("ascii")})
+            except OSError:
+                pass
+        _post_endpoint({
+            "team_code": str(cfg.get("team_code") or ""),
+            "kind": "feedback", "app": app_name, "version": app_version,
+            "pipeline": "", "status": kind, "stars": 0,
+            "message": scrub_secrets(message, known),
+            "contact": sender or "", "os": sys.platform,
+            "python": sys.version.split()[0], "log_name": "", "log_text": "",
+            "attachments": files,
+        })
+        return "team inbox"
+
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     slug = _slug(app_name)
 
@@ -202,6 +259,245 @@ def save_locally(app_name: str, app_version: str, kind: str, sender: str,
         except OSError:
             pass
     return folder
+
+
+# ── Team inbox (Google Apps Script) — the in-app "Send report" path ──────────
+#
+# The REAPER panels write a small report JSON (stars, message, which pipeline,
+# path of that run's archived log) and launch:
+#     python app_feedback.py --send-report <report.json>
+# This posts it to the team's Google Apps Script web app (URL + team code in
+# feedback_config.json next to this file). The script can only ADD a report to
+# the team's private Drive folder — it cannot read or delete anything — so it
+# is safe to ship its URL with every install. Secrets are scrubbed from the log
+# here, before anything leaves the machine.
+#
+# Offline, or no endpoint configured yet: the report is kept in
+# feedback_outbox/pending/ and re-sent automatically with the next report.
+
+FEEDBACK_CONFIG = "feedback_config.json"
+
+
+def _endpoint_config() -> dict:
+    for d in (os.path.dirname(os.path.abspath(__file__)), _app_dir()):
+        try:
+            with open(os.path.join(d, FEEDBACK_CONFIG), encoding="utf-8") as f:
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                return cfg
+        except (OSError, ValueError):
+            pass
+    return {}
+
+
+def _endpoint() -> str:
+    url = str(_endpoint_config().get("endpoint") or "").strip()
+    return url if url.startswith("https://") else ""
+
+
+# Credential shapes that must never leave the machine, even if they turn up in
+# a log line or a traceback.
+_SECRET_PATTERNS = [
+    (re.compile(r"AIza[0-9A-Za-z_\-]{30,}"), "[REDACTED-GOOGLE-KEY]"),
+    (re.compile(r"\bsk_[0-9a-fA-F]{24,}\b"), "[REDACTED-ELEVENLABS-KEY]"),
+    (re.compile(r"\bsk-[0-9A-Za-z_\-]{16,}"), "[REDACTED-KEY]"),
+    (re.compile(r"\bgh[pousr]_[0-9A-Za-z]{20,}"), "[REDACTED-GITHUB-TOKEN]"),
+    (re.compile(r"github_pat_[0-9A-Za-z_]{20,}"), "[REDACTED-GITHUB-TOKEN]"),
+    (re.compile(r"(?i)(bearer\s+)[0-9A-Za-z._\-]{12,}"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)(xi-api-key[\"']?\s*[:=]\s*[\"']?)[^\s\"',]+"),
+     r"\1[REDACTED]"),
+    (re.compile(r"(?i)([?&](?:key|api_key|token)=)[^&\s\"']+"), r"\1[REDACTED]"),
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE "
+                r"KEY-----", re.S), "[REDACTED-PRIVATE-KEY]"),
+]
+
+_SECRET_FIELD = re.compile(r"(?i)(key|token|secret|password|passwd|credential)")
+
+
+def _collect_secret_values(obj, out, field=""):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _collect_secret_values(v, out, str(k))
+    elif isinstance(obj, list):
+        for v in obj:
+            _collect_secret_values(v, out, field)
+    elif isinstance(obj, str):
+        v = obj.strip()
+        if len(v) >= 8 and _SECRET_FIELD.search(field) and os.sep not in v:
+            out.add(v)
+
+
+def _known_secrets() -> set:
+    """Every credential value saved in this install's settings files."""
+    root = os.path.dirname(os.path.abspath(__file__))
+    files = [os.path.join(root, "sync_pipeline_settings.json"),
+             os.path.join(root, "vertex_key.json")]
+    cfg_dir = os.path.join(root, "dubbing", "config")
+    try:
+        files += [os.path.join(cfg_dir, n) for n in os.listdir(cfg_dir)
+                  if n.lower().endswith(".json")]
+    except OSError:
+        pass
+    found = set()
+    for p in files:
+        try:
+            with open(p, encoding="utf-8") as f:
+                _collect_secret_values(json.load(f), found)
+        except (OSError, ValueError):
+            pass
+    return found
+
+
+def scrub_secrets(text: str, known=None) -> str:
+    """Remove API keys/tokens from free text before it is sent anywhere."""
+    if not text:
+        return text or ""
+    for v in sorted(known if known is not None else _known_secrets(),
+                    key=len, reverse=True):
+        text = text.replace(v, "[REDACTED]")
+    for rx, repl in _SECRET_PATTERNS:
+        text = rx.sub(repl, text)
+    return text
+
+
+def _read_log_tail(path: str) -> str:
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - MAX_LOG_CHARS))
+            data = f.read().decode("utf-8", errors="replace")
+        if size > MAX_LOG_CHARS:
+            data = "…(start of log trimmed)…\n" + data
+        return data
+    except OSError:
+        return ""
+
+
+def _post_endpoint(payload: dict) -> dict:
+    """POST one report to the Apps Script web app. Raises on failure."""
+    url = _endpoint()
+    if not url:
+        raise RuntimeError("no feedback endpoint configured "
+                           "(feedback_config.json)")
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": "application/json; charset=utf-8",
+                 "User-Agent": "FastSyncsFeedback"})
+    # Apps Script answers the POST with a 302 to the reply page; urllib
+    # follows it with a GET, which is exactly what Google expects.
+    with _urlopen(req, timeout=90) as r:
+        text = r.read().decode("utf-8", errors="replace")
+    try:
+        reply = json.loads(text)
+    except ValueError:
+        raise RuntimeError("feedback endpoint gave an unexpected reply: "
+                           + text[:200])
+    if not reply.get("ok"):
+        raise RuntimeError("feedback endpoint refused the report: "
+                           + str(reply.get("error") or reply)[:200])
+    return reply
+
+
+def _outbox_dir() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "feedback_outbox", "pending")
+
+
+def _queue(payload: dict) -> str:
+    import datetime
+    folder = _outbox_dir()
+    os.makedirs(folder, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    path = os.path.join(folder, stamp + ".json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    return path
+
+
+def flush_outbox() -> int:
+    """Re-send reports that could not be delivered earlier. Returns how many
+    went out. Stops at the first failure (still offline)."""
+    folder = _outbox_dir()
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".json"))
+    except OSError:
+        return 0
+    sent = 0
+    for n in names:
+        p = os.path.join(folder, n)
+        try:
+            with open(p, encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, ValueError):
+            continue
+        try:
+            _post_endpoint(payload)
+        except Exception:
+            break
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+        sent += 1
+    return sent
+
+
+def build_report_payload(report: dict) -> dict:
+    """Turn the panel's report JSON into the payload the endpoint stores.
+    The log is read from the archived copy the panel wrote, then scrubbed."""
+    known = _known_secrets()
+    log_path = str(report.get("log_path") or "")
+    log_text = scrub_secrets(_read_log_tail(log_path), known) if log_path \
+        else ""
+    cfg = _endpoint_config()
+    payload = {
+        "team_code": str(cfg.get("team_code") or ""),
+        "kind":      str(report.get("kind") or "run_report"),
+        "app":       "Fast Syncs",
+        "version":   str(report.get("version") or ""),
+        "pipeline":  str(report.get("pipeline") or ""),
+        "status":    str(report.get("status") or ""),
+        "stars":     report.get("stars") or 0,
+        "message":   scrub_secrets(str(report.get("message") or ""), known),
+        "contact":   str(report.get("contact") or "")[:200],
+        "project":   str(report.get("project") or "")[:200],
+        "duration_s": report.get("duration_s") or 0,
+        "started":   str(report.get("started") or ""),
+        "os":        sys.platform,
+        "reaper":    str(report.get("reaper") or ""),
+        "python":    sys.version.split()[0],
+        "log_name":  os.path.basename(log_path),
+        "log_text":  log_text,
+    }
+    return payload
+
+
+def send_report_file(report_path: str) -> dict:
+    """CLI entry used by the REAPER panels. Always writes <report>.result
+    (JSON) so the panel can show what happened, and never raises."""
+    result = {"ok": False, "where": "saved", "error": ""}
+    try:
+        with open(report_path, encoding="utf-8") as f:
+            report = json.load(f)
+        payload = build_report_payload(report)
+        flush_outbox()
+        try:
+            _post_endpoint(payload)
+            result = {"ok": True, "where": "sent", "error": ""}
+        except Exception as e:
+            queued = _queue(payload)
+            result = {"ok": False, "where": "saved", "error": str(e)[:300],
+                      "folder": os.path.dirname(queued)}
+    except Exception as e:
+        result = {"ok": False, "where": "failed", "error": str(e)[:300]}
+    try:
+        with open(report_path + ".result", "w", encoding="utf-8") as f:
+            json.dump(result, f)
+    except OSError:
+        pass
+    return result
 
 
 # ── Optional tkinter dialog (imported lazily so servers never need tk) ────────
@@ -415,7 +711,14 @@ def main(argv=None):
                     metavar="FILE", help="screenshot to attach (repeatable)")
     ap.add_argument("--gui", action="store_true",
                     help="open the graphical feedback dialog instead")
+    ap.add_argument("--send-report", metavar="REPORT_JSON", default="",
+                    help="send a run report written by the REAPER panel "
+                         "(result goes to REPORT_JSON.result)")
     args = ap.parse_args(argv)
+
+    if args.send_report:
+        res = send_report_file(args.send_report)
+        return 0 if res.get("ok") else 1
 
     if args.gui:
         open_feedback_dialog(None, app_name=args.app,
@@ -448,7 +751,7 @@ def main(argv=None):
     except Exception as e:
         folder = save_locally(args.app, args.app_version, args.kind,
                               args.name, message, args.attach)
-        print("Could not reach GitHub (%s).\nFeedback saved to: %s\n"
+        print("Could not send feedback (%s).\nFeedback saved to: %s\n"
               "Send that folder to the developer manually." % (e, folder))
         return 1
 

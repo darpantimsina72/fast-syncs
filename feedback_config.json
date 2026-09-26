@@ -1,0 +1,5 @@
+{
+  "_comment": "Team inbox for in-app reports. Fill both after deploying feedback/apps_script.gs (see feedback/SETUP.md). Empty endpoint = reports wait in feedback_outbox/ on each PC and are sent once this is filled.",
+  "endpoint": "",
+  "team_code": ""
+}
