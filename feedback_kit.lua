@@ -30,7 +30,14 @@ local M = {}
 local SEP = package.config:sub(1, 1)
 local IS_WIN = reaper.GetOS():match("Win") ~= nil
 local KEEP_LOGS = 50
-local EXT = "FastSyncsFeedback"   -- ExtState section (remembers the contact)
+local EXT = "FastSyncsFeedback"   -- ExtState section (remembers name + language)
+
+-- Languages a team member can say they support (the Dub tab's list).
+local LANGUAGES = { "Assamese", "Bengali", "Gujarati", "Hindi", "Kannada",
+                    "Malayalam", "Marathi", "Nepali", "Odia", "Punjabi",
+                    "Tamil", "Telugu" }
+
+local function trim(s) return (tostring(s or ""):match("^%s*(.-)%s*$")) end
 
 -- ── small helpers ─────────────────────────────────────────
 
@@ -186,7 +193,10 @@ function M.new_card(cfg)
   local c = {
     app_root = cfg.app_root, get_python = cfg.get_python,
     active = false, stars = 0, message = "", state = "ask", attach = true,
-    contact = reaper.GetExtState(EXT, "contact") or "",
+    -- Name and language are REQUIRED before Send: the team needs to know who
+    -- sent a report and which language they work on. Remembered per PC.
+    name = reaper.GetExtState(EXT, "name") or "",
+    language = reaper.GetExtState(EXT, "language") or "",
   }
 
   function c:start(run)
@@ -194,6 +204,7 @@ function M.new_card(cfg)
     self.active = true
     self.stars, self.message, self.state = 0, "", "ask"
     self.attach = true
+    self.need_fields = false
     self.result_path, self.note = nil, nil
   end
 
@@ -219,7 +230,11 @@ function M.new_card(cfg)
       '  "status": ', jstr(r.status), ",\n",
       '  "stars": ', tostring(self.stars), ",\n",
       '  "message": ', jstr(self.message), ",\n",
-      '  "contact": ', jstr(self.contact), ",\n",
+      -- "contact" is what the inbox shows as "From:"; the two fields are
+      -- also sent on their own for sorting later.
+      '  "contact": ', jstr(trim(self.name) .. " (" .. self.language .. ")"), ",\n",
+      '  "name": ', jstr(trim(self.name)), ",\n",
+      '  "language": ', jstr(self.language), ",\n",
       '  "version": ', jstr(r.version), ",\n",
       '  "project": ', jstr(r.project_name), ",\n",
       '  "started": ', jstr(os.date("%Y-%m-%d %H:%M:%S", r.started or os.time())), ",\n",
@@ -230,7 +245,8 @@ function M.new_card(cfg)
       '  "log_path": ', jstr(self.attach and (r.log or "") or ""), "\n",
       "}\n")
     f:close()
-    reaper.SetExtState(EXT, "contact", self.contact or "", true)
+    reaper.SetExtState(EXT, "name", trim(self.name), true)
+    reaper.SetExtState(EXT, "language", self.language or "", true)
 
     local sender = self.app_root .. SEP .. "app_feedback.py"
     if not py or py == "" then
@@ -317,9 +333,20 @@ function M.new_card(cfg)
         local rv, txt = reaper.ImGui_InputTextMultiline(ctx, "##fbmsg",
                                                         self.message, -1, 70)
         if rv then self.message = txt end
-        local rv2, who = reaper.ImGui_InputText(ctx,
-          "Your name or email (optional)##fbwho", self.contact)
-        if rv2 then self.contact = who end
+        local rv2, who = reaper.ImGui_InputText(ctx, "Your name *##fbwho",
+                                                self.name)
+        if rv2 then self.name = who end
+        if reaper.ImGui_BeginCombo(ctx, "Your language *##fblang",
+                                   self.language ~= "" and self.language
+                                   or "Choose…") then
+          for _, lang in ipairs(LANGUAGES) do
+            if reaper.ImGui_Selectable(ctx, lang .. "##fbl_" .. lang,
+                                       lang == self.language) then
+              self.language = lang
+            end
+          end
+          reaper.ImGui_EndCombo(ctx)
+        end
         if self.run and self.run.log and self.run.log ~= "" then
           local rv3, att = reaper.ImGui_Checkbox(ctx,
             "Attach this run's log (API keys are removed first)##fbatt",
@@ -328,11 +355,26 @@ function M.new_card(cfg)
         else
           self.attach = false
         end
-        if reaper.ImGui_Button(ctx, "Send", 120, 28) then self:send() end
+        local ready = trim(self.name) ~= "" and self.language ~= ""
+        if ready then
+          if reaper.ImGui_Button(ctx, "Send", 120, 28) then self:send() end
+        else
+          -- Not a disabled button: BeginDisabled is missing on old ReaImGui,
+          -- and a click that does nothing reads as "broken".
+          if reaper.ImGui_Button(ctx, "Send", 120, 28) then
+            self.need_fields = true
+          end
+        end
         reaper.ImGui_SameLine(ctx)
       end
       if reaper.ImGui_Button(ctx, "Skip", 80, 28) then
         self.state, self.note = "done", "Skipped."
+      end
+      if self.need_fields and self.stars > 0
+         and (trim(self.name) == "" or self.language == "") then
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF7777FF)
+        reaper.ImGui_Text(ctx, "Please fill in your name and language first.")
+        reaper.ImGui_PopStyleColor(ctx)
       end
     elseif self.state == "sending" then
       reaper.ImGui_TextDisabled(ctx, "Sending…")

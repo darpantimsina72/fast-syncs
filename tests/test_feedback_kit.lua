@@ -89,15 +89,16 @@ card:start({ pipeline = "Auto Sync", status = "failed", log = p,
              project_name = 'My "quoted"\nvideo' })
 card.stars = 2
 card.message = 'It "broke"\nat step 2 \\ नमस्ते'
-card.contact = "a@b.org"
+card.name = "  Asha "
+card.language = "Hindi"
 card:send()
 check("sender launched", #launched == 1)
 local rpt = launched[1] and launched[1]:match("%-%-send%-report '([^']+)'")
 local check_py = io.popen("python3 -c \"import json,sys; d=json.load(open(sys.argv[1],encoding='utf-8')); " ..
-  "print(d['stars'], d['message'].count('\\n'), bool(d['log_path']), d['contact'])\" '" .. (rpt or "") .. "'")
+  "print(d['stars'], d['message'].count('\\n'), bool(d['log_path']), d['contact'], d['name'], d['language'])\" '" .. (rpt or "") .. "'")
 local parsed = check_py:read("*a"); check_py:close()
-check("report JSON parses (2 stars, newline kept, log attached)", parsed:match("^2 1 True a@b.org") ~= nil)
-check("contact remembered", ext.contact == "a@b.org")
+check("report JSON parses (2 stars, newline kept, log attached)", parsed:match("^2 1 True Asha %(Hindi%) Asha Hindi") ~= nil)
+check("name + language remembered", ext.name == "Asha" and ext.language == "Hindi")
 
 -- 5 stars → no log
 card:start({ pipeline = "Auto Sync", status = "ok", log = p, started = os.time(),

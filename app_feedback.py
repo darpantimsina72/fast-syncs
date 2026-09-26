@@ -465,6 +465,8 @@ def build_report_payload(report: dict) -> dict:
         "stars":     report.get("stars") or 0,
         "message":   scrub_secrets(str(report.get("message") or ""), known),
         "contact":   str(report.get("contact") or "")[:200],
+        "name":      str(report.get("name") or "")[:100],
+        "language":  str(report.get("language") or "")[:40],
         "project":   str(report.get("project") or "")[:200],
         "duration_s": report.get("duration_s") or 0,
         "started":   str(report.get("started") or ""),
