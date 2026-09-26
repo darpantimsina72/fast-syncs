@@ -15,10 +15,11 @@
 --    previous run's error is gone the moment anybody presses a button.
 --    Unsaved project → <fast-syncs>/logs/unsaved/ (nowhere better to put it).
 --
--- 2. card — a small 1-to-5 star card drawn on the success/failure screens.
---    4-5 send just the rating. 1-3 stars open a message box and a
---    "Send report" button, which sends the rating, the message and that
---    run's archived log. Sending is done by app_feedback.py --send-report in
+-- 2. card — a small 1-to-5 rating card drawn on the success/failure
+--    screens. Clicking a number only selects it; the user can change it,
+--    type a message, tick/untick "Attach this run's log" (ticked by default
+--    for 1-3), and nothing leaves the machine until Send is pressed.
+--    Sending is done by app_feedback.py --send-report in
 --    a detached Python process (Lua cannot do HTTPS); this file only writes
 --    the report JSON and polls for "<report>.result".
 --
@@ -162,6 +163,19 @@ function M.archive_log(opts)
   return nil
 end
 
+-- Show a folder in Finder / Explorer. Never blocks the frame.
+function M.open_folder(dir)
+  if not dir or dir == "" then return end
+  if reaper.CF_ShellExecute then reaper.CF_ShellExecute(dir) return end
+  if IS_WIN then
+    -- start goes through cmd.exe: refuse a path cmd would interpret.
+    if dir:find('["%%&|<>^]') then return end
+    os.execute('start "" "' .. dir .. '"')
+  else
+    os.execute("open " .. shq(dir) .. " >/dev/null 2>&1 &")
+  end
+end
+
 -- ── 2. star card ──────────────────────────────────────────
 
 -- card = M.new_card{ app_root=, get_python=function() return path end }
@@ -171,7 +185,7 @@ end
 function M.new_card(cfg)
   local c = {
     app_root = cfg.app_root, get_python = cfg.get_python,
-    active = false, stars = 0, message = "", state = "ask",
+    active = false, stars = 0, message = "", state = "ask", attach = true,
     contact = reaper.GetExtState(EXT, "contact") or "",
   }
 
@@ -179,6 +193,7 @@ function M.new_card(cfg)
     self.run = run
     self.active = true
     self.stars, self.message, self.state = 0, "", "ask"
+    self.attach = true
     self.result_path, self.note = nil, nil
   end
 
@@ -211,8 +226,8 @@ function M.new_card(cfg)
       '  "duration_s": ', tostring(math.max(0, (r.finished or os.time())
                                             - (r.started or os.time()))), ",\n",
       '  "reaper": ', jstr((rver or "") .. " " .. reaper.GetOS()), ",\n",
-      -- 4-5 stars: rating only. The log goes along only with a report.
-      '  "log_path": ', jstr(self.stars <= 3 and (r.log or "") or ""), "\n",
+      -- The log goes along only when "Attach this run's log" is ticked.
+      '  "log_path": ', jstr(self.attach and (r.log or "") or ""), "\n",
       "}\n")
     f:close()
     reaper.SetExtState(EXT, "contact", self.contact or "", true)
@@ -270,39 +285,52 @@ function M.new_card(cfg)
     reaper.ImGui_Separator(ctx)
     reaper.ImGui_Text(ctx, "How did this run go?")
 
-    if self.state == "ask" or self.state == "detail" then
-      -- Numbered buttons, gold when lit: a star glyph is not guaranteed to
-      -- exist in the user's ImGui font, a digit always is.
+    if self.state == "ask" then
+      -- Clicking a number only SELECTS it; nothing is sent until Send is
+      -- pressed, and the choice can be changed until then. Only the chosen
+      -- number lights up (digits, not star glyphs: a digit exists in every
+      -- ImGui font).
       for i = 1, 5 do
         if i > 1 then reaper.ImGui_SameLine(ctx) end
-        local lit = i <= self.stars
+        local chosen = (i == self.stars)
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),
-                                    lit and 0xE0A800FF or 0x3A3A3AFF)
+                                    chosen and 0xE0A800FF or 0x3A3A3AFF)
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(),
-                                    0xF0C040FF)
+                                    chosen and 0xF0C040FF or 0x555555FF)
         if reaper.ImGui_Button(ctx, tostring(i) .. "##fbstar", 34, 30) then
-          self.stars = i
-          if i >= 4 then self:send() else self.state = "detail" end
+          if self.stars ~= i then
+            self.stars = i
+            -- Default: attach the log for a bad run; the box can change it.
+            self.attach = (i <= 3)
+          end
         end
         reaper.ImGui_PopStyleColor(ctx, 2)
       end
       reaper.ImGui_SameLine(ctx)
       reaper.ImGui_TextDisabled(ctx, "1 = bad · 5 = great")
-    end
 
-    if self.state == "detail" then
-      reaper.ImGui_TextWrapped(ctx,
-        "Sorry it didn't go well. Tell us what happened — the log of this " ..
-        "run is attached automatically (API keys are removed first).")
-      local rv, txt = reaper.ImGui_InputTextMultiline(ctx, "##fbmsg",
-                                                      self.message, -1, 70)
-      if rv then self.message = txt end
-      local rv2, who = reaper.ImGui_InputText(ctx,
-                                              "Your name or email (optional)##fbwho",
-                                              self.contact)
-      if rv2 then self.contact = who end
-      if reaper.ImGui_Button(ctx, "Send report", 140, 28) then self:send() end
-      reaper.ImGui_SameLine(ctx)
+      if self.stars > 0 then
+        reaper.ImGui_Text(ctx, string.format("Selected: %d / 5", self.stars))
+        reaper.ImGui_TextWrapped(ctx, self.stars <= 3
+          and "Sorry it didn't go well. What happened? (optional)"
+          or  "Anything to add? (optional)")
+        local rv, txt = reaper.ImGui_InputTextMultiline(ctx, "##fbmsg",
+                                                        self.message, -1, 70)
+        if rv then self.message = txt end
+        local rv2, who = reaper.ImGui_InputText(ctx,
+          "Your name or email (optional)##fbwho", self.contact)
+        if rv2 then self.contact = who end
+        if self.run and self.run.log and self.run.log ~= "" then
+          local rv3, att = reaper.ImGui_Checkbox(ctx,
+            "Attach this run's log (API keys are removed first)##fbatt",
+            self.attach)
+          if rv3 then self.attach = att end
+        else
+          self.attach = false
+        end
+        if reaper.ImGui_Button(ctx, "Send", 120, 28) then self:send() end
+        reaper.ImGui_SameLine(ctx)
+      end
       if reaper.ImGui_Button(ctx, "Skip", 80, 28) then
         self.state, self.note = "done", "Skipped."
       end
@@ -318,6 +346,10 @@ function M.new_card(cfg)
     end
     if self.run and self.run.log and self.run.log ~= "" then
       reaper.ImGui_TextDisabled(ctx, "Log saved: " .. self.run.log)
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, "Open folder##fblog") then
+        M.open_folder(dirname(self.run.log))
+      end
     end
   end
 

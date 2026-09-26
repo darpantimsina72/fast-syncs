@@ -103,11 +103,23 @@ check("contact remembered", ext.contact == "a@b.org")
 card:start({ pipeline = "Auto Sync", status = "ok", log = p, started = os.time(),
              finished = os.time(), version = "0.15.5", project_name = "v" })
 card.stars = 5
+card.attach = false          -- user unticked "Attach this run's log"
 card:send()
 local rpt2 = launched[2] and launched[2]:match("%-%-send%-report '([^']+)'")
 local h2 = io.popen("python3 -c \"import json,sys; print(repr(json.load(open(sys.argv[1]))['log_path']))\" '" .. (rpt2 or "") .. "'")
 local lp = h2:read("*a"); h2:close()
-check("5 stars sends no log", lp:match("^''") ~= nil)
+check("unticked box sends no log", lp:match("^''") ~= nil)
+
+-- a good rating may still carry the log when the box is ticked
+card:start({ pipeline = "Auto Sync", status = "ok", log = p, started = os.time(),
+             finished = os.time(), version = "0.15.6", project_name = "v" })
+check("box ticked by default on a new card", card.attach == true)
+card.stars = 4
+card:send()
+local rpt3 = launched[3] and launched[3]:match("%-%-send%-report '([^']+)'")
+local h3 = io.popen("python3 -c \"import json,sys; print(bool(json.load(open(sys.argv[1]))['log_path']))\" '" .. (rpt3 or "") .. "'")
+local lp3 = h3:read("*a"); h3:close()
+check("ticked box sends log even for 4 stars", lp3:match("^True") ~= nil)
 
 real_execute("rm -rf '" .. tmp .. "'")
 print(fails == 0 and "\nGREEN: all checks passed" or ("\nRED: " .. fails .. " failed"))
