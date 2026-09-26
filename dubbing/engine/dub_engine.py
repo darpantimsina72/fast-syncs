@@ -190,14 +190,8 @@ REQUIRED_FUNCTIONS = [
     "_load_audio_any",               # audio/video -> mono float32 + sr
     "_detect_regions_from_audio",    # waveform speech-region detection
     "_build_subtitle_srt",           # Stage-1 English SRT (for translation)
-    "regions_collapsed",             # v0.15.5 did the loudness gate collapse?
-    "regions_from_words",            # v0.15.5 music-proof regions from word times
     "_parse_srt_to_analysis_format", # LLM input format
     "_run_gemini_pipeline",          # Step1 -> Step2 -> Step3 chain
-    "lekhak_selected",               # v0.15.5 is Lekhak the translator this run?
-    "lekhak_translate",              # v0.15.5 Lekhak desk translation (Step1 swap)
-    "lekhak_keep",                   # v0.15.5 approved script -> desk memory
-    "lekhak_status_label",           # v0.15.5 one-line translator banner
     "_run_emotion_enrichment",       # Step4 emotion tags (strict=True from here)
     "_load_lang_prompt",             # per-language prompt file (pre-spend check)
     "_extract_srt_entries",          # SRT -> (start, end, text) rows (review pairing)
@@ -213,7 +207,6 @@ REQUIRED_FUNCTIONS = [
     "_build_target_subtitle_srt",    # target-language SRT from TTS audio
     "_call_gemini_mapping",          # EN<->target subtitle mapping
     "run_sync_from_strings",         # sync algorithm
-    "run_sync_isotonic_from_strings", # v0.15.5 trial-engine legacy placement
     "_write_srt_from_dict",          # synced subs -> SRT text
     "_build_timestamps",             # synced subs -> timestamp entries
     "_format_timestamps_as_text",    # timestamps file format (contract)
@@ -231,7 +224,6 @@ REQUIRED_FUNCTIONS = [
     # v0.8 sentence-timed pieces
     "build_pieces",                  # sections -> one piece per sentence
     "place_pieces",                  # windowed placement + bounded borrowing
-    "place_pieces_isotonic",         # v0.15.5 legacy-style placement, no parking
     "synthesize_sentences_elevenlabs",# /with-timestamps TTS -> spans per sentence
     "_split_script_into_units",      # v0.12 clause-level units
 ]
@@ -457,42 +449,6 @@ def _sync_mode(args) -> str:
     return "match"
 
 
-PIECE_PLACERS = ("isotonic", "window")
-
-
-def _piece_placer(args) -> str:
-    """Which match-mode placer runs: --piece-placer > engine_settings.json >
-    'isotonic' (the v0.15.5 default).
-
-    Defaults to 'window' — the behaviour that shipped before v0.15.5. The
-    trial engine is opt-in, so an install that changes nothing keeps the
-    placement it already had.
-
-    'isotonic' never parks a piece — it stretches the run across the English
-    and nudges overruns forward, which is what legacy sync mode does, at match
-    mode's cost. 'window' is the earlier behaviour: aim at each piece's own
-    window, park anything that will not fit.
-    """
-    v = (getattr(args, "piece_placer", None) or "").strip().lower()
-    if v in PIECE_PLACERS:
-        return v
-    try:
-        with open(ENGINE_SETTINGS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            v = (data.get("piece_placer") or "").strip().lower()
-            if v in PIECE_PLACERS:
-                return v
-            # The same one switch the Auto Sync half uses, so a user turns the
-            # trial engine on once and both tools follow.
-            if (data.get("sync_engine") or "").strip().lower() in (
-                    "new", "samanvaya", "isotonic"):
-                return "isotonic"
-    except Exception:
-        pass
-    return "window"
-
-
 CHUNK_MODES = ("clause", "sentence", "section")
 
 
@@ -572,10 +528,9 @@ def _import_pipeline():
     if ENGINE_DIR not in sys.path:
         sys.path.insert(0, ENGINE_DIR)
     from pipeline import (config, stt, srt_tools, llm, tts, sync, tm,  # noqa: F401
-                          match, agent_splitter, agent_aligner, lekhak)
+                          match, agent_splitter, agent_aligner)
     ns = types.SimpleNamespace()
-    for mod in (config, stt, srt_tools, llm, tts, sync, match, agent_splitter,
-                agent_aligner, lekhak):
+    for mod in (config, stt, srt_tools, llm, tts, sync, match, agent_splitter, agent_aligner):
         for name, value in vars(mod).items():
             if name.startswith("__"):
                 continue
@@ -669,69 +624,6 @@ def _write_text(path, text):
 def _read_text(path):
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
-
-
-def _write_json(path, obj):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2, ensure_ascii=False)
-
-
-def _read_json(path):
-    """Parse a small sidecar, or {} when it is absent or unreadable.
-
-    Callers use this for optional run metadata, so a missing or half-written
-    file must degrade to "we do not know" rather than end a run.
-    """
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _english_prose_for_lekhak(pl, final_srt, raw_eng):
-    """The English to send Lekhak: words only, no timings.
-
-    Lekhak strips subtitle timings by design and would translate the analysis
-    format's `[4.139s]` annotations as if they were something a speaker said.
-    The cue texts are rejoined into flowing prose instead, which is the shape
-    its pipeline is built to read. Falls back to the raw transcription if the
-    SRT cannot be parsed for any reason.
-    """
-    try:
-        entries = pl._extract_srt_entries(final_srt)
-        text = " ".join((t or "").strip() for (_s0, _s1, t) in entries
-                        if (t or "").strip())
-        if text.strip():
-            return text.strip()
-    except Exception:
-        pass
-    return (raw_eng or "").strip()
-
-
-def _lekhak_learn_from_approved(pl, base, language, approved_text):
-    """Feed the human-approved script back into the Lekhak desk (v0.15.5).
-
-    Only runs when this audio's translation actually came from Lekhak — the
-    sidecar written at S2a carries the paste id. Best-effort throughout: a dub
-    resume must not fail because a memory write did not land.
-    """
-    sidecar = _read_json(base + "_lekhak.json")
-    paste_id = (sidecar.get("paste_id") or "").strip()
-    if not paste_id:
-        return
-    if not getattr(pl, "lekhak_learn_enabled", None) or \
-            not pl.lekhak_learn_enabled():
-        _note("Lekhak: learn-back is switched off — the approved script was "
-              "not sent back.")
-        return
-    lang = (sidecar.get("language") or language or "").strip() or language
-    try:
-        pl.lekhak_keep(paste_id, approved_text, lang,
-                       status_cb=lambda m: _note(m))
-    except Exception as e:
-        _note(f"Lekhak: learn-back failed ({e}) — the dub continues.")
 
 
 # ── Reusing a paid synthesis after a late failure ───────────────────────────
@@ -920,42 +812,13 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
     regions = pl._detect_regions_from_audio(
         y_data, sr, pl.DEFAULT_THR_DB, pl.DEFAULT_HYS_DB,
         pl.DEFAULT_MIN_MS)
+    if not regions:
+        raise RuntimeError("No speech regions detected in the English audio "
+                           "(is the file silent?).")
     try:
         ctx["en_audio_dur"] = float(len(y_data)) / float(sr) if sr else 0.0
     except Exception:
         ctx["en_audio_dur"] = 0.0
-
-    # v0.15.5: background music defeats the loudness gate. The gate opens on
-    # anything above a fixed level and the music bed never drops below it, so
-    # it never closes and the whole talk comes back as ONE region — or none.
-    # That is not an error anywhere downstream: it becomes a single English cue,
-    # every dub piece but one is left unmatched, and the rest are chained onto
-    # the Un sync track at the far end. The word timings the transcriber already
-    # returned cannot be fooled by music, so they take over when the gate has
-    # plainly collapsed, and only if they actually find more lines than it did.
-    _collapsed = getattr(pl, "regions_collapsed", None)
-    _from_words = getattr(pl, "regions_from_words", None)
-    if callable(_collapsed) and callable(_from_words) \
-            and _collapsed(regions, ctx["en_audio_dur"]):
-        _why = ("no region at all" if not regions
-                else f"one region covering the whole "
-                     f"{ctx['en_audio_dur']:.0f}s of audio")
-        _word_regions = _from_words(words)
-        if len(_word_regions) > len(regions):
-            _say("S1b", f"WARNING: loudness-based detection found {_why} — "
-                        "background music is the usual cause. Rebuilding the "
-                        f"lines from word timings instead: "
-                        f"{len(_word_regions)} region(s).")
-            regions = _word_regions
-        else:
-            _say("S1b", f"WARNING: speech detection found {_why}, and the word "
-                        "timings do not split it any further. If this audio has "
-                        "background music the whole talk will be treated as one "
-                        "line and most dub pieces will land on Un sync.")
-
-    if not regions:
-        raise RuntimeError("No speech regions detected in the English audio "
-                           "(is the file silent?).")
     ctx["regions"] = regions
 
     final_srt = pl._build_subtitle_srt(regions, words)
@@ -990,31 +853,6 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
             tm_cached, tm_glossary = None, ""
             _note(f"WARNING: translation-memory lookup failed ({e}) — "
                   "running the full LLM chain.")
-    # v0.15.5: Lekhak may take Step 1's chair for the languages it is enabled
-    # for. Only the translation comes from there — Step 2 and Step 3 still run,
-    # because every timing-aware thing (pulse mapping, the `...` pause threads,
-    # the [fast] pace tags, shortening what will not fit) lives in them and
-    # Lekhak never sees a timing. The paste id is written to a sidecar so the
-    # resume-after-review run can send the approved wording back to be learned.
-    lekhak_text = ""
-    use_lekhak = (provided_text is None and not tm_cached
-                  and getattr(pl, "lekhak_selected", None) is not None
-                  and pl.lekhak_selected(language))
-    if use_lekhak:
-        _say("S2a", "Translating with Lekhak (Step 1 replaced)…")
-        _lk = pl.lekhak_translate(
-            _english_prose_for_lekhak(pl, final_srt, raw_eng), language,
-            status_cb=lambda m: _say("S2a", m))
-        lekhak_text = _lk["text"]
-        _write_text(base + "_LekhakTranslation.txt", lekhak_text)
-        _write_json(base + "_lekhak.json", {
-            "paste_id": _lk.get("paste_id") or "",
-            "language": language,
-            "pages": _lk.get("pages", 0),
-            "from_memory": _lk.get("from_memory", 0),
-        })
-        _say("S2a", f"Lekhak translation received ({len(lekhak_text)} chars).")
-
     if provided_text is not None:
         tr_result = rev_result = punc_result = provided_text
         _say("S2a", "Using the provided translation — LLM translation "
@@ -1029,20 +867,15 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
         _say("S2b", "Review step skipped (proofed script from memory).")
         _say("S2c", "Punctuation step skipped (proofed script from memory).")
     else:
-        if tm_glossary and not lekhak_text:
+        if tm_glossary:
             _note("Translation memory: partial matches found — injecting "
                   "the approved-translations glossary into the prompt.")
-        if lekhak_text:
-            _say("S2a", f"Step 2 + Step 3 running on {gemini_model} "
-                        "(review + pace tags -> punctuation)…")
-        else:
-            _say("S2a", f"Translation chain running on {gemini_model} "
-                        f"(Step1 translate -> Step2 review -> Step3 "
-                        f"punctuation)…")
+        _say("S2a", f"Translation chain running on {gemini_model} "
+                    f"(Step1 translate -> Step2 review -> Step3 punctuation)…")
         (tr_result, rev_result, punc_result,
          _tr_in, _rev_in, _punc_in) = pl._run_gemini_pipeline(
             formatted_srt, gemini_model, language=language, steps=3,
-            tm_glossary=tm_glossary, pretranslated=lekhak_text)
+            tm_glossary=tm_glossary)
         _say("S2b", "Review step done (ran inside the translation chain).")
         _say("S2c", "Punctuation step done (ran inside the translation chain).")
 
@@ -1182,15 +1015,7 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     # ── [S3d] placement + order sweep + files ───────────────────────────────
     _say("S3d", "Placing pieces into their English slots…")
     durations = [(e - s) / 1000.0 for (s, e) in spans]
-    # v0.15.5: "isotonic" placement gives the legacy result — every piece laid
-    # down, overruns nudged forward, nothing parked on Un sync — without
-    # legacy's second paid transcription of the synthesized audio and its extra
-    # mapping call. "window" is the pre-v0.15.5 behaviour, kept for comparison.
-    if _piece_placer(args) == "isotonic" and grain != "section":
-        _say("S3d", "Placement: isotonic (legacy-style, nothing parked).")
-        placed = pl.place_pieces_isotonic(pieces, durations,
-                                          log=lambda m: _say("S3d", m))
-    elif grain != "section":
+    if grain != "section":
         placed = pl.agentic_place_pieces(pieces, durations, en_entries, language,
                                          pl.GEMINI_DEFAULT_MODEL, api_key=api_key,
                                          voice_id=voice_id, el_model=args.el_model,
@@ -1388,17 +1213,7 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
 
     # ── [S3d] Sync algorithm ────────────────────────────────────────────────
     _say("S3d", "Running the sync algorithm…")
-    # v0.15.5: the trial engine also reaches legacy. Same switch, same idea as
-    # match mode's — every line placed, order preserved, nothing pushed past
-    # the end of the English as overflow.
-    _legacy_sync = (pl.run_sync_isotonic_from_strings
-                    if (_piece_placer(args) == "isotonic"
-                        and getattr(pl, "run_sync_isotonic_from_strings", None))
-                    else pl.run_sync_from_strings)
-    if _legacy_sync is not pl.run_sync_from_strings:
-        _say("S3d", "Placement: isotonic (trial engine) — nothing goes to "
-                    "overflow.")
-    synced_subs, orig_te_subs, sync_log = _legacy_sync(
+    synced_subs, orig_te_subs, sync_log = pl.run_sync_from_strings(
         en_srt, te_srt, mapping_text,
         en_audio_duration=ctx.get("en_audio_dur", 0.0))
     _write_text(base + "_sync_log.txt", sync_log)
@@ -1564,12 +1379,6 @@ def _begin_run(args, manifest):
     _roles = getattr(pl, "_llm_role_overrides_label", None)
     if callable(_roles) and _roles():
         _note(f"Per-stage model overrides: {_roles()}")
-    # Say which translator this run will use, in the same place the provider is
-    # named — "why is this Telugu different from last week" has to be one line
-    # of the log, not a settings-file hunt.
-    _translator = getattr(pl, "lekhak_status_label", None)
-    if callable(_translator):
-        _note(_translator(args.language))
     _require_ffmpeg(pl, hard=(args.steps in ("full", "dub")))
     # v0.15.1: prove the LLM answers before anything bills. full/dub always
     # need it (see _preflight_llm); a translate run handed --provided-script
@@ -1723,14 +1532,6 @@ def _run_dub(args, manifest):
     else:
         _note(f"WARNING: marker {marker!r} not found in "
               f"{os.path.basename(fs_path)} — FinalScript left unchanged.")
-
-    # v0.15.5: the human has just approved this script, which is the only
-    # signal worth learning from. Send it back to the Lekhak desk that produced
-    # the translation and mark it Kept, so the next audio with the same
-    # sentences reuses this wording for free. Done here rather than after the
-    # dub finishes: the approval already happened, and a later synthesis
-    # failure should not throw the lesson away.
-    _lekhak_learn_from_approved(pl, ctx["base"], args.language, script_text)
 
     # English audio duration for the sync algorithm (local decode, no API).
     try:

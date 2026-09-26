@@ -76,15 +76,6 @@ _LLM_SETTINGS_DEFAULTS: Dict[str, str] = {
     "model_sync_match": "",   # Auto Sync clip matching (mirrored to sync settings)
     "prompt_caching":  "1",
     "http_user_agent": "",                    # blank → _DEFAULT_HTTP_USER_AGENT
-    # v0.15.5 Lekhak translator. "gemini" (shipped) runs the Step1-3 prompt
-    # chain exactly as before; "lekhak" replaces Step 1 with the self-hosted
-    # Lekhak desk for the listed languages only, and Steps 2-3 carry on
-    # unchanged. See pipeline/lekhak.py for what each key does.
-    "translator":       "gemini",
-    "lekhak_base_url":  "http://127.0.0.1:3000",
-    "lekhak_password":  "",
-    "lekhak_languages": "Telugu,Hindi,Nepali,Marathi",
-    "lekhak_learn":     "1",
     # Auto-Sync-only server/proxy credentials. The engine never calls them; they
     # live in this file because the panel's Settings tab is the single place any
     # credential is entered, and listing them here keeps them round-tripping.
@@ -731,44 +722,9 @@ def _load_lang_prompt(stage: str, language: str) -> str:
         return f.read()
 
 
-# Step 1 is the only place [fast][/fast] tags are created: the Step 2 and Step 3
-# prompts are told the tags are "already optimized in initial translation step"
-# and to preserve them untouched. When an outside translator (Lekhak) takes
-# Step 1's chair nobody makes them, and a line too long for its slot has no way
-# to fit — it is demoted to the Un sync track instead.
-#
-# So when Step 1 is skipped, Step 2 is handed the tag-making job as well. This
-# rides in the DYNAMIC half of the request, never the prompt file: the file is
-# the cached static prefix, and the Gemini path must stay byte-identical so an
-# ordinary run is unaffected.
-_STEP2_FAST_TAG_ADDENDUM = """
-
-### ADDITIONAL INSTRUCTION FOR THIS REQUEST — PACE TAGS
-
-The translation above came from an external translator that could not see the
-timings, so it carries NO [fast][/fast] tags. Creating them is your job in this
-request, in addition to everything in the guidelines above.
-
-For every segment, compare the translated text against that segment's duration
-and the gap after it (the numbers in the formatted English above):
-
-1. First shorten it using the tools already described — sandhi, compound nouns,
-   spoken contractions, half sentences. A shorter line that fits is always
-   better than a tagged one.
-2. If it STILL will not fit in the segment plus its gap, wrap the over-long
-   portion in [fast] and [/fast] so the speech engine renders that stretch at a
-   faster pace. Tag the smallest stretch that solves the problem, never a whole
-   paragraph by reflex.
-3. Never tag text that already fits comfortably.
-
-Everything else about the result format is unchanged: output only the finished
-script, with no commentary."""
-
-
 def _run_gemini_pipeline(formatted_srt: str, model: str = GEMINI_DEFAULT_MODEL,
                          language: str = TTS_DEFAULT_LANGUAGE,
-                         steps: int = 3, tm_glossary: str = "",
-                         pretranslated: str = ""):
+                         steps: int = 3, tm_glossary: str = ""):
     """Runs translation (→ review → punctuation) on the configured LLM provider.
 
     *steps* selects the prompt chain depth:
@@ -782,36 +738,21 @@ def _run_gemini_pipeline(formatted_srt: str, model: str = GEMINI_DEFAULT_MODEL,
     *tm_glossary* (optional) is a translation-memory block of previously
     approved translations, appended to the Step-1 dynamic input so proofed
     phrasing is reused for consistency.
-    *pretranslated* (v0.15.5, optional) is a finished translation from an
-    outside translator — Lekhak. When given, the Step-1 call is skipped entirely
-    and this text enters the chain in its place; Step 2 is then also asked to
-    create the [fast][/fast] pace tags Step 1 would have made.
     Returns (translation, review, punctuation, tr_input, rev_input, punc_input)."""
     steps = max(1, min(3, int(steps or 3)))
-    pretranslated = (pretranslated or "").strip()
 
-    if pretranslated:
-        # No Step-1 call, no Step-1 prompt file read. tr_input stays empty so a
-        # caller writing the debug inputs out records honestly that nothing was
-        # sent for this step.
-        tr_input = ""
-        tr_result = pretranslated
-    else:
-        p1 = _load_lang_prompt("Step1_Translation_Prompt", language)
-        tr_dyn     = f"\n\n=== Formatted SRT Content ===\n{formatted_srt}"
-        if tm_glossary:
-            tr_dyn += tm_glossary
-        tr_input   = p1 + tr_dyn
-        tr_result  = _llm_generate(tr_dyn, model, static_prefix=p1,
-                                   role="translate")
+    p1 = _load_lang_prompt("Step1_Translation_Prompt", language)
+    tr_dyn     = f"\n\n=== Formatted SRT Content ===\n{formatted_srt}"
+    if tm_glossary:
+        tr_dyn += tm_glossary
+    tr_input   = p1 + tr_dyn
+    tr_result  = _llm_generate(tr_dyn, model, static_prefix=p1, role="translate")
 
     rev_result, rev_input = tr_result, ""
     if steps >= 2:
         p2 = _load_lang_prompt("Step2_Review_Prompt", language)
         rev_dyn    = (f"\n\nEnglish text\n{formatted_srt}\n\n"
                       f"{language} Script for Tuning\n{tr_result}")
-        if pretranslated:
-            rev_dyn += _STEP2_FAST_TAG_ADDENDUM
         rev_input  = p2 + rev_dyn
         rev_result = _llm_generate(rev_dyn, model, static_prefix=p2,
                                    role="translate")

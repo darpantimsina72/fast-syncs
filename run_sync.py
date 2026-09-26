@@ -131,19 +131,6 @@ def _build_env(settings: dict) -> dict:
     if vkey:
         env["GOOGLE_APPLICATION_CREDENTIALS"] = vkey
 
-    # v0.15.5 placement and matching style. Both are optional and both have
-    # working defaults in the matcher, so a settings file that predates them
-    # behaves exactly as the matcher's own defaults say — isotonic placement
-    # and automatic script-pivot matching. Set "placer": "spring" to get the
-    # pre-v0.15.5 placement back for one job, without reinstalling anything.
-    # v0.15.5: one switch for the whole trial engine. Absent or "classic"
-    # means the matcher behaves exactly as it did before any of it existed.
-    put("SYNC_ENGINE",     settings.get("sync_engine"))
-    # Still honoured, and still wins over the switch above, so one behaviour
-    # can be isolated for a single job without turning the rest on.
-    put("SYNC_PLACER",     settings.get("placer"))
-    put("SYNC_MATCH_MODE", settings.get("match_mode"))
-
     # Matching is always Gemini — OpenAI/Anthropic matcher options are not
     # exposed in the Reaper UI.
     env["SYNC_MATCHER_PROVIDER"] = "gemini"

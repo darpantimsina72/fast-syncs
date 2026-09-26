@@ -625,13 +625,6 @@ local function load_llm_config()
   v = jval("http_user_agent")  if v then LLM_USER_AGENT = v end
   v = jval("server_url")       if v then LLM_SERVER_URL   = v end
   v = jval("server_token")     if v then LLM_SERVER_TOKEN = v end
-  -- v0.15.5 Lekhak translator. Absent in every earlier config, which is why
-  -- each one keeps its default rather than being blanked.
-  v = jval("translator")       if v and v ~= "" then V5.translator   = v end
-  v = jval("lekhak_base_url")  if v and v ~= "" then V5.lekhak_url   = v end
-  v = jval("lekhak_password")  if v then            V5.lekhak_pw     = v end
-  v = jval("lekhak_languages") if v and v ~= "" then V5.lekhak_langs = v end
-  v = jval("lekhak_learn")     if v and v ~= "" then V5.lekhak_learn = v end
   -- v0.7 per-stage model overrides. Blank = "use the Model field above",
   -- which is what every existing config has, so nothing changes on upgrade.
   for _, role in ipairs(V5.MODEL_ROLES) do
@@ -732,9 +725,6 @@ local function save_sync_credentials()
     -- api_base is the switch that turns proxy mode on for the Python worker:
     -- the server URL in server mode, empty in every direct mode.
     { "api_base",        (conn == "server") and LLM_SERVER_URL or "" },
-    -- v0.15.5: one switch drives the trial engine in both tools. Written as
-    -- the word the Python worker reads, so a hand-edited file is obvious.
-    { "sync_engine",     (V5.piece_placer == "isotonic") and "new" or "classic" },
   }
 
   local content
@@ -901,13 +891,6 @@ local function save_config_files()
   f:write(string.format('  "http_user_agent": "%s",\n', _json_escape(LLM_USER_AGENT)))
   f:write(string.format('  "server_url": "%s",\n',      _json_escape(LLM_SERVER_URL)))
   f:write(string.format('  "server_token": "%s",\n',    _json_escape(LLM_SERVER_TOKEN)))
-  -- v0.15.5 Lekhak translator. Always written, even at their defaults, so the
-  -- file's shape stays stable and the keys are discoverable by hand-editing.
-  f:write(string.format('  "translator": "%s",\n',       _json_escape(V5.translator)))
-  f:write(string.format('  "lekhak_base_url": "%s",\n',  _json_escape(V5.lekhak_url)))
-  f:write(string.format('  "lekhak_password": "%s",\n',  _json_escape(V5.lekhak_pw)))
-  f:write(string.format('  "lekhak_languages": "%s",\n', _json_escape(V5.lekhak_langs)))
-  f:write(string.format('  "lekhak_learn": "%s",\n',     _json_escape(V5.lekhak_learn)))
   f:write(string.format('  "prompt_caching": "%s"\n',   _json_escape(LLM_PROMPT_CACHING)))
   f:write('}\n')
   f:close()
@@ -982,23 +965,6 @@ end
 -- where the engine's _chunk_mode() reads it. V5 fields — 200-local limit.
 V5.chunk_mode = "clause"
 V5.sync_mode  = "match"
--- v0.15.5: which placement match mode uses. "window" is Classic — the
--- behaviour that shipped, parking anything too long for its slot — and it is
--- the default because the new engine is a trial the user opts into. "isotonic"
--- lays every piece down and nudges overruns forward, the legacy result without
--- legacy's second paid transcription.
-V5.piece_placer = "window"
-
--- v0.15.5: which translator does Step 1. "gemini" keeps the shipped prompt
--- chain; "lekhak" asks the self-hosted Lekhak desk for the translation and
--- lets Steps 2-3 add the pauses, the pace tags and the shortening exactly as
--- before. Stored in llm_settings.json beside the other credentials, because
--- the desk password is one. V5 fields — 200-local limit.
-V5.translator   = "gemini"
-V5.lekhak_url   = "http://127.0.0.1:3000"
-V5.lekhak_pw    = ""
-V5.lekhak_langs = "Telugu,Hindi,Nepali,Marathi"
-V5.lekhak_learn = "1"
 
 function V5.load_chunk_mode()
   local content = read_all(ENGINE_SETTINGS_PATH)
@@ -1011,10 +977,6 @@ function V5.load_chunk_mode()
   if s == "match" or s == "legacy" then
     V5.sync_mode = s
   end
-  local p = json_field(content, "piece_placer")
-  if p == "isotonic" or p == "window" then
-    V5.piece_placer = p
-  end
 end
 
 function V5.save_chunk_mode()
@@ -1024,7 +986,6 @@ function V5.save_chunk_mode()
   if not content or not content:find("{") then content = "{\n}\n" end
   content = _json_set_flat(content, "chunk_mode", V5.chunk_mode)
   content = _json_set_flat(content, "sync_mode", V5.sync_mode)
-  content = _json_set_flat(content, "piece_placer", V5.piece_placer)
   local f = io.open(ENGINE_SETTINGS_PATH, "w")
   if not f then return false, ENGINE_SETTINGS_PATH end
   f:write(content)
@@ -5801,71 +5762,6 @@ function V5.pane_connection(ctx)
   V5.hint(ctx, 'These keys are the only copy — the Sync tab uses the same ' ..
                'ones and has no fields of its own.')
 
-  -- v0.15.5: who writes the first draft. Only Step 1 moves — Step 2 (review,
-  -- shorten, pace tags) and Step 3 (pauses, punctuation) keep running on the
-  -- provider chosen above, which is why this sits under it rather than
-  -- replacing it.
-  V5.field(ctx, 'Translator', 200)
-  _, V5.translator = _ui_combo(ctx, '##translator', V5.translator,
-                               { "gemini", "lekhak" })
-  V5.hint(ctx, 'Who writes the first translation. "gemini" is the shipped ' ..
-               'prompt chain. "lekhak" asks your self-hosted Lekhak desk ' ..
-               'instead — better wording, and it learns from every script ' ..
-               'you approve. Pauses, pace tags and length trimming are ' ..
-               'added afterwards either way.')
-  if V5.translator == 'lekhak' then
-    V5.field(ctx, 'Lekhak address', 260)
-    rv, V5.lekhak_url = reaper.ImGui_InputText(ctx, '##lekurl',
-                                               V5.lekhak_url or '')
-    V5.hint(ctx, 'Where Lekhak is running. http://127.0.0.1:3000 when it is ' ..
-                 'on this same machine.')
-    V5.field(ctx, 'Desk password', 260)
-    rv, V5.lekhak_pw = reaper.ImGui_InputText(ctx, '##lekpw',
-                                              V5.lekhak_pw or '', pw)
-    V5.hint(ctx, 'The Other-translation desk password from Lekhak. One ' ..
-                 'password covers every language desk.')
-    -- A dropdown, matching Provider and Translator above. The stored value
-    -- stays the comma-separated string the engine reads, so an existing
-    -- settings file keeps working and can still be hand-edited; "All" is
-    -- simply every language written out.
-    V5.field(ctx, 'Languages', 260)
-    local cur_langs = V5.lekhak_langs or ''
-    local n_langs = 0
-    for _ in cur_langs:gmatch('[^,]+') do n_langs = n_langs + 1 end
-    local shown = (n_langs == #LANGUAGES) and 'All' or cur_langs
-    local lang_items = { 'All' }
-    for _, name in ipairs(LANGUAGES) do lang_items[#lang_items + 1] = name end
-    -- A hand-edited file can name two or three languages, which is not one of
-    -- the entries above. Show it as its own entry rather than silently
-    -- snapping the user's choice to something else.
-    local known = false
-    for _, it in ipairs(lang_items) do if it == shown then known = true end end
-    if not known and shown ~= '' then
-      table.insert(lang_items, 2, shown)
-    end
-    local lang_hit, lang_pick = _ui_combo(ctx, '##leklangs', shown, lang_items)
-    if lang_hit then
-      if lang_pick == 'All' then
-        V5.lekhak_langs = table.concat(LANGUAGES, ',')
-      else
-        V5.lekhak_langs = lang_pick
-      end
-    end
-    V5.hint(ctx, 'Which languages go through Lekhak. Pick one to trial it on ' ..
-                 'that language alone, or All for every language. Everything ' ..
-                 'not chosen keeps using the AI chain above. Your run still ' ..
-                 'takes its language from the Dub tab — this only says which ' ..
-                 'ones are allowed to use Lekhak.')
-    local learn_on = (V5.lekhak_learn ~= '0')
-    rv, learn_on = reaper.ImGui_Checkbox(ctx,
-      'Teach Lekhak from approved scripts##leklearn', learn_on)
-    if rv then V5.lekhak_learn = learn_on and '1' or '0' end
-    V5.hint(ctx, 'When you approve a script at the review pause it is sent ' ..
-                 'back and remembered. Pause marks and pace tags are ' ..
-                 'stripped first, so the desk your translators share never ' ..
-                 'learns to write them.')
-  end
-
   V5.field(ctx, 'Model', 260)
   rv, LLM_MODEL = reaper.ImGui_InputText(ctx, '##llmmodel', LLM_MODEL or '')
   if LLM_PROVIDER == 'openai' then
@@ -6652,62 +6548,37 @@ function V5.pane_advanced(ctx)
   })
   if sm ~= V5.sync_mode then
     V5.sync_mode = sm
-    local oks, badp = V5.save_chunk_mode()
-    if not oks then
-      ui_set_banner("error", "Could not write:\n" .. tostring(badp))
+    local okc, badpath = V5.save_chunk_mode()
+    if not okc then
+      ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
     end
   end
 
-  -- v0.15.5: the trial sync engine, as ONE switch for BOTH tools. Off by
-  -- default — the team wants users to opt in and compare, not to be moved
-  -- onto it. Shown in legacy too, because the same switch is what the Auto
-  -- Sync tab reads; it just has no effect on legacy's own placement.
-  do
-    V5.label(ctx, 'Sync engine')
-    -- The two sync modes fail differently when a dubbed line will not fit,
-    -- so one description cannot be true for both. Match parks the line on the
-    -- Un sync track; Legacy has never done that — it pushes the line past the
-    -- end of the English instead (overflow). Saying "parked on Un sync" under
-    -- Legacy describes behaviour that does not exist there.
-    local classic_help
-    if V5.sync_mode == 'legacy' then
-      classic_help =
-        'What Legacy has always done: five rounds of spring placement, ' ..
-        'compressing and bleeding into neighbouring gaps. Nothing is ever ' ..
-        'put on the Un sync track. A line that still will not fit is pushed ' ..
-        'past the end of the English audio (overflow).'
-    else
-      classic_help =
-        'What Match has always done. Each dubbed line aims at its own ' ..
-        'English slot, and anything too long to fit is parked on the Un ' ..
-        'sync track for you to place by hand.'
+  reaper.ImGui_Dummy(ctx, 0, 8)
+  V5.field(ctx, 'Python', 260)
+  rv, PYTHON_CMD = reaper.ImGui_InputText(ctx, '##pycmd', PYTHON_CMD or '')
+  V5.hint(ctx, 'Leave blank to auto-detect (dubbing/venv/ first, then system ' ..
+               'installs). Run ' .. SETUP_SCRIPT .. ' once to create venv/.')
+end
+
+function V5.pane_about(ctx)
+  V5.heading(ctx, 'About', 'Version and updates')
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  reaper.ImGui_Text(ctx, 'Fast Syncs '
+    .. (V5.APP_VERSION ~= '' and ('v' .. V5.APP_VERSION)
+        or '(VERSION file missing — run Update…)'))
+  reaper.ImGui_PopStyleColor(ctx)
+
+  reaper.ImGui_Dummy(ctx, 0, 8)
+  if V5.updater_path() then
+    if reaper.ImGui_Button(ctx, 'Update…', 150, 30) then
+      V5.run_updater()
     end
-    local new_help
-    if V5.sync_mode == 'legacy' then
-      new_help =
-        'Places every line proportionally across the English and nudges ' ..
-        'overruns forward. Order can never flip and nothing is pushed into ' ..
-        'overflow at the far end. Being trialled — compare before you keep it.'
-    else
-      new_help =
-        'Lays every line down and nudges overruns forward, so nothing is ' ..
-        'parked on Un sync. The result Legacy gives, without Legacy paying ' ..
-        'for a second transcription. Being trialled — compare first.'
-    end
-    local pp = V5.segmented(ctx, 'pieceplacer', V5.piece_placer, {
-      { 'window',   'Classic',   classic_help },
-      { 'isotonic', 'New (trial)', new_help },
-    })
-    V5.hint(ctx, 'Classic is the old behaviour and the default — unchanged ' ..
-                 'in both sync modes. New turns on the trial engine for this ' ..
-                 'tab and the Auto Sync tab at once. Switch back any time.')
-    if pp ~= V5.piece_placer then
-      V5.piece_placer = pp
-      local okp, badpp = V5.save_chunk_mode()
-      if not okp then
-        ui_set_banner("error", "Could not write:\n" .. tostring(badpp))
-      end
-    end
+    V5.hint(ctx, 'Updates the whole fast-syncs install — the sync tool AND ' ..
+                 'this dubbing app.')
+  else
+    _grey_hint(ctx, 'No fast-syncs updater found above dubbing/ — this ' ..
+                    'looks like a standalone install.')
   end
 end
 
@@ -6761,30 +6632,12 @@ function V5.ui_settings_body(ctx)
 
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_BeginChild(ctx, '##pane_body', -1, -38) then
-    -- The pane body runs under pcall for one reason: ImGui_EndChild MUST be
-    -- reached. A Lua error anywhere inside a pane — a typo, a helper that does
-    -- not exist in this ReaImGui build, a nil field — used to escape past the
-    -- EndChild below, which leaves the ImGui context unbalanced. REAPER then
-    -- raises "Missing EndChild()" and kills the whole window, so the original
-    -- one-line mistake is invisible behind a second, scarier dialog and the
-    -- panel cannot be reopened without restarting.
-    --
-    -- With this, a broken pane shows its own error in the banner, every other
-    -- pane keeps working, and the window survives.
-    local ok, err = pcall(function()
-      local drawn = false
-      for _, pane in ipairs(V5.PANES) do
-        if V5.settings_pane == pane[1] then pane[3](ctx); drawn = true end
-      end
-      if not drawn then V5.pane_connection(ctx) end
-    end)
-    reaper.ImGui_EndChild(ctx)
-    if not ok then
-      ui_set_banner("error",
-        "The '" .. tostring(V5.settings_pane or "connection") ..
-        "' settings pane hit an error and was not drawn:\n" .. tostring(err) ..
-        "\nEvery other pane still works. Please report this line.")
+    local drawn = false
+    for _, pane in ipairs(V5.PANES) do
+      if V5.settings_pane == pane[1] then pane[3](ctx); drawn = true end
     end
+    if not drawn then V5.pane_connection(ctx) end
+    reaper.ImGui_EndChild(ctx)
   end
 
   -- One Save for the window. Every pane writes to the same two config files,
