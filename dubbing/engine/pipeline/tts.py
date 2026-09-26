@@ -21,10 +21,15 @@ Adaptations (everything else is verbatim):
 """
 
 import base64
+import hashlib
+import http.client
 import io
 import json
 import os
 import re
+import socket
+import threading
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -34,7 +39,7 @@ from .config import (_urlopen, ELEVENLABS_CHUNK_CHARS, ELEVENLABS_TTS_MODEL,
                      ELEVENLABS_TTS_VOICE_ID, CONFIG_DIR, PYDUB_AVAILABLE,
                      TTS_DEFAULT_LANGUAGE, TTS_DEFAULT_VOICE, TTS_LANGUAGES,
                      TTS_MAX_BYTES, _AudioSegment, _strip_emotion_tags,
-                     load_tts_settings)
+                     load_tts_settings, _env_int, _run_parallel)
 from .stt import _sanitize_voice_id
 
 try:
@@ -225,9 +230,9 @@ def synthesize_tts(text: str, output_path: str, status_cb=None,
     with open(chunk_log_path, "w", encoding="utf-8") as lf:
         lf.write("\n".join(chunk_log_lines))
 
-    if status_cb:
+    if say:
         chunk_note = f" ({total} chunks joined)" if total > 1 else ""
-        status_cb(f"TTS: Saving → {os.path.basename(output_path)}…{chunk_note}")
+        say(f"TTS: Saving → {os.path.basename(output_path)}…{chunk_note}")
 
     # Concatenate all PCM chunks and write single WAV
     all_pcm = b"".join(chunk_pcm_list)
@@ -474,16 +479,53 @@ def _split_script_into_units(text: str, max_chars: int = CLAUSE_MAX_CHARS,
     return _merge_tiny_units(units, min_chars) if min_chars > 0 else units
 
 
-def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
-                         previous_text: str = None, next_text: str = None) -> bytes:
-    """
-    Single ElevenLabs text-to-speech request → raw MP3 bytes.
+# ─── ElevenLabs request plumbing: payload, retry, parallelism ───────────────
+# Independent TTS requests run ELEVENLABS_TTS_WORKERS at a time (none of
+# them depends on another's audio: the previous_text / next_text stitching
+# context is always SCRIPT text, never a previous reply, and no request
+# sends previous_request_ids). Results are reassembled in the original order,
+# so the joined audio is the same as a one-at-a-time run. Override with the
+# DUB_TTS_WORKERS environment variable (1 = the old sequential behaviour).
+ELEVENLABS_TTS_WORKERS = _env_int("DUB_TTS_WORKERS", 4, 1, 8)
 
-    previous_text / next_text enable request-stitching: when synthesizing one
-    sentence in isolation the surrounding script is sent as context so prosody
-    matches the neighbouring segments. Models that reject those fields get one
-    automatic retry without them.
-    """
+# Transient failures (rate limit / overload / outage / timeout / dropped
+# connection) are retried after these waits. A Retry-After header, when the
+# server sends one, is honoured up to _EL_RETRY_AFTER_CAP seconds. Running
+# requests in parallel makes an occasional 429 ("too many concurrent
+# requests" on smaller plans) expected rather than fatal.
+_EL_RETRY_DELAYS = (2.0, 5.0, 10.0)
+_EL_RETRY_AFTER_CAP = 60.0
+
+# One lock for every line this module prints while worker threads run, so
+# two progress lines can never interleave mid-line in the log the panel reads.
+_TTS_PRINT_LOCK = threading.Lock()
+
+
+def _tts_log(msg: str) -> None:
+    """Untagged-stage progress line. Tagged [tts], NOT [Sxx]: the panel takes
+    the last [Sxx] tag it sees as the current stage (same reason as
+    stt._stt_log and llm._llm_log)."""
+    with _TTS_PRINT_LOCK:
+        print(f"[tts] {msg}", flush=True)
+
+
+def _locked_cb(status_cb):
+    """status_cb wrapped so it can never print at the same time as a worker
+    thread's retry line. None stays None."""
+    if not status_cb:
+        return None
+
+    def _cb(msg):
+        with _TTS_PRINT_LOCK:
+            status_cb(msg)
+    return _cb
+
+
+def _el_tts_payload(chunk: str, model_id: str, previous_text: str = None,
+                    next_text: str = None) -> bytes:
+    """JSON body of one ElevenLabs TTS request — byte-for-byte what both
+    request functions have always sent (same key order, same voice settings,
+    same 600-char stitching caps, ensure_ascii=False)."""
     body = {
         "text": chunk,
         "model_id": model_id,
@@ -500,20 +542,132 @@ def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
         body["previous_text"] = previous_text[-600:]
     if next_text:
         body["next_text"] = next_text[:600]
+    return json.dumps(body, ensure_ascii=False).encode("utf-8")
 
-    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-    req = urllib.request.Request(
-        url, data=payload, method="POST",
-        headers={
-            "xi-api-key": api_key,
-            "Content-Type": "application/json; charset=utf-8",
-            "Accept": "audio/mpeg",
-        },
-    )
+
+def _el_request_key(url: str, payload: bytes) -> str:
+    """Identity of one synthesis request: the endpoint (carries the voice id)
+    plus the exact JSON body (text, stitching context, model, voice
+    settings). Identical key = identical request. The API key is not part of
+    it — it does not change what is spoken."""
+    h = hashlib.sha256()
+    h.update(url.encode("utf-8"))
+    h.update(b"\x00")
+    h.update(payload)
+    return h.hexdigest()
+
+
+def _el_retryable(exc: BaseException) -> bool:
+    """Worth another attempt? 429 and 5xx, timeouts, dropped connections.
+
+    Typed checks only, never a substring match on server-supplied text.
+    HTTPError is tested first because it subclasses URLError."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code == 429 or exc.code >= 500
+    if isinstance(exc, urllib.error.URLError):
+        return isinstance(exc.reason, (TimeoutError, socket.timeout,
+                                       ConnectionError))
+    return isinstance(exc, (TimeoutError, socket.timeout, ConnectionError,
+                            http.client.RemoteDisconnected,
+                            http.client.IncompleteRead))
+
+
+def _el_retry_after(exc: BaseException) -> float:
+    """Seconds the server asked us to wait (Retry-After), else 0.0."""
+    headers = getattr(exc, "headers", None)
     try:
-        with _urlopen(req, timeout=180) as resp:
-            return resp.read()
+        raw = headers.get("Retry-After") if headers else None
+        return max(0.0, float(str(raw).strip()))
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
+
+
+def _el_send(make_request, timeout: float) -> bytes:
+    """POST through config._urlopen (TLS policy unchanged) and return the
+    body, retrying transient failures per _EL_RETRY_DELAYS. The request is
+    rebuilt per attempt (urlopen consumes a Request). The final failure is
+    re-raised unchanged, so the callers' HTTP-code messages still apply."""
+    attempts = len(_EL_RETRY_DELAYS) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            with _urlopen(make_request(), timeout=timeout) as resp:
+                return resp.read()
+        except Exception as e:
+            if attempt == attempts or not _el_retryable(e):
+                raise
+            delay = max(_EL_RETRY_DELAYS[attempt - 1],
+                        min(_el_retry_after(e), _EL_RETRY_AFTER_CAP))
+            if isinstance(e, urllib.error.HTTPError):
+                detail = f"HTTP {e.code}"
+                try:
+                    e.close()
+                except Exception:
+                    pass
+            else:
+                detail = type(e).__name__
+            _tts_log(f"ElevenLabs request failed ({detail}), attempt "
+                     f"{attempt}/{attempts} — retrying in {delay:g}s")
+            time.sleep(delay)
+
+
+def _read_reuse_sidecar(mp3_path: str, key: str):
+    """(mp3 bytes, sidecar dict) of a previous run's piece whose request key
+    matches exactly, else None. Any doubt (missing file, corrupt JSON,
+    different key, size mismatch) returns None and the piece is synthesized
+    again — reusing audio that does not match the script would dub the wrong
+    words, which is far worse than paying twice. Same rule as the legacy
+    whole-wav reuse (dub_engine._reusable_tts)."""
+    try:
+        with open(mp3_path + ".json", "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        if not isinstance(meta, dict) or meta.get("key") != key:
+            return None
+        with open(mp3_path, "rb") as f:
+            audio = f.read()
+        if not audio or len(audio) != meta.get("bytes"):
+            return None
+        return audio, meta
+    except Exception:
+        return None
+
+
+def _write_reuse_sidecar(mp3_path: str, audio: bytes, meta: dict) -> None:
+    """Write the piece mp3, then its sidecar (atomically). Best effort: a
+    sidecar we cannot write only costs one re-synthesis on a re-run."""
+    with open(mp3_path, "wb") as f:
+        f.write(audio)
+    try:
+        data = dict(meta)
+        data["bytes"] = len(audio)
+        tmp = mp3_path + ".json.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, mp3_path + ".json")
+    except Exception:
+        pass
+
+
+def _elevenlabs_tts_post(chunk: str, api_key: str, voice_id: str, model_id: str,
+                         previous_text: str = None, next_text: str = None) -> bytes:
+    """
+    Single ElevenLabs text-to-speech request → raw MP3 bytes.
+
+    previous_text / next_text enable request-stitching: when synthesizing one
+    sentence in isolation the surrounding script is sent as context so prosody
+    matches the neighbouring segments. Models that reject those fields get one
+    automatic retry without them.
+    """
+    payload = _el_tts_payload(chunk, model_id, previous_text, next_text)
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    try:
+        return _el_send(lambda: urllib.request.Request(
+            url, data=payload, method="POST",
+            headers={
+                "xi-api-key": api_key,
+                "Content-Type": "application/json; charset=utf-8",
+                "Accept": "audio/mpeg",
+            },
+        ), timeout=180)
     except urllib.error.HTTPError as e:
         err_body = ""
         try:
@@ -596,7 +750,7 @@ def ensure_writable_output(output_path: str, status_cb=None) -> str:
 def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
                                voice_id: str = ELEVENLABS_TTS_VOICE_ID,
                                model_id: str = ELEVENLABS_TTS_MODEL,
-                               status_cb=None) -> str:
+                               status_cb=None, workers: int = None) -> str:
     """
     Convert target-language text to speech using ElevenLabs TTS (eleven_v3
     auto-detects the script) and save to output_path (MP3 decoded to WAV via
@@ -662,34 +816,47 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
         "",
     ]
 
-    chunk_bytes_list = []
+    # Indic-tuned voice settings: slightly higher stability + style 0
+    # produce cleaner pronunciation of conjunct consonants and matras
+    # across Devanagari / Bengali / Tamil / Telugu / Kannada / Malayalam /
+    # Gujarati / Odia / Assamese scripts.
+    # NOTE: do NOT send `language_code` — eleven_v3 auto-detects the
+    # target language from the input text. Passing language_code triggers
+    # HTTP 400 `unsupported_language` on multilingual models.
+    # Lower stability + raised style give eleven_v3 room to act on the
+    # inline emotion / accent tags injected by Step4 (e.g. [bengali accent],
+    # [calm], [slow], [pause]) so delivery feels human and reflective —
+    # closer to a wise teacher (Sadhguru-style cadence) than a flat read.
+    #
+    # Chunks carry no stitching context, so each request is independent:
+    # they run a few at a time and are joined strictly in script order.
+    workers = ELEVENLABS_TTS_WORKERS if workers is None else max(1, int(workers))
+    say = _locked_cb(status_cb)
+    if say:
+        if total > 1:
+            say(f"TTS: ElevenLabs generating audio… {total} chunks, up to "
+                f"{min(workers, total)} at a time")
+        else:
+            say("TTS: ElevenLabs generating audio…")
+    finished = [0]
+
+    def _chunk_done(idx, audio_bytes):
+        # Save individual chunk as MP3 (ElevenLabs returns MP3 bytes) the
+        # moment it arrives, on the calling thread.
+        with open(f"{out_base}_chunk_{idx + 1:02d}.mp3", "wb") as cf:
+            cf.write(audio_bytes)
+        finished[0] += 1
+        if say and total > 1:
+            say(f"TTS: ElevenLabs generating audio… chunk {idx + 1} of "
+                f"{total} done ({finished[0]}/{total} finished)")
+
+    chunk_bytes_list = _run_parallel(
+        [(lambda c=chunk: _elevenlabs_tts_post(c, api_key, voice_id, model_id))
+         for chunk in chunks],
+        workers, on_done=_chunk_done)
 
     for i, chunk in enumerate(chunks, 1):
-        if status_cb:
-            if total > 1:
-                status_cb(f"TTS: ElevenLabs generating audio… chunk {i} of {total}")
-            else:
-                status_cb("TTS: ElevenLabs generating audio…")
-
-        # Indic-tuned voice settings: slightly higher stability + style 0
-        # produce cleaner pronunciation of conjunct consonants and matras
-        # across Devanagari / Bengali / Tamil / Telugu / Kannada / Malayalam /
-        # Gujarati / Odia / Assamese scripts.
-        # NOTE: do NOT send `language_code` — eleven_v3 auto-detects the
-        # target language from the input text. Passing language_code triggers
-        # HTTP 400 `unsupported_language` on multilingual models.
-        # Lower stability + raised style give eleven_v3 room to act on the
-        # inline emotion / accent tags injected by Step4 (e.g. [bengali accent],
-        # [calm], [slow], [pause]) so delivery feels human and reflective —
-        # closer to a wise teacher (Sadhguru-style cadence) than a flat read.
-        audio_bytes = _elevenlabs_tts_post(chunk, api_key, voice_id, model_id)
-        chunk_bytes_list.append(audio_bytes)
-
-        # Save individual chunk as MP3 (ElevenLabs returns MP3 bytes)
         chunk_audio_path = f"{out_base}_chunk_{i:02d}.mp3"
-        with open(chunk_audio_path, "wb") as cf:
-            cf.write(audio_bytes)
-
         # Add entry to chunk log
         chunk_log_lines += [
             f"=== CHUNK {i} of {total} ===",
@@ -753,7 +920,7 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
                                    api_key: str,
                                    voice_id: str = ELEVENLABS_TTS_VOICE_ID,
                                    model_id: str = ELEVENLABS_TTS_MODEL,
-                                   status_cb=None):
+                                   status_cb=None, workers: int = None):
     """Synthesize *section_texts* one by one into ONE concatenated WAV
     (contract v0.7 match mode). Returns (output_path, spans) where spans is
     one (start_ms, end_ms) pair per section inside the wav, gaps excluded.
@@ -810,27 +977,89 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
         "",
     ]
 
-    seg_list = []
+    # Plan every request up front. The stitching context is SCRIPT text
+    # (neighbouring sections / subchunks), never a previous reply, so the
+    # requests are independent and can run a few at a time. The bodies are
+    # exactly what the old one-by-one loop sent.
     total = len(sections)
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    plan = []                      # per section: [(sub, prev, next), ...]
     for i, text in enumerate(sections):
-        if status_cb:
-            status_cb(f"TTS: section {i + 1} of {total} "
-                      f"({len(text)} chars)…")
         prev_ctx = sections[i - 1] if i > 0 else None
         next_ctx = sections[i + 1] if i + 1 < total else None
-        sec_bytes = []
         subchunks = _split_text_for_elevenlabs(text)
+        reqs = []
         for k, sub in enumerate(subchunks):
             # Stitching context: everything before/after THIS subchunk, so
             # multi-subchunk sections stay continuous internally too.
             p = " ".join(filter(None, [prev_ctx] + subchunks[:k])) or None
             n = " ".join(filter(None, subchunks[k + 1:] + [next_ctx])) or None
-            sec_bytes.append(_elevenlabs_tts_post(
-                sub, api_key, voice_id, model_id,
-                previous_text=p, next_text=n))
-        raw = b"".join(sec_bytes)
-        with open(f"{out_base}_sec_{i + 1:03d}.mp3", "wb") as sf:
-            sf.write(raw)
+            reqs.append((sub, p, n))
+        plan.append(reqs)
+
+    def _sec_key(reqs):
+        h = hashlib.sha256()
+        for (sub, p, n) in reqs:
+            h.update(_el_request_key(url, _el_tts_payload(sub, model_id, p, n))
+                     .encode("ascii"))
+        return h.hexdigest()
+
+    # Re-run reuse: a section whose exact requests were already paid for in
+    # a previous run (same text, context, voice, model, settings) is read
+    # back from its _sec_NNN.mp3 instead of being synthesized again.
+    say = _locked_cb(status_cb)
+    all_bytes = [None] * total     # per section: list of sub-request bytes
+    keys = [_sec_key(r) for r in plan]
+    for i in range(total):
+        hit = _read_reuse_sidecar(f"{out_base}_sec_{i + 1:03d}.mp3", keys[i])
+        if hit:
+            audio, meta = hit
+            lens = meta.get("lengths") or []
+            if (len(lens) == len(plan[i]) and sum(lens) == len(audio)
+                    and all(isinstance(x, int) and x > 0 for x in lens)):
+                parts, pos = [], 0
+                for ln in lens:
+                    parts.append(audio[pos:pos + ln])
+                    pos += ln
+                all_bytes[i] = parts
+                if say:
+                    say(f"TTS: section {i + 1} of {total} reused from the "
+                        "previous run (same text, voice and model).")
+
+    jobs = [(i, k) for i in range(total) if all_bytes[i] is None
+            for k in range(len(plan[i]))]
+    workers = ELEVENLABS_TTS_WORKERS if workers is None else max(1, int(workers))
+    if jobs and say:
+        say(f"TTS: synthesizing {total - sum(1 for b in all_bytes if b)} "
+            f"section(s) in {len(jobs)} request(s), up to "
+            f"{min(workers, len(jobs))} at a time…")
+    pending = {}
+    for (i, k) in jobs:
+        pending.setdefault(i, {})
+    def _job_done(j, audio):
+        i, k = jobs[j]
+        pending[i][k] = audio
+        if len(pending[i]) == len(plan[i]):
+            parts = [pending[i][kk] for kk in range(len(plan[i]))]
+            all_bytes[i] = parts
+            _write_reuse_sidecar(f"{out_base}_sec_{i + 1:03d}.mp3",
+                                 b"".join(parts),
+                                 {"key": keys[i],
+                                  "lengths": [len(b) for b in parts]})
+            if say:
+                say(f"TTS: section {i + 1} of {total} "
+                    f"({len(sections[i])} chars) done")
+
+    _run_parallel(
+        [(lambda s_=plan[i][k][0], p_=plan[i][k][1], n_=plan[i][k][2]:
+          _elevenlabs_tts_post(s_, api_key, voice_id, model_id,
+                               previous_text=p_, next_text=n_))
+         for (i, k) in jobs],
+        workers, on_done=_job_done)
+
+    seg_list = []
+    for i, text in enumerate(sections):
+        sec_bytes = all_bytes[i]
         try:
             seg = AudioSegment.empty()
             for rb in sec_bytes:
@@ -869,9 +1098,9 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
     with open(out_base + "_chunks.txt", "w", encoding="utf-8") as lf:
         lf.write("\n".join(log_lines))
 
-    if status_cb:
-        status_cb(f"TTS: Saving → {os.path.basename(output_path)}… "
-                  f"({total} sections)")
+    if say:
+        say(f"TTS: Saving → {os.path.basename(output_path)}… "
+            f"({total} sections)")
     try:
         combined.export(output_path, format="wav")
     except PermissionError:
@@ -900,35 +1129,18 @@ def _elevenlabs_tts_post_ts(chunk: str, api_key: str, voice_id: str,
     ORIGINAL text as sent — is used, never `normalized_alignment`: our
     sentence offsets are indices into the text we sent, and normalization
     rewrites numbers etc., shifting every index after it."""
-    body = {
-        "text": chunk,
-        "model_id": model_id,
-        "voice_settings": {
-            "stability": 0.35,
-            "similarity_boost": 0.80,
-            "style": 0.40,
-            "use_speaker_boost": True,
-        },
-    }
-    if previous_text:
-        body["previous_text"] = previous_text[-600:]
-    if next_text:
-        body["next_text"] = next_text[:600]
-
-    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    payload = _el_tts_payload(chunk, model_id, previous_text, next_text)
     url = (f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
            "/with-timestamps")
-    req = urllib.request.Request(
-        url, data=payload, method="POST",
-        headers={
-            "xi-api-key": api_key,
-            "Content-Type": "application/json; charset=utf-8",
-            "Accept": "application/json",
-        },
-    )
     try:
-        with _urlopen(req, timeout=300) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = json.loads(_el_send(lambda: urllib.request.Request(
+            url, data=payload, method="POST",
+            headers={
+                "xi-api-key": api_key,
+                "Content-Type": "application/json; charset=utf-8",
+                "Accept": "application/json",
+            },
+        ), timeout=300).decode("utf-8"))
     except urllib.error.HTTPError as e:
         err_body = ""
         try:
@@ -1020,7 +1232,7 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
                                     api_key: str,
                                     voice_id: str = ELEVENLABS_TTS_VOICE_ID,
                                     model_id: str = ELEVENLABS_TTS_MODEL,
-                                    status_cb=None):
+                                    status_cb=None, workers: int = None):
     """v0.8: speak *sentences* in long natural stretches and return
     (output_path, spans) with ONE (start_ms, end_ms) pair PER SENTENCE
     inside the combined wav.
@@ -1081,11 +1293,15 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
         "",
     ]
 
-    combined = AudioSegment.empty()
-    gap = None
-    spans = [None] * len(sentences)
-    cursor = 0
-
+    # Plan every stretch request up front. Its stitching context is the
+    # neighbouring SCRIPT sentences, never a previous reply, so the requests
+    # are independent: they run a few at a time and the audio is assembled
+    # below strictly in stretch order. Bodies are exactly what the old
+    # one-by-one loop sent.
+    n_groups = len(groups)
+    url_ts = (f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+              "/with-timestamps")
+    plan = []            # per stretch: (text, offsets, prev_ctx, next_ctx, key)
     for gi, group in enumerate(groups):
         text = " ".join(sentences[i] for i in group)
         offsets, pos = [], 0
@@ -1098,15 +1314,66 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
         prev_ctx = sentences[group[0] - 1] if group[0] > 0 else None
         nxt_i = group[-1] + 1
         next_ctx = sentences[nxt_i] if nxt_i < len(sentences) else None
+        key = _el_request_key(
+            url_ts, _el_tts_payload(text, model_id, prev_ctx, next_ctx))
+        plan.append((text, offsets, prev_ctx, next_ctx, key))
 
-        if status_cb:
-            status_cb(f"TTS: stretch {gi + 1} of {len(groups)} "
-                      f"({len(group)} sentence(s), {len(text)} chars)…")
-        audio, chars, starts, ends = _elevenlabs_tts_post_ts(
-            text, api_key, voice_id, model_id,
-            previous_text=prev_ctx, next_text=next_ctx)
-        with open(f"{out_base}_str_{gi + 1:03d}.mp3", "wb") as sf:
-            sf.write(audio)
+    # Re-run reuse: a stretch whose exact request was already paid for (same
+    # text, context, voice, model, voice settings) is read back from its
+    # _str_NNN.mp3 plus the character timings saved beside it.
+    say = _locked_cb(status_cb)
+    replies = [None] * n_groups     # (audio, chars, starts, ends)
+    for gi in range(n_groups):
+        hit = _read_reuse_sidecar(f"{out_base}_str_{gi + 1:03d}.mp3",
+                                  plan[gi][4])
+        if hit:
+            audio, meta = hit
+            chars = meta.get("characters")
+            starts = meta.get("starts")
+            ends = meta.get("ends")
+            if all(isinstance(x, list) for x in (chars, starts, ends)):
+                replies[gi] = (audio, chars, starts, ends)
+                if say:
+                    say(f"TTS: stretch {gi + 1} of {n_groups} reused from the "
+                        "previous run (same text, voice and model).")
+
+    todo = [gi for gi in range(n_groups) if replies[gi] is None]
+    workers = ELEVENLABS_TTS_WORKERS if workers is None else max(1, int(workers))
+    if todo and say:
+        say(f"TTS: synthesizing {len(todo)} stretch(es), up to "
+            f"{min(workers, len(todo))} at a time…")
+    finished = [0]
+
+    def _stretch_done(j, reply):
+        gi = todo[j]
+        replies[gi] = reply
+        audio, chars, starts, ends = reply
+        # Saved the moment it arrives: a later failure keeps paid audio.
+        _write_reuse_sidecar(f"{out_base}_str_{gi + 1:03d}.mp3", audio,
+                             {"key": plan[gi][4], "characters": list(chars),
+                              "starts": list(starts), "ends": list(ends)})
+        finished[0] += 1
+        if say:
+            text = plan[gi][0]
+            say(f"TTS: stretch {gi + 1} of {n_groups} "
+                f"({len(groups[gi])} sentence(s), {len(text)} chars) done "
+                f"— {finished[0]}/{len(todo)} finished")
+
+    _run_parallel(
+        [(lambda t=plan[gi][0], p_=plan[gi][2], n_=plan[gi][3]:
+          _elevenlabs_tts_post_ts(t, api_key, voice_id, model_id,
+                                  previous_text=p_, next_text=n_))
+         for gi in todo],
+        workers, on_done=_stretch_done)
+
+    combined = AudioSegment.empty()
+    gap = None
+    spans = [None] * len(sentences)
+    cursor = 0
+
+    for gi, group in enumerate(groups):
+        text, offsets = plan[gi][0], plan[gi][1]
+        audio, chars, starts, ends = replies[gi]
         try:
             seg = AudioSegment.from_file(io.BytesIO(audio), format="mp3")
         except FileNotFoundError:
@@ -1117,10 +1384,10 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
                 "again.")
 
         if not chars:
-            if status_cb:
-                status_cb("TTS: WARNING — no character timings in the reply; "
-                          "estimating sentence boundaries proportionally for "
-                          "this stretch.")
+            if say:
+                say(f"TTS: WARNING — no character timings in the reply for "
+                    f"stretch {gi + 1}; estimating sentence boundaries "
+                    "proportionally for this stretch.")
         rel = _sentence_spans_from_alignment(text, offsets, chars, starts,
                                              ends)
         # Clamp to the decoded audio, then stamp absolute positions.
@@ -1158,9 +1425,9 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
     with open(out_base + "_chunks.txt", "w", encoding="utf-8") as lf:
         lf.write("\n".join(log_lines))
 
-    if status_cb:
-        status_cb(f"TTS: Saving → {os.path.basename(output_path)}… "
-                  f"({len(sentences)} sentence pieces)")
+    if say:
+        say(f"TTS: Saving → {os.path.basename(output_path)}… "
+            f"({len(sentences)} sentence pieces)")
     try:
         combined.export(output_path, format="wav")
     except PermissionError:

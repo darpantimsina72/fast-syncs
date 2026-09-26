@@ -1,6 +1,6 @@
 -- @description Fast Syncs — AI dubbing sync for REAPER
 -- @author darpantimsina72
--- @version 0.15.5
+-- @version 0.15.6
 -- @about
 --   Transcribes your Dialogue VO and Dub tracks, asks Gemini which dubbed clip
 --   means the same thing as which English clip, and moves each dubbed clip to
@@ -718,6 +718,19 @@ local function read_file(path)
   if not f then return nil end
   local c = f:read("*a"); f:close(); return c
 end
+
+-- v0.15.6: per-video run logs + the "How did this run go?" star card. Shared
+-- with the dub panel (feedback_kit.lua next to this script). A missing or
+-- broken kit must never stop a sync, so every use below is nil-guarded.
+local FB = nil
+do
+  local ok, mod = pcall(dofile, get_script_dir() .. package.config:sub(1, 1)
+                                 .. "feedback_kit.lua")
+  if ok and type(mod) == "table" then FB = mod end
+end
+local _fb_card    = nil   -- created lazily (find_python is defined below)
+local _fb_project = nil   -- REAPER project the running sync belongs to
+local _fb_version = nil
 
 -- FIX: GetMediaSourceFileName requires TWO arguments in Reaper's Lua API.
 -- The second argument is a string buffer — pass "" and use the return value.
@@ -1722,6 +1735,8 @@ local function ui_phase_success(ctx, on_close)
     end
   end
 
+  if _fb_card then _fb_card:render(ctx) end
+
   reaper.ImGui_Dummy(ctx, 0, 12)
   reaper.ImGui_Separator(ctx)
   if reaper.ImGui_Button(ctx, 'Close', 120, 32) then on_close() end
@@ -1758,6 +1773,8 @@ local function ui_phase_failure(ctx, on_close)
     reaper.ImGui_PopStyleColor(ctx)
   end
 
+  if _fb_card then _fb_card:render(ctx) end
+
   reaper.ImGui_Dummy(ctx, 0, 12)
   reaper.ImGui_Separator(ctx)
   if reaper.ImGui_Button(ctx, 'Close', 120, 32) then on_close() end
@@ -1773,6 +1790,43 @@ end
 -- ═══════════════════════════════════════════════════════════
 -- LIVE LOG TAIL + RESULT HANDLING
 -- ═══════════════════════════════════════════════════════════
+
+-- Copy this run's log next to its REAPER project and arm the star card.
+-- `status` is "ok" | "failed" | "cancelled"; `extra` is what the panel showed.
+local function finish_run_feedback(status, extra)
+  if not FB then return end
+  if not _fb_version then
+    local v = read_file(get_script_dir() .. package.config:sub(1, 1)
+                        .. "VERSION") or ""
+    _fb_version = (v:match("^%s*([^\r\n]*)") or ""):match("^(.-)%s*$") or ""
+  end
+  local saved = FB.archive_log({
+    app_root = get_script_dir(), pipeline = "AutoSync", status = status,
+    log_path = _poll_log_path, started = _poll_start_time,
+    version = _fb_version, project = _fb_project, extra = extra,
+  })
+  if saved then log("  Log saved: " .. saved) end
+  if status == "cancelled" then
+    if _fb_card then _fb_card:reset() end
+    return
+  end
+  if not _fb_card then
+    _fb_card = FB.new_card({
+      app_root = get_script_dir(),
+      get_python = function()
+        if PYTHON_CMD ~= "" then return PYTHON_CMD end
+        return find_python()
+      end,
+    })
+  end
+  local _, pfn = reaper.EnumProjects(-1, "")
+  _fb_card:start({
+    pipeline = "Auto Sync", status = status, log = saved,
+    started = _poll_start_time, finished = os.time(),
+    version = _fb_version,
+    project_name = (pfn or ""):match("([^/\\]+)$") or "",
+  })
+end
 
 local function on_python_done(success)
   if not success then return end
@@ -1912,6 +1966,7 @@ local function poll_python_step()
 
       if (exit_code == 0) and file_exists(_poll_results_path) then
         on_python_done(true)
+        finish_run_feedback("ok", _ui_result)
       else
         local python_log = read_file(_poll_log_path) or "(no output)"
         local short_log = python_log
@@ -1923,6 +1978,8 @@ local function poll_python_step()
           _ui_failure = { error_tail = short_log, log_path = _poll_log_path }
         end
         _ui_phase = "failure"
+        finish_run_feedback(_ui_cancelled and "cancelled" or "failed",
+                            _ui_failure.error_tail)
       end
       return
     end
@@ -1944,6 +2001,7 @@ local function poll_python_step()
       log_path = _poll_log_path,
     }
     _ui_phase = "failure"
+    finish_run_feedback("failed", _ui_failure.error_tail)
     return
   end
 end
@@ -2088,6 +2146,8 @@ local function start_sync_run()
   _poll_dub_items    = dub_items
   _poll_last_size    = 0
   _poll_start_time   = os.time()
+  _fb_project        = reaper.EnumProjects(-1, "")
+  if _fb_card then _fb_card:reset() end
 
   -- Progress tracking for the running phase.
   _ui_progress     = 0.05

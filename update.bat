@@ -24,7 +24,8 @@ if errorlevel 1 (
 rem Pass the project dir with a trailing "." (not a bare "%~dp0", which ends
 rem in a backslash — "C:\path\" can confuse quote parsing). "C:\path\." is
 rem unambiguous and cd resolves it to the folder.
-"%TEMP%\fast-syncs-update.bat" --from-temp "%~dp0."
+rem %1 %2 carry an optional "--version X.Y.Z" (the Settings roll-back button).
+"%TEMP%\fast-syncs-update.bat" --from-temp "%~dp0." %1 %2
 exit /b
 
 :run
@@ -47,6 +48,26 @@ rem Set FAST_SYNCS_ZIP_URL beforehand to override (e.g. to pin an older release)
 if defined FAST_SYNCS_ZIP_URL set "ZIP_URL=%FAST_SYNCS_ZIP_URL%"
 rem Used only if the release download fails - see :zip_update below.
 set "FALLBACK_ZIP_URL=https://codeload.github.com/darpantimsina72/fast-syncs/zip/refs/heads/main"
+
+rem ── roll back: update.bat --version X.Y.Z ─────────────────────
+rem Installs that exact published release instead of the latest one. Used by
+rem the "Roll back" button in the dub panel's Settings. The value must be a
+rem bare version number (digits and dots only) - checked BEFORE it is used
+rem anywhere, so nothing else can ride along into a command line.
+set "PIN_VERSION="
+if /i "%~3"=="--version" set "PIN_VERSION=%~4"
+if not defined PIN_VERSION goto pin_done
+echo %PIN_VERSION%| findstr /r /x "[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*" >nul
+if errorlevel 1 goto pin_bad
+set "FAST_SYNCS_ZIP_URL=https://github.com/darpantimsina72/fast-syncs/releases/download/v%PIN_VERSION%/fast-syncs.zip"
+set "ZIP_URL=%FAST_SYNCS_ZIP_URL%"
+echo [update] Rolling back to version %PIN_VERSION% ...
+goto pin_done
+:pin_bad
+echo [update] ERROR: "--version" needs a version number like 0.15.4
+pause
+exit /b 1
+:pin_done
 rem NO_DL is set when the new files could NOT be fetched, so the final
 rem message never claims an update that did not happen.
 set "NO_DL="
@@ -68,6 +89,9 @@ rem manifest lets the next update delete what the new release dropped.
 set "MANIFEST=.fast-syncs-manifest"
 set "PRUNED=0"
 
+rem A roll-back always installs the release ZIP, even on a git checkout:
+rem "git pull" can only move forward.
+if defined PIN_VERSION goto zip_update
 if exist ".git" goto git_update
 goto zip_update
 
@@ -81,6 +105,8 @@ if errorlevel 1 (
   set "NO_DL=1"
   goto deps
 )
+rem Remember the version we are leaving, for the Settings roll-back button.
+if exist "VERSION" copy /y "VERSION" ".previous-version" >nul
 git pull --ff-only
 if errorlevel 1 (
   echo [update] git pull could not fast-forward ^(diverged or local edits^) -
@@ -135,6 +161,8 @@ rem
 rem Keep the manifest the PREVIOUS install left behind BEFORE the overlay
 rem overwrites it - the difference between the two is the whole point.
 if exist "%MANIFEST%" copy /y "%MANIFEST%" "%MANIFEST_PREV%" >nul
+rem Remember the version we are leaving, for the Settings roll-back button.
+if exist "VERSION" copy /y "VERSION" ".previous-version" >nul
 
 set "COPIED=0"
 set "SRCDIR="

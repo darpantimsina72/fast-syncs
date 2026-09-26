@@ -264,6 +264,16 @@ V5.APP_VERSION = (function()
   return v or ""
 end)()
 
+-- v0.15.6: per-video run logs + the "How did this run go?" star card, shared
+-- with Auto Sync (fast-syncs root/feedback_kit.lua). Lives on V5 — this chunk
+-- has no locals to spare. nil when the kit is missing: every use is guarded.
+V5.APP_ROOT = BASE_DIR:match("^(.*)[/\\][^/\\]*$") or BASE_DIR
+V5.FB = (function()
+  local ok, mod = pcall(dofile, V5.APP_ROOT .. SEP .. "feedback_kit.lua")
+  if ok and type(mod) == "table" then return mod end
+  return nil
+end)()
+
 local ENGINE_SETTINGS_PATH = ENGINE_DIR .. SEP .. "engine_settings.json"
 local PANEL_SETTINGS_PATH  = SCRIPT_DIR .. SEP .. "dub_panel_settings.json"
 
@@ -625,13 +635,6 @@ local function load_llm_config()
   v = jval("http_user_agent")  if v then LLM_USER_AGENT = v end
   v = jval("server_url")       if v then LLM_SERVER_URL   = v end
   v = jval("server_token")     if v then LLM_SERVER_TOKEN = v end
-  -- v0.15.5 Lekhak translator. Absent in every earlier config, which is why
-  -- each one keeps its default rather than being blanked.
-  v = jval("translator")       if v and v ~= "" then V5.translator   = v end
-  v = jval("lekhak_base_url")  if v and v ~= "" then V5.lekhak_url   = v end
-  v = jval("lekhak_password")  if v then            V5.lekhak_pw     = v end
-  v = jval("lekhak_languages") if v and v ~= "" then V5.lekhak_langs = v end
-  v = jval("lekhak_learn")     if v and v ~= "" then V5.lekhak_learn = v end
   -- v0.7 per-stage model overrides. Blank = "use the Model field above",
   -- which is what every existing config has, so nothing changes on upgrade.
   for _, role in ipairs(V5.MODEL_ROLES) do
@@ -732,9 +735,6 @@ local function save_sync_credentials()
     -- api_base is the switch that turns proxy mode on for the Python worker:
     -- the server URL in server mode, empty in every direct mode.
     { "api_base",        (conn == "server") and LLM_SERVER_URL or "" },
-    -- v0.15.5: one switch drives the trial engine in both tools. Written as
-    -- the word the Python worker reads, so a hand-edited file is obvious.
-    { "sync_engine",     (V5.piece_placer == "isotonic") and "new" or "classic" },
   }
 
   local content
@@ -901,13 +901,6 @@ local function save_config_files()
   f:write(string.format('  "http_user_agent": "%s",\n', _json_escape(LLM_USER_AGENT)))
   f:write(string.format('  "server_url": "%s",\n',      _json_escape(LLM_SERVER_URL)))
   f:write(string.format('  "server_token": "%s",\n',    _json_escape(LLM_SERVER_TOKEN)))
-  -- v0.15.5 Lekhak translator. Always written, even at their defaults, so the
-  -- file's shape stays stable and the keys are discoverable by hand-editing.
-  f:write(string.format('  "translator": "%s",\n',       _json_escape(V5.translator)))
-  f:write(string.format('  "lekhak_base_url": "%s",\n',  _json_escape(V5.lekhak_url)))
-  f:write(string.format('  "lekhak_password": "%s",\n',  _json_escape(V5.lekhak_pw)))
-  f:write(string.format('  "lekhak_languages": "%s",\n', _json_escape(V5.lekhak_langs)))
-  f:write(string.format('  "lekhak_learn": "%s",\n',     _json_escape(V5.lekhak_learn)))
   f:write(string.format('  "prompt_caching": "%s"\n',   _json_escape(LLM_PROMPT_CACHING)))
   f:write('}\n')
   f:close()
@@ -982,23 +975,6 @@ end
 -- where the engine's _chunk_mode() reads it. V5 fields — 200-local limit.
 V5.chunk_mode = "clause"
 V5.sync_mode  = "match"
--- v0.15.5: which placement match mode uses. "window" is Classic — the
--- behaviour that shipped, parking anything too long for its slot — and it is
--- the default because the new engine is a trial the user opts into. "isotonic"
--- lays every piece down and nudges overruns forward, the legacy result without
--- legacy's second paid transcription.
-V5.piece_placer = "window"
-
--- v0.15.5: which translator does Step 1. "gemini" keeps the shipped prompt
--- chain; "lekhak" asks the self-hosted Lekhak desk for the translation and
--- lets Steps 2-3 add the pauses, the pace tags and the shortening exactly as
--- before. Stored in llm_settings.json beside the other credentials, because
--- the desk password is one. V5 fields — 200-local limit.
-V5.translator   = "gemini"
-V5.lekhak_url   = "http://127.0.0.1:3000"
-V5.lekhak_pw    = ""
-V5.lekhak_langs = "Telugu,Hindi,Nepali,Marathi"
-V5.lekhak_learn = "1"
 
 function V5.load_chunk_mode()
   local content = read_all(ENGINE_SETTINGS_PATH)
@@ -1011,10 +987,6 @@ function V5.load_chunk_mode()
   if s == "match" or s == "legacy" then
     V5.sync_mode = s
   end
-  local p = json_field(content, "piece_placer")
-  if p == "isotonic" or p == "window" then
-    V5.piece_placer = p
-  end
 end
 
 function V5.save_chunk_mode()
@@ -1024,7 +996,6 @@ function V5.save_chunk_mode()
   if not content or not content:find("{") then content = "{\n}\n" end
   content = _json_set_flat(content, "chunk_mode", V5.chunk_mode)
   content = _json_set_flat(content, "sync_mode", V5.sync_mode)
-  content = _json_set_flat(content, "piece_placer", V5.piece_placer)
   local f = io.open(ENGINE_SETTINGS_PATH, "w")
   if not f then return false, ENGINE_SETTINGS_PATH end
   f:write(content)
@@ -1805,6 +1776,10 @@ local MANIFEST_KEYS = {
   -- v0.3: --test-llm manifest fields ("voices" from --list-voices is an
   -- array and is parsed separately by parse_voices_json).
   "provider", "model", "reply",
+  -- v0.15.3: --test-llm also reports the model list (comma-separated ids).
+  -- These two were missing here, so the list was read and then dropped and
+  -- every Model dropdown stayed empty (fixed v0.15.6).
+  "models", "models_all",
   -- v0.4: --voice-change manifest field.
   "vc_wav",
   -- v0.7: match sync mode (texts sidecar for the item text + chunk counts).
@@ -2547,6 +2522,91 @@ function V5.run_updater()
             "this manually:\n  " .. cmd, "Updating", 0)
 end
 
+-- v0.15.6: the model list "Test connection" / "Fetch models" gets from the
+-- provider is kept on disk, so the Model dropdowns work in every later
+-- session without testing again. One id per line, "p:" = this key may call
+-- it, "a:" = the endpoint advertises it. Gitignored (per machine, per key).
+V5.MODEL_CACHE = SCRIPT_DIR .. SEP .. "model_cache.txt"
+
+function V5.save_model_cache()
+  local f = io.open(V5.MODEL_CACHE, "wb")
+  if not f then return end
+  for _, id in ipairs(V5.models) do f:write("p:", id, "\n") end
+  for _, id in ipairs(V5.models_all) do f:write("a:", id, "\n") end
+  f:close()
+end
+
+function V5.load_model_cache()
+  local text = read_all(V5.MODEL_CACHE)
+  if not text then return end
+  local p, a = {}, {}
+  for line in text:gmatch("[^\r\n]+") do
+    local kind, id = line:match("^([pa]):%s*(%S+)%s*$")
+    if kind == "p" then p[#p + 1] = id elseif kind == "a" then a[#a + 1] = id end
+  end
+  V5.models, V5.models_all = p, a
+end
+V5.load_model_cache()
+
+-- v0.15.6: roll back to an earlier release (Settings > About). The updater
+-- takes `--version X.Y.Z` and installs exactly that published release.
+-- Choices = the version this install had before its last update
+-- (.previous-version, written by the updater) + rollback_versions.txt,
+-- keeping only versions OLDER than the running one, newest first.
+function V5.ver_parts(v)
+  local a, b, c = tostring(v or ""):match("^(%d+)%.(%d+)%.(%d+)$")
+  if not a then return nil end
+  return { tonumber(a), tonumber(b), tonumber(c) }
+end
+
+function V5.ver_less(x, y)
+  local a, b = V5.ver_parts(x), V5.ver_parts(y)
+  if not a or not b then return false end
+  for i = 1, 3 do
+    if a[i] ~= b[i] then return a[i] < b[i] end
+  end
+  return false
+end
+
+function V5.rollback_choices()
+  local seen, out = {}, {}
+  local function add(v)
+    v = (v or ""):match("^%s*(.-)%s*$")
+    if V5.ver_parts(v) and not seen[v]
+       and (V5.APP_VERSION == "" or V5.ver_less(v, V5.APP_VERSION)) then
+      seen[v] = true
+      out[#out + 1] = v
+    end
+  end
+  add((read_all(V5.FS_ROOT .. SEP .. ".previous-version") or ""):match("^[^\r\n]*"))
+  for line in (read_all(V5.FS_ROOT .. SEP .. "rollback_versions.txt") or "")
+              :gmatch("[^\r\n]+") do
+    if not line:match("^%s*#") then add(line) end
+  end
+  table.sort(out, function(x, y) return V5.ver_less(y, x) end)
+  return out
+end
+
+function V5.run_rollback(ver)
+  -- Digits and dots only: this value goes onto a command line.
+  if not V5.ver_parts(ver) then return end
+  local p = V5.updater_path()
+  if not p then return end
+  local ret = reaper.MB(
+    "Roll back Fast Syncs from v" .. V5.APP_VERSION .. " to v" .. ver ..
+    "?\n\nThis installs that older release over this folder. Your " ..
+    "settings, keys and projects are kept.\n\nYou can come back to the " ..
+    "newest version any time with the Update button.",
+    "Roll back to v" .. ver, 4)
+  if ret ~= 6 then return end
+  local cmd = V5.run_in_terminal(p, "--version " .. ver)
+  if not cmd then return end
+  reaper.MB("The roll-back is running in a separate terminal window.\n\n" ..
+            "When it says 'Update complete', close this window and run the " ..
+            "script again.\n\nIf no window appeared, run this manually:\n  "
+            .. cmd, "Rolling back", 0)
+end
+
 -- Offer to run the one-time dubbing setup (creates dubbing/venv/ and
 -- installs the engine deps) when the venv is missing at launch time.
 function V5.offer_run_setup(reason)
@@ -2838,6 +2898,7 @@ local function launch_engine(cmd, mode, header_lines)
   _poll_partial    = ""
   _poll_start_time = os.time()
   _ui_phase        = "running"
+  if V5.fb_card and not UTIL_MODES[mode] then V5.fb_card:reset() end
   return true
 end
 
@@ -3885,6 +3946,7 @@ local function _finish_run(exit_code)
       -- v0.15.3: the same manifest carries the model list.
       V5.models     = V5._split_csv(m.models or "")
       V5.models_all = V5._split_csv(m.models_all or "")
+      V5.save_model_cache()
       local extra = ""
       if #V5.models > 0 then
         extra = string.format("\n%d model(s) this key can use — pick them " ..
@@ -4130,6 +4192,65 @@ local function _finish_run(exit_code)
   _ui_phase   = "failure"
 end
 
+-- v0.15.6: after _finish_run has settled the phase, copy this run's log next
+-- to its REAPER project (run_dub.py wipes the live log at the next launch —
+-- a Test connection click used to erase a failed dub's only log) and, for the
+-- two real pipelines, arm the star card on the success/failure screen.
+V5.QUIET_OK = { test_llm = true, list_voices = true, preview = true }
+function V5.after_run(exit_code)
+  if not V5.FB then return end
+  local mode = _run_mode
+  local status
+  if _ui_cancelled or _cancel_pending then status = "cancelled"
+  elseif _ui_phase == "failure" then status = "failed"
+  elseif _ui_phase == "review" then status = "review"
+  elseif _ui_phase == "success" then status = "ok"
+  else status = (exit_code == 0) and "ok" or "failed" end
+  -- Successful quick checks would only bury the logs that matter.
+  if status == "ok" and V5.QUIET_OK[mode] then return end
+
+  local pipeline_run = (mode == "full" or mode == "translate" or mode == "dub")
+  local own = (SCRIPT_MODE == "have")
+  local tag
+  if pipeline_run then
+    tag = (own and "DubOwnScript" or "DubFull")
+          .. ((mode == "translate") and "-translate"
+              or (mode == "dub") and "-voice" or "")
+  else
+    tag = "Dub-" .. tostring(mode)
+  end
+  local extra = (_ui_failure and status ~= "ok") and _ui_failure.error_tail
+                or nil
+  local saved = V5.FB.archive_log({
+    app_root = V5.APP_ROOT, pipeline = tag, status = status,
+    log_path = LOG_PATH, started = _poll_start_time,
+    version = V5.APP_VERSION, project = V5.run_project, extra = extra,
+  })
+  if saved then log_append("[panel] Log saved: " .. saved) end
+
+  -- The card belongs to the end of a pipeline, not to a review pause or a
+  -- utility tool, and a cancelled run was the user's own choice.
+  if not pipeline_run or status == "review" or status == "cancelled" then
+    return
+  end
+  if not V5.fb_card then
+    V5.fb_card = V5.FB.new_card({
+      app_root = V5.APP_ROOT,
+      get_python = function() return find_python() end,
+    })
+  end
+  local pfn = ""
+  if V5.run_project and reaper.ValidatePtr
+     and reaper.ValidatePtr(V5.run_project, "ReaProject*") then
+    pfn = reaper.GetProjectName(V5.run_project, "") or ""
+  end
+  V5.fb_card:start({
+    pipeline = own and "Dubbing — own script" or "Dubbing — full pipeline",
+    status = status, log = saved, started = _poll_start_time,
+    finished = os.time(), version = V5.APP_VERSION, project_name = pfn,
+  })
+end
+
 -- Incremental log tail: track the last read size, read only new bytes,
 -- carry any incomplete trailing line to the next poll.
 local function poll_engine()
@@ -4180,6 +4301,7 @@ local function poll_engine()
     log_append(string.format(
       "──── engine finished in %ds (exit code %d) ────", elapsed, exit_code))
     _finish_run(exit_code)
+    V5.after_run(exit_code)
     return
   end
 
@@ -4199,6 +4321,7 @@ local function poll_engine()
       log_path = LOG_PATH,
     }
     _ui_phase = "failure"
+    V5.after_run(1)
   end
 end
 
@@ -5801,73 +5924,39 @@ function V5.pane_connection(ctx)
   V5.hint(ctx, 'These keys are the only copy — the Sync tab uses the same ' ..
                'ones and has no fields of its own.')
 
-  -- v0.15.5: who writes the first draft. Only Step 1 moves — Step 2 (review,
-  -- shorten, pace tags) and Step 3 (pauses, punctuation) keep running on the
-  -- provider chosen above, which is why this sits under it rather than
-  -- replacing it.
-  V5.field(ctx, 'Translator', 200)
-  _, V5.translator = _ui_combo(ctx, '##translator', V5.translator,
-                               { "gemini", "lekhak" })
-  V5.hint(ctx, 'Who writes the first translation. "gemini" is the shipped ' ..
-               'prompt chain. "lekhak" asks your self-hosted Lekhak desk ' ..
-               'instead — better wording, and it learns from every script ' ..
-               'you approve. Pauses, pace tags and length trimming are ' ..
-               'added afterwards either way.')
-  if V5.translator == 'lekhak' then
-    V5.field(ctx, 'Lekhak address', 260)
-    rv, V5.lekhak_url = reaper.ImGui_InputText(ctx, '##lekurl',
-                                               V5.lekhak_url or '')
-    V5.hint(ctx, 'Where Lekhak is running. http://127.0.0.1:3000 when it is ' ..
-                 'on this same machine.')
-    V5.field(ctx, 'Desk password', 260)
-    rv, V5.lekhak_pw = reaper.ImGui_InputText(ctx, '##lekpw',
-                                              V5.lekhak_pw or '', pw)
-    V5.hint(ctx, 'The Other-translation desk password from Lekhak. One ' ..
-                 'password covers every language desk.')
-    -- A dropdown, matching Provider and Translator above. The stored value
-    -- stays the comma-separated string the engine reads, so an existing
-    -- settings file keeps working and can still be hand-edited; "All" is
-    -- simply every language written out.
-    V5.field(ctx, 'Languages', 260)
-    local cur_langs = V5.lekhak_langs or ''
-    local n_langs = 0
-    for _ in cur_langs:gmatch('[^,]+') do n_langs = n_langs + 1 end
-    local shown = (n_langs == #LANGUAGES) and 'All' or cur_langs
-    local lang_items = { 'All' }
-    for _, name in ipairs(LANGUAGES) do lang_items[#lang_items + 1] = name end
-    -- A hand-edited file can name two or three languages, which is not one of
-    -- the entries above. Show it as its own entry rather than silently
-    -- snapping the user's choice to something else.
-    local known = false
-    for _, it in ipairs(lang_items) do if it == shown then known = true end end
-    if not known and shown ~= '' then
-      table.insert(lang_items, 2, shown)
-    end
-    local lang_hit, lang_pick = _ui_combo(ctx, '##leklangs', shown, lang_items)
-    if lang_hit then
-      if lang_pick == 'All' then
-        V5.lekhak_langs = table.concat(LANGUAGES, ',')
-      else
-        V5.lekhak_langs = lang_pick
-      end
-    end
-    V5.hint(ctx, 'Which languages go through Lekhak. Pick one to trial it on ' ..
-                 'that language alone, or All for every language. Everything ' ..
-                 'not chosen keeps using the AI chain above. Your run still ' ..
-                 'takes its language from the Dub tab — this only says which ' ..
-                 'ones are allowed to use Lekhak.')
-    local learn_on = (V5.lekhak_learn ~= '0')
-    rv, learn_on = reaper.ImGui_Checkbox(ctx,
-      'Teach Lekhak from approved scripts##leklearn', learn_on)
-    if rv then V5.lekhak_learn = learn_on and '1' or '0' end
-    V5.hint(ctx, 'When you approve a script at the review pause it is sent ' ..
-                 'back and remembered. Pause marks and pace tags are ' ..
-                 'stripped first, so the desk your translators share never ' ..
-                 'learns to write them.')
-  end
-
   V5.field(ctx, 'Model', 260)
   rv, LLM_MODEL = reaper.ImGui_InputText(ctx, '##llmmodel', LLM_MODEL or '')
+  -- v0.15.6: pick from the models this key can use instead of typing. The
+  -- text box above stays: a provider without a model list, or a model the
+  -- key gained since the last fetch, must still be typeable.
+  do
+    local avail = (#V5.models > 0) and V5.models or V5.models_all
+    if #avail > 0 and reaper.ImGui_BeginCombo then
+      V5.field(ctx, '', 260)
+      if reaper.ImGui_BeginCombo(ctx, '##llmmodel_pick',
+                                 string.format('Choose from %d models…',
+                                               #avail)) then
+        for _, id in ipairs(avail) do
+          if reaper.ImGui_Selectable(ctx, id .. '##llmpick_' .. id,
+                                     id == LLM_MODEL) then
+            LLM_MODEL = id
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+    end
+    if LLM_PROVIDER ~= 'server' then
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, (#avail > 0) and 'Refresh list'
+                                  or 'Fetch models', 110, 0) then
+        start_test_llm()
+      end
+      if #avail == 0 then
+        V5.hint(ctx, 'Fill in the key below, then press Fetch models to ' ..
+                     'choose from a list instead of typing.')
+      end
+    end
+  end
   if LLM_PROVIDER == 'openai' then
     V5.hint(ctx, 'Model id your gateway serves, e.g. gemini-3-flash-preview.')
   elseif LLM_PROVIDER == 'server' then
@@ -6652,62 +6741,64 @@ function V5.pane_advanced(ctx)
   })
   if sm ~= V5.sync_mode then
     V5.sync_mode = sm
-    local oks, badp = V5.save_chunk_mode()
-    if not oks then
-      ui_set_banner("error", "Could not write:\n" .. tostring(badp))
+    local okc, badpath = V5.save_chunk_mode()
+    if not okc then
+      ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
     end
   end
 
-  -- v0.15.5: the trial sync engine, as ONE switch for BOTH tools. Off by
-  -- default — the team wants users to opt in and compare, not to be moved
-  -- onto it. Shown in legacy too, because the same switch is what the Auto
-  -- Sync tab reads; it just has no effect on legacy's own placement.
-  do
-    V5.label(ctx, 'Sync engine')
-    -- The two sync modes fail differently when a dubbed line will not fit,
-    -- so one description cannot be true for both. Match parks the line on the
-    -- Un sync track; Legacy has never done that — it pushes the line past the
-    -- end of the English instead (overflow). Saying "parked on Un sync" under
-    -- Legacy describes behaviour that does not exist there.
-    local classic_help
-    if V5.sync_mode == 'legacy' then
-      classic_help =
-        'What Legacy has always done: five rounds of spring placement, ' ..
-        'compressing and bleeding into neighbouring gaps. Nothing is ever ' ..
-        'put on the Un sync track. A line that still will not fit is pushed ' ..
-        'past the end of the English audio (overflow).'
-    else
-      classic_help =
-        'What Match has always done. Each dubbed line aims at its own ' ..
-        'English slot, and anything too long to fit is parked on the Un ' ..
-        'sync track for you to place by hand.'
+  reaper.ImGui_Dummy(ctx, 0, 8)
+  V5.field(ctx, 'Python', 260)
+  rv, PYTHON_CMD = reaper.ImGui_InputText(ctx, '##pycmd', PYTHON_CMD or '')
+  V5.hint(ctx, 'Leave blank to auto-detect (dubbing/venv/ first, then system ' ..
+               'installs). Run ' .. SETUP_SCRIPT .. ' once to create venv/.')
+end
+
+function V5.pane_about(ctx)
+  V5.heading(ctx, 'About', 'Version and updates')
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  reaper.ImGui_Text(ctx, 'Fast Syncs '
+    .. (V5.APP_VERSION ~= '' and ('v' .. V5.APP_VERSION)
+        or '(VERSION file missing — run Update…)'))
+  reaper.ImGui_PopStyleColor(ctx)
+
+  reaper.ImGui_Dummy(ctx, 0, 8)
+  if V5.updater_path() then
+    if reaper.ImGui_Button(ctx, 'Update…', 150, 30) then
+      V5.run_updater()
     end
-    local new_help
-    if V5.sync_mode == 'legacy' then
-      new_help =
-        'Places every line proportionally across the English and nudges ' ..
-        'overruns forward. Order can never flip and nothing is pushed into ' ..
-        'overflow at the far end. Being trialled — compare before you keep it.'
-    else
-      new_help =
-        'Lays every line down and nudges overruns forward, so nothing is ' ..
-        'parked on Un sync. The result Legacy gives, without Legacy paying ' ..
-        'for a second transcription. Being trialled — compare first.'
-    end
-    local pp = V5.segmented(ctx, 'pieceplacer', V5.piece_placer, {
-      { 'window',   'Classic',   classic_help },
-      { 'isotonic', 'New (trial)', new_help },
-    })
-    V5.hint(ctx, 'Classic is the old behaviour and the default — unchanged ' ..
-                 'in both sync modes. New turns on the trial engine for this ' ..
-                 'tab and the Auto Sync tab at once. Switch back any time.')
-    if pp ~= V5.piece_placer then
-      V5.piece_placer = pp
-      local okp, badpp = V5.save_chunk_mode()
-      if not okp then
-        ui_set_banner("error", "Could not write:\n" .. tostring(badpp))
+    V5.hint(ctx, 'Updates the whole fast-syncs install — the sync tool AND ' ..
+                 'this dubbing app.')
+
+    -- v0.15.6: roll back when a new version misbehaves.
+    reaper.ImGui_Dummy(ctx, 0, 10)
+    local choices = V5.rollback_choices()
+    if #choices > 0 and reaper.ImGui_BeginCombo then
+      if not V5.rollback_pick or not V5.ver_parts(V5.rollback_pick)
+         or not V5.ver_less(V5.rollback_pick, V5.APP_VERSION) then
+        V5.rollback_pick = choices[1]
       end
+      reaper.ImGui_SetNextItemWidth(ctx, 150)
+      if reaper.ImGui_BeginCombo(ctx, '##rollback_ver',
+                                 'v' .. V5.rollback_pick) then
+        for _, v in ipairs(choices) do
+          if reaper.ImGui_Selectable(ctx, 'v' .. v .. '##rb_' .. v,
+                                     v == V5.rollback_pick) then
+            V5.rollback_pick = v
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, 'Roll back…', 150, 0) then
+        V5.run_rollback(V5.rollback_pick)
+      end
+      V5.hint(ctx, 'Went wrong after an update? Go back to an earlier ' ..
+                   'version. Settings and keys are kept.')
     end
+  else
+    _grey_hint(ctx, 'No fast-syncs updater found above dubbing/ — this ' ..
+                    'looks like a standalone install.')
   end
 end
 
@@ -6761,30 +6852,12 @@ function V5.ui_settings_body(ctx)
 
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_BeginChild(ctx, '##pane_body', -1, -38) then
-    -- The pane body runs under pcall for one reason: ImGui_EndChild MUST be
-    -- reached. A Lua error anywhere inside a pane — a typo, a helper that does
-    -- not exist in this ReaImGui build, a nil field — used to escape past the
-    -- EndChild below, which leaves the ImGui context unbalanced. REAPER then
-    -- raises "Missing EndChild()" and kills the whole window, so the original
-    -- one-line mistake is invisible behind a second, scarier dialog and the
-    -- panel cannot be reopened without restarting.
-    --
-    -- With this, a broken pane shows its own error in the banner, every other
-    -- pane keeps working, and the window survives.
-    local ok, err = pcall(function()
-      local drawn = false
-      for _, pane in ipairs(V5.PANES) do
-        if V5.settings_pane == pane[1] then pane[3](ctx); drawn = true end
-      end
-      if not drawn then V5.pane_connection(ctx) end
-    end)
-    reaper.ImGui_EndChild(ctx)
-    if not ok then
-      ui_set_banner("error",
-        "The '" .. tostring(V5.settings_pane or "connection") ..
-        "' settings pane hit an error and was not drawn:\n" .. tostring(err) ..
-        "\nEvery other pane still works. Please report this line.")
+    local drawn = false
+    for _, pane in ipairs(V5.PANES) do
+      if V5.settings_pane == pane[1] then pane[3](ctx); drawn = true end
     end
+    if not drawn then V5.pane_connection(ctx) end
+    reaper.ImGui_EndChild(ctx)
   end
 
   -- One Save for the window. Every pane writes to the same two config files,
@@ -7048,6 +7121,8 @@ local function ui_phase_success(ctx, on_close)
     'Re-voice a whole track: "Track Voice" tab.')
   reaper.ImGui_PopStyleColor(ctx)
 
+  if V5.fb_card then V5.fb_card:render(ctx) end
+
   reaper.ImGui_Dummy(ctx, 0, 10)
   reaper.ImGui_Separator(ctx)
   if reaper.ImGui_Button(ctx, 'Close', 120, 32) then on_close() end
@@ -7102,6 +7177,8 @@ local function ui_phase_failure(ctx, on_close)
     reaper.ImGui_TextWrapped(ctx, _import_summary)
     reaper.ImGui_PopStyleColor(ctx)
   end
+
+  if V5.fb_card then V5.fb_card:render(ctx) end
 
   reaper.ImGui_Dummy(ctx, 0, 10)
   reaper.ImGui_Separator(ctx)

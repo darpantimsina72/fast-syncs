@@ -1,0 +1,5 @@
+{
+  "_comment": "Team inbox for in-app reports. Fill both after deploying feedback/apps_script.gs (see feedback/SETUP.md). Empty endpoint = reports wait in feedback_outbox/ on each PC and are sent once this is filled.",
+  "endpoint": "https://script.google.com/macros/s/AKfycbzLadpUYF2OaguIoM62CkzMfxTtNvfxgJR7_aZXBaeHEldfMqtbT2xpjywYALFgNtU-ZA/exec",
+  "team_code": "fs-76DslOLN2iRYDVHn"
+}
