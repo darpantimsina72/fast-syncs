@@ -1589,7 +1589,11 @@ def _run_regen(args, manifest):
     out_wav = pl.synthesize_tts_elevenlabs(
         text, out_wav, api_key=api_key, voice_id=voice_id,
         model_id=args.el_model,
-        status_cb=lambda m: _say("S2d", m))
+        status_cb=lambda m: _say("S2d", m),
+        # v0.15.7: one request for the whole text when it fits, so a redo of
+        # several joined chunks is one take in one voice (separate requests
+        # drift apart in tone).
+        max_chars=getattr(pl, "ELEVENLABS_ONE_TAKE_CHARS", None))
     manifest["regen_wav"] = out_wav
     _say("S2d", f"Regen chunk saved: {os.path.basename(out_wav)}")
 

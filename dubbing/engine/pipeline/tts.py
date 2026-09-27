@@ -750,7 +750,8 @@ def ensure_writable_output(output_path: str, status_cb=None) -> str:
 def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
                                voice_id: str = ELEVENLABS_TTS_VOICE_ID,
                                model_id: str = ELEVENLABS_TTS_MODEL,
-                               status_cb=None, workers: int = None) -> str:
+                               status_cb=None, workers: int = None,
+                               max_chars: int = None) -> str:
     """
     Convert target-language text to speech using ElevenLabs TTS (eleven_v3
     auto-detects the script) and save to output_path (MP3 decoded to WAV via
@@ -802,7 +803,9 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
     if status_cb:
         status_cb("TTS: Connecting to ElevenLabs…")
 
-    chunks = _split_text_for_elevenlabs(text)
+    # max_chars: a caller may ask for bigger requests (chunk redo = one take).
+    chunks = _split_text_for_elevenlabs(
+        text, max_chars or ELEVENLABS_CHUNK_CHARS)
     total  = len(chunks)
 
     out_base        = os.path.splitext(output_path)[0]

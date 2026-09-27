@@ -534,6 +534,11 @@ def _lang_tokens(language: str) -> tuple:
 
 # Characters per ElevenLabs TTS request chunk
 ELEVENLABS_CHUNK_CHARS = 1000
+# v0.15.7: a chunk redo (--regen-chunk) sends up to this many characters in ONE
+# request, so several chunks joined with "Redo as one voice" come back as one
+# take in one voice. Every ElevenLabs model accepts this much (eleven_v3's
+# per-request limit is the lowest, at 3000).
+ELEVENLABS_ONE_TAKE_CHARS = 2800
 
 # ─── TTS byte-chunk limit ─────────────────────────────────────────────────────
 TTS_MAX_BYTES = 4800   # Safe limit below the 5000-byte API cap

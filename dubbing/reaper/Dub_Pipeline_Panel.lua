@@ -3523,8 +3523,59 @@ local function apply_regen_result(wav)
   end
   reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", basename(wav), true)
   V5.set_item_text(item, p.note or "")
-  reaper.Undo_EndBlock("Regenerate dub chunk", -1)
+  -- v0.15.7 "Redo as one voice": the other chunks that were joined into this
+  -- one take are removed, so the new audio is ONE item where they were.
+  local removed = 0
+  for _, g in ipairs(p.merge or {}) do
+    local other = _find_item_by_guid(g)
+    if other and other ~= item then
+      local tr = reaper.GetMediaItem_Track(other)
+      if tr and reaper.DeleteTrackMediaItem(tr, other) then
+        removed = removed + 1
+      end
+    end
+  end
+  reaper.Undo_EndBlock(removed > 0 and "Regenerate chunks as one voice"
+                       or "Regenerate dub chunk", -1)
   reaper.UpdateArrange()
+  return true
+end
+
+-- v0.15.7: redo several chunks as ONE take. ElevenLabs gives every request
+-- its own delivery, so chunks redone one by one can sound like different
+-- speakers. This joins their texts in timeline order, synthesizes them in a
+-- single request (the engine allows ~2800 characters per take for a redo),
+-- and puts the result back as one item at the first chunk's position; the
+-- other selected chunks are removed in the same undo step.
+function V5.regen_merge_start(items)
+  local list = {}
+  for _, it in ipairs(items or {}) do
+    if it and reaper.ValidatePtr(it, "MediaItem*") then list[#list + 1] = it end
+  end
+  table.sort(list, function(a, b)
+    return reaper.GetMediaItemInfo_Value(a, "D_POSITION")
+         < reaper.GetMediaItemInfo_Value(b, "D_POSITION")
+  end)
+  local texts, guids = {}, {}
+  for _, it in ipairs(list) do
+    local txt = (V5.get_item_text(it) or ""):match("^%s*(.-)%s*$")
+    if txt ~= "" then
+      texts[#texts + 1] = txt
+      guids[#guids + 1] = _item_guid(it)
+    end
+  end
+  if #texts < 2 then
+    ui_set_banner("error", "Select at least two chunks that have text stored " ..
+                           "on them to join them into one voice.")
+    return false
+  end
+  local first = _find_item_by_guid(guids[1])
+  -- One take, one voice: the first chunk's own voice choice if it has one,
+  -- else the main voice from Settings.
+  local voice = V5.regen_voice_of[guids[1]] or ""
+  local joined = table.concat(texts, "\n")
+  if not start_regen(first, joined, voice) then return false end
+  if _regen_pending then _regen_pending.merge = guids end
   return true
 end
 
@@ -4708,6 +4759,21 @@ function V5.ui_regen_multi(ctx, sel)
   _grey_hint(ctx, 'Stops at the first chunk that fails, so a bad voice id or '
                .. 'a dead connection cannot burn credits on the rest. Chunks '
                .. 'already done stay done.')
+
+  -- v0.15.7: the same selection, generated as ONE take in ONE voice.
+  if #sel >= 2 then
+    reaper.ImGui_Dummy(ctx, 0, 6)
+    _ui_begin_disabled(ctx, not can or _ui_phase == "running")
+    if reaper.ImGui_Button(ctx, string.format('Redo as ONE voice  (%d → 1)',
+                                              #sel), 230, 30) and can then
+      V5.regen_merge_start(sel)
+    end
+    _ui_end_disabled(ctx)
+    _grey_hint(ctx, 'Joins the selected chunks into one text and generates it '
+                 .. 'in a single take, so it is the same voice all the way '
+                 .. 'through. The result replaces them as ONE item at the '
+                 .. 'first chunk\'s position (Ctrl/Cmd+Z undoes it).')
+  end
 end
 
 local function ui_regen_section(ctx, default_open)
