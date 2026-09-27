@@ -5,7 +5,7 @@
  *   1. saves the run log (and any screenshots) as files in one private
  *      Google Drive folder, one sub-folder per report,
  *   2. adds a row to a Google Sheet (date, stars, pipeline, message, link),
- *   3. emails the owner for every report with 1-3 stars or an error.
+ *   3. emails the owner for every report (bad ones marked ⚠ in the subject).
  *
  * The web app can only ADD reports. Nothing it returns reveals other reports,
  * so its URL is safe to ship inside the app. It rejects posts without the
@@ -66,11 +66,12 @@ function doPost(e) {
       sheet_().appendRow([new Date(), str_(r.app), str_(r.version), str_(r.pipeline), str_(r.status),
         r.stars || '', str_(r.contact), str_(r.message).slice(0, 2000), str_(r.os), folder.getUrl()]);
 
+      // Every report is emailed (good ratings too); bad ones are flagged in the subject.
       var bad = (r.stars && r.stars <= 3) || /fail/i.test(String(r.status || '')) || r.kind === 'feedback';
       var notify = CONFIG.NOTIFY_EMAIL || Session.getEffectiveUser().getEmail();
-      if (bad && notify.indexOf('@') > 0) {
+      if (notify.indexOf('@') > 0) {
         MailApp.sendEmail(notify,
-          '[Fast Syncs] ' + (r.stars ? r.stars + '★ ' : '') + str_(r.pipeline || r.kind) + ' — ' + str_(r.status),
+          '[Fast Syncs] ' + (bad ? '⚠ ' : '') + (r.stars ? r.stars + '★ ' : '') + str_(r.pipeline || r.kind) + ' — ' + str_(r.status),
           summary + '\n\nFiles: ' + folder.getUrl());
       }
     } finally {
