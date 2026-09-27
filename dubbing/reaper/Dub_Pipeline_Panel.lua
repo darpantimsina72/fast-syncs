@@ -3640,6 +3640,25 @@ local function start_regen(item, text, voice_id)
     ui_set_banner("error", "Chunk text is empty — nothing to synthesize.")
     return false
   end
+  -- v0.15.7: a chunk is a line or two. Far more text than one take holds
+  -- means the item carries something else (on 2026-09-27 five selected
+  -- items each carried the WHOLE script, and a redo sent 42,589 characters
+  -- to ElevenLabs). Ask before spending credits on it.
+  local nchars = V5._rg_chars(text)
+  if nchars > V5.ONE_TAKE_CHARS then
+    local r = reaper.MB(string.format(
+      "This would generate %d characters of speech (about %d ElevenLabs " ..
+      "requests) — far more than a normal chunk. The selected item(s) may " ..
+      "carry the whole script instead of one line.\n\nGenerate anyway?",
+      nchars, math.ceil(nchars / V5.ONE_TAKE_CHARS)),
+      "Unusually long text", 4)
+    if r ~= 6 then
+      ui_set_banner("warn", string.format(
+        "Not generated: %d characters is too long for a chunk. Check the " ..
+        "text stored on the selected item(s).", nchars))
+      return false
+    end
+  end
 
   local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
   local n = math.floor(pos * 1000 + 0.5)
@@ -3749,6 +3768,8 @@ end
 -- single request (the engine allows ~2800 characters per take for a redo),
 -- and puts the result back as one item at the first chunk's position; the
 -- other selected chunks are removed in the same undo step.
+V5.ONE_TAKE_CHARS = 2800   -- same as the engine's ELEVENLABS_ONE_TAKE_CHARS
+
 function V5.regen_merge_start(items)
   local list = {}
   for _, it in ipairs(items or {}) do
@@ -3758,15 +3779,21 @@ function V5.regen_merge_start(items)
     return reaper.GetMediaItemInfo_Value(a, "D_POSITION")
          < reaper.GetMediaItemInfo_Value(b, "D_POSITION")
   end)
-  local texts, guids = {}, {}
+  local texts, guids, seen = {}, {}, {}
   for _, it in ipairs(list) do
     local txt = (V5.get_item_text(it) or ""):match("^%s*(.-)%s*$")
     if txt ~= "" then
-      texts[#texts + 1] = txt
+      -- Every selected item is replaced, but the same text is spoken once:
+      -- items that carry identical text (a split item keeps its note on
+      -- every piece) would otherwise be read out several times over.
+      if not seen[txt] then
+        seen[txt] = true
+        texts[#texts + 1] = txt
+      end
       guids[#guids + 1] = _item_guid(it)
     end
   end
-  if #texts < 2 then
+  if #guids < 2 then
     ui_set_banner("error", "Select at least two chunks that have text stored " ..
                            "on them to join them into one voice.")
     return false
@@ -7308,6 +7335,37 @@ end
 -- to print its own version of this.
 function V5.ui_status_bar(ctx)
   reaper.ImGui_Separator(ctx)
+  -- v0.15.7: a job can be started from Tools or Settings, but its Cancel
+  -- lived only on the Dub tab's running screen — from anywhere else a
+  -- runaway job could not be stopped. The Stop button is here, on every tab.
+  if _ui_phase == "running" or V5.regen_queue then
+    local what = ({ regen = "Redoing chunk audio", tts = "Generating speech",
+                    preview = "Making a voice preview", test_llm =
+                    "Testing the connection", list_voices = "Fetching voices",
+                    voice_change = "Changing the voice" })[_run_mode]
+                 or "Dub run"
+    if V5.regen_queue and V5.regen_qstat then
+      what = string.format("Redoing chunks (%d of %d)", math.max(1, V5.regen_qi or 1),
+                           V5.regen_qstat.total or 0)
+    end
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55AAFFFF)
+    reaper.ImGui_Text(ctx, _spinner_glyph() .. '  ' .. what .. '…')
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x883333FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0xAA4444FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x661111FF)
+    if reaper.ImGui_SmallButton(ctx, 'Stop##statusstop') then
+      if _ui_phase == "running" then cancel_engine() end
+      if V5.regen_queue then
+        -- Between two chunks nothing is running: just drop the rest.
+        V5.regen_queue, V5.regen_qi, V5.regen_cur = nil, 0, nil
+        V5.regen_next_due, V5.regen_qstat = nil, nil
+        ui_set_banner("warn", "Chunk batch stopped. Chunks already done stay done.")
+      end
+    end
+    reaper.ImGui_PopStyleColor(ctx, 3)
+  end
   local voice = V5.voice_name(VOICE_ID or '')
   if voice == '' then
     voice = (VOICE_ID or '') ~= '' and 'voice set' or 'no voice'
