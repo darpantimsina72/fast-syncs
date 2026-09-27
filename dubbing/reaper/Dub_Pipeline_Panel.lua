@@ -1774,6 +1774,53 @@ local function _ensure_lang_font(ctx)
   _ui_font = _lang_fonts[script] or nil
 end
 
+-- v0.15.7: ONE font for the whole window that has Latin AND all 12 target
+-- scripts, so no text anywhere (Sync tab, Tools, chunk lists, logs, combos)
+-- falls back to '?' just because it was not the current language's script.
+-- Windows: Nirmala UI ships with 8.1+ and covers every Indic script here.
+-- macOS: Arial Unicode ships with the OS and covers all 12 (checked against
+-- its cmap). A user-installed Noto Sans is not needed. Returns nil when none
+-- is found (the per-language font still applies where it was used before).
+V5.ALL_SCRIPT_FONTS_WIN = { "C:/Windows/Fonts/Nirmala.ttf",
+                            "C:/Windows/Fonts/NirmalaS.ttf" }
+V5.ALL_SCRIPT_FONTS_MAC = { "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+                            "/Library/Fonts/Arial Unicode.ttf" }
+function V5.global_font(ctx)
+  if V5.gfont ~= nil then return V5.gfont or nil end
+  V5.gfont = false
+  if not (reaper.ImGui_CreateFontFromFile or reaper.ImGui_CreateFont) then
+    return nil
+  end
+  local list = _is_windows() and V5.ALL_SCRIPT_FONTS_WIN
+                              or V5.ALL_SCRIPT_FONTS_MAC
+  for _, p in ipairs(list) do
+    if file_exists(p) then
+      local ok, font
+      if reaper.ImGui_CreateFontFromFile then
+        ok, font = pcall(reaper.ImGui_CreateFontFromFile, p, 0, 0)
+      else
+        ok, font = pcall(reaper.ImGui_CreateFont, p, 14)
+      end
+      if ok and font and pcall(reaper.ImGui_Attach, ctx, font) then
+        V5.gfont = font
+        return font
+      end
+    end
+  end
+  return nil
+end
+
+-- Push the all-scripts font at the window's normal size. Returns true when
+-- pushed (caller pops with _pop_font before ImGui_End).
+function V5.push_global_font(ctx)
+  local font = V5.global_font(ctx)
+  if not font then return false end
+  local size = reaper.ImGui_GetFontSize and reaper.ImGui_GetFontSize(ctx) or 14
+  if pcall(reaper.ImGui_PushFont, ctx, font, size) then return true end
+  if pcall(reaper.ImGui_PushFont, ctx, font) then return true end
+  return false
+end
+
 -- ReaImGui older than 0.9 rasterizes only a fixed Latin glyph range — an
 -- Indic font may load fine and STILL draw every character as '?'. 0.9+
 -- rasterizes glyphs on demand. Cached; used to explain '?' text honestly.
@@ -1803,7 +1850,7 @@ function V5.script_font_warning(ctx)
     msg = "Your ReaImGui version is too old to draw " .. script ..
           " text — it shows every character as '?'. Update it via " ..
           "Extensions → ReaPack → Synchronize packages, then restart REAPER."
-  elseif _ui_font == nil then
+  elseif _ui_font == nil and not V5.gfont then
     msg = "No " .. script .. " font was found on this system — the text " ..
           "shows as '?'. Install \"Noto Sans " .. script ..
           "\" (free, fonts.google.com), then restart REAPER. " ..
@@ -1813,6 +1860,19 @@ function V5.script_font_warning(ctx)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
   reaper.ImGui_TextWrapped(ctx, msg)
   reaper.ImGui_PopStyleColor(ctx)
+  -- v0.15.7: one click instead of a menu hunt — runs ReaPack's own
+  -- "Synchronize packages" action, which updates ReaImGui with the rest.
+  if V5.reaimgui_pre09() and reaper.NamedCommandLookup then
+    local cmd = reaper.NamedCommandLookup("_REAPACK_SYNC")
+    if cmd and cmd ~= 0 then
+      if reaper.ImGui_SmallButton(ctx, 'Update ReaImGui now##fontupd') then
+        reaper.Main_OnCommand(cmd, 0)
+        reaper.MB("ReaPack is updating your extensions. When it finishes, " ..
+                  "restart REAPER so the new ReaImGui loads.",
+                  "Updating ReaImGui", 0)
+      end
+    end
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -3048,8 +3108,18 @@ function V5.reattach_running()
   local mode = (head:find("--test-llm", 1, true) and "test_llm")
                or (head:find("--list-voices", 1, true) and "list_voices")
                or head:match("%-%-steps%s+(%a+)")
+  -- v0.15.7: a Tools > text-to-speech run (its text file is TTS_<stamp>.txt)
+  -- only needs the wav from the manifest and the text to label the item, so
+  -- it can be finished — and imported — by this reopened window too.
+  local tfile = head:match('%-%-text%-file%s+"([^"]+)"')
+                or head:match('%-%-text%-file%s+(%S+)')
+  if not mode and tfile and basename(tfile):match("^TTS_%d+_%d+%.txt$") then
+    mode = "tts"
+    V5.tts_pending = { text = read_all(tfile) or "" }
+    V5.tts_return_phase = "setup"
+  end
   if mode ~= "full" and mode ~= "translate" and mode ~= "dub"
-     and mode ~= "test_llm" and mode ~= "list_voices" then
+     and mode ~= "test_llm" and mode ~= "list_voices" and mode ~= "tts" then
     -- A voice-tool run (chunk regen, voice change, preview): applying its
     -- result needs details this reopened window no longer has. Offer to
     -- stop it instead of leaving it unreachable.
@@ -5774,6 +5844,21 @@ function V5.tts_import(wav)
   reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", basename(wav), true)
   V5.set_item_text(item, (V5.tts_pending and V5.tts_pending.text) or "")
   reaper.Undo_EndBlock("Import TTS audio", -1)
+  -- v0.15.7: select the new item and bring it into view — it used to land
+  -- on a TTS track that could be scrolled out of sight, and looked like
+  -- nothing had been imported.
+  reaper.SelectAllMediaItems(0, false)
+  reaper.SetMediaItemSelected(item, true)
+  reaper.SetOnlyTrackSelected(tr)
+  reaper.Main_OnCommand(40913, 0)   -- Track: vertical scroll selected into view
+  if reaper.GetSet_ArrangeView2 then
+    local s, e = reaper.GetSet_ArrangeView2(0, false, 0, 0)
+    if s and e and (pos < s or pos > e) then
+      local w = e - s
+      reaper.GetSet_ArrangeView2(0, true, 0, 0, math.max(0, pos - w * 0.1),
+                                 math.max(0, pos - w * 0.1) + w)
+    end
+  end
   reaper.UpdateArrange()
   return true
 end
@@ -7614,24 +7699,27 @@ local function main()
     -- Outside the `visible` guard on purpose: a fully off-screen window can
     -- report itself as not visible, which is the case we must still rescue.
     check_offscreen(_ui_ctx)
+    -- v0.15.7: polling moved OUT of the `visible` guard. A panel docked in a
+    -- REAPER docker whose tab is not showing reports not-visible, and runs
+    -- used to freeze there — a finished text-to-speech was never imported
+    -- until the panel was looked at again. None of this draws anything.
+    -- Once per launch, pick up a run the previous window left going in the
+    -- background (closing the panel never stops the engine).
+    if not V5.reattach_checked then
+      V5.reattach_checked = true
+      V5.reattach_running()
+    end
+    if _ui_phase == "running" then poll_engine() end
+    -- v0.15.3: a multi-chunk batch waits here between chunks.
+    V5.regen_queue_tick()
+    -- v0.5: the embedded Auto Sync run polls every frame too — it is
+    -- independent of the dub run and of which tab is showing.
+    if V5.SYNC then V5.SYNC.poll() end
     if visible then
       -- Follow the language combo with a matching Indic font (v0.4).
       _ensure_lang_font(_ui_ctx)
-      -- Poll OUTSIDE the tab bar: the run must keep progressing even
-      -- while the user sits on the Log tab.
-      -- v0.15.7: once per launch, pick up a run the previous window left
-      -- going in the background (closing the panel never stops the engine).
-      if not V5.reattach_checked then
-        V5.reattach_checked = true
-        V5.reattach_running()
-      end
-      if _ui_phase == "running" then poll_engine() end
-      -- v0.15.3: a multi-chunk batch waits here between chunks, so it keeps
-      -- moving whichever tab the user is looking at.
-      V5.regen_queue_tick()
-      -- v0.5: the embedded Auto Sync run polls every frame too — it is
-      -- independent of the dub run and of which tab is showing.
-      if V5.SYNC then V5.SYNC.poll() end
+      -- v0.15.7: every piece of text in the window uses the all-scripts font.
+      V5.gfont_pushed = V5.push_global_font(_ui_ctx)
 
       -- v0.13: the Script control on the Dub tab decides where the translated
       -- script comes from, so there is nothing left for the caller to
@@ -7734,6 +7822,7 @@ local function main()
       end
 
       V5.ui_status_bar(_ui_ctx)
+      if V5.gfont_pushed then _pop_font(_ui_ctx); V5.gfont_pushed = false end
       -- Inside the guard: see the note in V5.ui_settings_window. NoCollapse
       -- hid this one, but Begin() also reports not-visible for a fully
       -- clipped window — the very case check_offscreen() above exists for.
