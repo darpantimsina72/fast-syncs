@@ -6,6 +6,68 @@ The original app is READ-ONLY — never modify or write anything inside
 is only a one-time extraction source and optional key-migration source, never
 a runtime dependency.
 
+## v0.15.7 — One tidy output folder per project
+
+Up to v0.15.6 a run wrote ~30 files flat into `<audio dir>/<base>/` and
+copied the English audio there. A new run now writes into ONE folder per
+project, sorted by purpose:
+
+```
+<folder of the saved .RPP>/FastSyncs/     (unsaved project: <audio folder>/FastSyncs/)
+  .fastsyncs-layout        marker file, content "2"
+  01_Source/               track renders used as dub input ("From track")
+  02_Script/               <base>.srt, <base>_analyzed.txt, _TranslationStep.txt,
+                           _ReviewStep.txt, _FinalScript.txt, _provided_translation.txt,
+                           _review_en.txt, _review_translation.txt, _translation_edited.txt
+  03_Voice/                <Lang>_(<base>)_tts.wav
+  03_Voice/pieces/         _tts_sec_NNN.mp3(+.json), _tts_str_NNN.mp3(+.json),
+                           _tts_chunk_NN.mp3, _tts_chunks.txt, <base>_tts_state.json
+  03_Voice/Redo/regen/     chunk redo text + wav (Tools > Redo)
+  03_Voice/Redo/VoiceChange/  track voice-change renders
+  03_Voice/Redo/TTS/       Tools > Text to speech output
+  04_Final/                <Lang>_(<base>)_synced.wav, <base>_sync_synced.srt
+  Logs/                    <base>_sync_log.txt + every archived run log
+  _work/                   _sync_en.srt, _sync_te.srt, _sync_texts.txt,
+                           _sync_timestamps.txt, _sync_mapping.txt,
+                           <base>_engine_done.json
+```
+
+- **File names are unchanged** — only folders moved — so every name-based
+  reuse (TTS `_sec_`/`_str_` sidecars, `_tts_state.json`, the STT/LLM
+  caches) keeps working. Several audios share one `FastSyncs/`; their files
+  never collide because every name carries `<base>` or `(<base>)`.
+- **One helper decides every path**: `pipeline/config.py` `layout_path(out_dir,
+  kind, filename)`. Marker present → `out_dir/<subfolder>/filename`; no
+  marker (a pre-0.15.7 flat folder) → `out_dir/filename`, exactly as before.
+  Readers use the same helper, so old folders still resume. Kinds: `source
+  script voice pieces regen voicechange tts final logs work`. TTS side files
+  follow `pieces_base(wav)` (03_Voice/pieces/ for a tidy 03_Voice wav, next
+  to the wav otherwise). The panel mirrors it as `V5.layout_path` /
+  `V5.LAYOUT_SUB`; `tests/test_output_layout.py` checks the two tables agree.
+- **Which folder** (`_choose_output_dir`, first match wins): (1) the dub
+  `--script` / a `--provided-script` sits in a tidy `02_Script/` → that root,
+  or in a legacy folder holding this audio's work → that legacy folder;
+  (2) the audio sits inside its own legacy folder → that folder; (3) a legacy
+  sibling `<audio dir>/<base>/` already holds `<base>.srt` and the tidy root
+  does not → keep the legacy folder (a run started on 0.15.6 finishes on
+  0.15.7, flat, reusing its paid audio); (4) otherwise the tidy root.
+- **New CLI flag** `--project-dir <dir>` (run_dub.py forwards it; the panel
+  sends it for full/translate/dub runs when the project is saved). A path on
+  argv, never text or secrets.
+- **Manifest**: `en_audio` now points at the ORIGINAL audio in a tidy run (no
+  copy is made). The out_dir copy of `engine_done.json` is per audio:
+  `_work/<base>_engine_done.json` (tidy) / `out_dir/engine_done.json`
+  (legacy). The status-dir `engine_done.json` is unchanged. No manifest key
+  was added or removed.
+- **Panel**: provided script, edited translation, chunk redo, "From track"
+  renders, voice change and the TTS tool follow the layout for a saved
+  project; an unsaved project keeps the old project-media folders.
+  Run history dedupes by out_dir + audio and finds the per-audio manifest
+  (old name as fallback). Archived run logs (feedback_kit) moved from
+  `<project>/FastSyncs_Logs/` to `<project>/FastSyncs/Logs/`.
+- **Import_Dub_Results.lua**: manifests carry absolute paths, so both layouts
+  import; its pick-a-timestamps-file fallback also understands `_work/`.
+
 ## v0.12 — Clause-sized pieces (sentence boundaries were still too coarse)
 
 v0.10 cut per SENTENCE, which is coarse for these scripts: Indic
@@ -626,7 +688,8 @@ plain files — edit in any editor), updater/feedback systems.
         engine_log.txt    # live tee of worker stdout+stderr
         engine_pid.txt    # worker PID (for cancel)
         engine_done.txt   # written LAST: single line = exit code
-        engine_done.json  # copy of result manifest (also written to out_dir)
+        engine_done.json  # copy of result manifest (also written to out_dir;
+                          # v0.15.7 tidy: out_dir/_work/<base>_engine_done.json)
     reaper/                    # internal: loaded by auto_sync_pipeline.lua
       Dub_Pipeline_Panel.lua   # ReaImGui panel (run + poll + import)
       Import_Dub_Results.lua   # standalone importer (no ReaImGui needed)

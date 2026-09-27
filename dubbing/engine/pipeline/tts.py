@@ -39,7 +39,8 @@ from .config import (_urlopen, ELEVENLABS_CHUNK_CHARS, ELEVENLABS_TTS_MODEL,
                      ELEVENLABS_TTS_VOICE_ID, CONFIG_DIR, PYDUB_AVAILABLE,
                      TTS_DEFAULT_LANGUAGE, TTS_DEFAULT_VOICE, TTS_LANGUAGES,
                      TTS_MAX_BYTES, _AudioSegment, _strip_emotion_tags,
-                     load_tts_settings, _env_int, _run_parallel)
+                     load_tts_settings, _env_int, _run_parallel,
+                     pieces_base)
 from .stt import _sanitize_voice_id
 
 try:
@@ -184,7 +185,9 @@ def synthesize_tts(text: str, output_path: str, status_cb=None,
         audio_encoding=_tts_module.AudioEncoding.LINEAR16,
         sample_rate_hertz=_SAMPLE_RATE)
 
-    out_base         = os.path.splitext(output_path)[0]
+    # v0.15.7: side files go to 03_Voice/pieces/ in a tidy folder, next to
+    # the wav otherwise (same names either way) — see config.pieces_base.
+    out_base         = pieces_base(output_path)
     chunk_log_path   = out_base + "_chunks.txt"
     chunk_log_lines  = [
         f"TTS Chunk Log — {os.path.basename(output_path)}",
@@ -808,7 +811,8 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
         text, max_chars or ELEVENLABS_CHUNK_CHARS)
     total  = len(chunks)
 
-    out_base        = os.path.splitext(output_path)[0]
+    # v0.15.7: tidy folder -> 03_Voice/pieces/, else next to the wav.
+    out_base        = pieces_base(output_path)
     chunk_log_path  = out_base + "_chunks.txt"
     chunk_log_lines = [
         f"TTS Chunk Log — {os.path.basename(output_path)}",
@@ -969,7 +973,9 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
             "pydub not installed — the sectioned TTS mode needs it to "
             "assemble the per-section audio. Re-run the setup script.")
 
-    out_base = os.path.splitext(output_path)[0]
+    # v0.15.7: tidy folder -> 03_Voice/pieces/ (the _sec_/_str_ reuse
+    # sidecars too), else next to the wav — see config.pieces_base.
+    out_base = pieces_base(output_path)
     log_lines = [
         f"TTS Section Log — {os.path.basename(output_path)}",
         "Platform : ElevenLabs (sectioned, request-stitched)",
@@ -1285,7 +1291,9 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
             "assemble the audio. Re-run the setup script.")
 
     groups = _pack_sentences(sentences, ELEVENLABS_CHUNK_CHARS)
-    out_base = os.path.splitext(output_path)[0]
+    # v0.15.7: tidy folder -> 03_Voice/pieces/ (the _sec_/_str_ reuse
+    # sidecars too), else next to the wav — see config.pieces_base.
+    out_base = pieces_base(output_path)
     log_lines = [
         f"TTS Sentence Log — {os.path.basename(output_path)}",
         "Platform : ElevenLabs (/with-timestamps, sentence-timed)",

@@ -344,6 +344,40 @@ fast-syncs/
 
 **Total: about 20,000 lines of code.**
 
+### Where one video's dub files land (v0.15.7)
+
+Before 0.15.7 every run dumped about 30 files into one flat folder next to
+the audio (plus a copy of the audio). Now each project gets ONE tidy folder,
+sorted by what the files are for. The English audio is not copied.
+
+```
+<folder of the saved .RPP>/FastSyncs/     (unsaved project: <audio folder>/FastSyncs/)
+  .fastsyncs-layout        marker file, content "2"
+  01_Source/               track renders used as dub input ("From track")
+  02_Script/               <base>.srt, <base>_analyzed.txt, _TranslationStep.txt,
+                           _ReviewStep.txt, _FinalScript.txt, _provided_translation.txt,
+                           _review_en.txt, _review_translation.txt, _translation_edited.txt
+  03_Voice/                <Lang>_(<base>)_tts.wav
+  03_Voice/pieces/         _tts_sec_NNN.mp3(+.json), _tts_str_NNN.mp3(+.json),
+                           _tts_chunk_NN.mp3, _tts_chunks.txt, <base>_tts_state.json
+  03_Voice/Redo/regen/     chunk redo text + wav (Tools > Redo)
+  03_Voice/Redo/VoiceChange/  track voice-change renders
+  03_Voice/Redo/TTS/       Tools > Text to speech output
+  04_Final/                <Lang>_(<base>)_synced.wav, <base>_sync_synced.srt
+  Logs/                    <base>_sync_log.txt + every archived run log
+  _work/                   _sync_en.srt, _sync_te.srt, _sync_texts.txt,
+                           _sync_timestamps.txt, _sync_mapping.txt,
+                           <base>_engine_done.json
+```
+
+- `04_Final/` is what you hand over. `02_Script/` is the words. `03_Voice/`
+  is the speech. `_work/` is the robot's scratch paper.
+- File names did not change, only folders — so "don't pay twice" reuse
+  still works.
+- An old flat folder (no marker file) keeps working flat: a run started on
+  0.15.6 finishes in the same place on 0.15.7.
+- Unsaved project: the folder sits next to the audio instead.
+
 ---
 
 ## 6. How the Two Robots Share One Window

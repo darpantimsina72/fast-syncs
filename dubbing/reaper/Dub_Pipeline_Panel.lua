@@ -39,7 +39,8 @@
 --   - Windows support: OS-aware setup hints (setup_windows.bat).
 --   - "From track": pick the English audio straight from a project
 --     track — one clean item uses its source file, anything else is
---     rendered to <project>/DubSource/ first.
+--     rendered to <project>/DubSource/ first (v0.15.7: saved project →
+--     FastSyncs/01_Source/).
 --
 -- v0.3 additions (standalone app):
 --   - ⚙ Settings section (setup phase): LLM provider/model/keys and
@@ -62,7 +63,8 @@
 --   - Chunk regeneration: select a "Dub Chunks" item, edit its stored
 --     text, hit Regenerate — the engine synthesizes just that text
 --     ("--regen-chunk") and the panel swaps the item's take source to
---     the new wav. Non-destructive: new files go to <out_dir>/regen/.
+--     the new wav. Non-destructive: new files go to <out_dir>/regen/
+--     (v0.15.7 tidy folder: <out_dir>/03_Voice/Redo/regen/).
 --     v0.8: an optional voice picker under the button re-synthesizes the
 --     same text in a different voice (empty = the Settings voice).
 --
@@ -368,6 +370,120 @@ local function open_path(path)
   else os.execute('xdg-open ' .. shellquote(path)) end
 end
 local function open_url(url) open_path(url) end
+
+-- ---------------------------------------------------------------------------
+-- v0.15.7 output layout. New runs put one video's files into ONE tidy folder
+-- "<folder of the saved .RPP>/FastSyncs/" (unsaved project: next to the
+-- audio), sorted into subfolders. A folder WITHOUT the marker file is a
+-- pre-0.15.7 flat folder and keeps its flat paths, so old runs still resume.
+-- KEEP IN SYNC with LAYOUT_SUBDIRS / _choose_output_dir in
+-- dubbing/engine/pipeline/config.py (the engine decides where a run's files
+-- go; the panel must agree for the files it writes itself).
+-- All on V5 — the main chunk is at Lua's 200-locals limit.
+-- ---------------------------------------------------------------------------
+V5.LAYOUT_DIRNAME = "FastSyncs"
+V5.LAYOUT_MARKER  = ".fastsyncs-layout"
+V5.LAYOUT_SUB = {
+  source = "01_Source", script = "02_Script", voice = "03_Voice",
+  pieces = "03_Voice/pieces", regen = "03_Voice/Redo/regen",
+  voicechange = "03_Voice/Redo/VoiceChange", tts = "03_Voice/Redo/TTS",
+  final = "04_Final", logs = "Logs", work = "_work",
+}
+
+function V5.is_tidy(dir)
+  return (dir or "") ~= "" and file_exists(dir .. SEP .. V5.LAYOUT_MARKER)
+end
+
+-- Create the tidy root + its marker (idempotent). Subfolders come lazily.
+function V5.make_tidy_root(root)
+  reaper.RecursiveCreateDirectory(root, 0)
+  local mk = root .. SEP .. V5.LAYOUT_MARKER
+  if not file_exists(mk) then
+    local f = io.open(mk, "wb")
+    if f then f:write("2\n") f:close() end
+  end
+  return root
+end
+
+-- Tidy folder -> out_dir/<subfolder of kind>/filename (subfolder created
+-- unless make == false). Legacy flat folder -> out_dir/filename, as before.
+-- An empty filename returns the folder.
+function V5.layout_path(out_dir, kind, filename, make)
+  local d = out_dir or ""
+  if V5.is_tidy(d) then
+    local sub = (V5.LAYOUT_SUB[kind] or ""):gsub("/", SEP)
+    d = d .. SEP .. sub
+    if make ~= false then reaper.RecursiveCreateDirectory(d, 0) end
+  end
+  if filename and filename ~= "" then return d .. SEP .. filename end
+  return d
+end
+
+-- Folder of the saved ACTIVE project, or nil when it was never saved.
+function V5.project_dir()
+  local _, fn = reaper.EnumProjects(-1, "")
+  if not fn or fn == "" then return nil end
+  local d = dirname(fn)
+  if d == "" then return nil end
+  return d
+end
+
+-- "<project folder>/FastSyncs" (created with its marker when make), or nil
+-- for an unsaved project.
+function V5.tidy_root(make)
+  local pd = V5.project_dir()
+  if not pd then return nil end
+  local root = pd .. SEP .. V5.LAYOUT_DIRNAME
+  if make then V5.make_tidy_root(root) end
+  return root
+end
+
+function V5.audio_base(path)
+  return (basename(path or ""):gsub("%.[^.]+$", ""))
+end
+
+-- Where the engine will write a NEW run for *audio* (mirror of
+-- config._choose_output_dir without the script-path rule). Returns
+-- (dir, is_tidy). Creates nothing.
+function V5.out_dir_for(audio)
+  local src  = dirname(audio or "")
+  local base = V5.audio_base(audio)
+  if basename(src) == base and not V5.is_tidy(src) then return src, false end
+  local pd = V5.project_dir()
+  local root
+  if pd then
+    root = pd .. SEP .. V5.LAYOUT_DIRNAME
+  elseif V5.is_tidy(src) then
+    root = src
+  elseif V5.is_tidy(dirname(src)) then
+    root = dirname(src)
+  else
+    root = src .. SEP .. V5.LAYOUT_DIRNAME
+  end
+  local legacy = src .. SEP .. base
+  if not V5.is_tidy(legacy) and file_exists(legacy .. SEP .. base .. ".srt")
+     and not file_exists(root .. SEP .. "02_Script" .. SEP .. base .. ".srt") then
+    return legacy, false
+  end
+  return root, true
+end
+
+-- The out_dir copy of a run's engine_done.json: per audio in a tidy folder
+-- (_work/<base>_engine_done.json), the old out_dir/engine_done.json in a
+-- legacy one. Returns the first that exists, or nil.
+function V5.find_manifest_copy(out_dir, audio)
+  if (out_dir or "") == "" then return nil end
+  local cands = {}
+  if (audio or "") ~= "" then
+    cands[#cands + 1] = out_dir .. SEP .. "_work" .. SEP ..
+                        V5.audio_base(audio) .. "_engine_done.json"
+  end
+  cands[#cands + 1] = out_dir .. SEP .. "engine_done.json"
+  for _, p in ipairs(cands) do
+    if file_exists(p) then return p end
+  end
+  return nil
+end
 
 -- ---------------------------------------------------------------------------
 -- Minimal tolerant JSON reader (flat string / number / bool fields only).
@@ -2386,6 +2502,13 @@ local function build_engine_cmd(py, opts)
   if opts.audio and opts.audio ~= '' then
     parts[#parts + 1] = '--audio'
     parts[#parts + 1] = q(opts.audio)
+    -- v0.15.7: saved project -> the run's files go to <its folder>/FastSyncs/.
+    -- Only the audio runs (full/translate/dub) write run outputs.
+    local pd = V5.project_dir()
+    if pd then
+      parts[#parts + 1] = '--project-dir'
+      parts[#parts + 1] = q(pd)
+    end
   end
   parts[#parts + 1] = '--language'
   parts[#parts + 1] = q(opts.language or LANGUAGE)
@@ -2958,20 +3081,20 @@ function V5.reattach_running()
 end
 
 -- v0.4: write the pasted translation where the engine's own outputs live.
--- Mirrors pipeline/config._prepare_output_dir: outputs go to a sibling
--- folder named after the audio file (reused when the audio already sits
--- inside its own output folder). Returns the file path, or nil + banner.
+-- v0.15.7: V5.out_dir_for mirrors pipeline/config._choose_output_dir — the
+-- tidy FastSyncs/02_Script/, or the audio's pre-0.15.7 flat folder when that
+-- already holds its work. The engine picks the same folder back up from
+-- this file's location. Returns the file path, or nil + banner.
 local function write_provided_script(audio, text)
-  local adir = dirname(audio)
-  local base = basename(audio):gsub("%.[^.]+$", "")
-  local out_dir
-  if basename(adir) == base then
-    out_dir = adir
+  local base = V5.audio_base(audio)
+  local out_dir, tidy = V5.out_dir_for(audio)
+  if tidy then
+    V5.make_tidy_root(out_dir)
   else
-    out_dir = adir .. SEP .. base
     reaper.RecursiveCreateDirectory(out_dir, 0)
   end
-  local path = out_dir .. SEP .. base .. "_provided_translation.txt"
+  local path = V5.layout_path(out_dir, "script",
+                              base .. "_provided_translation.txt")
   local f = io.open(path, "wb")
   if not f then
     ui_set_banner("error",
@@ -2993,12 +3116,11 @@ local function start_dub_run()
 
   local audio = LAST_AUDIO
   if audio and audio ~= "" then
-    local base = audio:match("^.-([^\\/]+)%.[^\\/]+$")
-    local out_dir = audio:match("^(.*)[\\/]")
-    if out_dir and base then
-      local edited_path = out_dir .. SEP .. base .. "_translation_edited.txt"
-      os.remove(edited_path)
-    end
+    -- A stale edited translation from an earlier run of this audio must not
+    -- be picked up. v0.15.7: look where the new run will write.
+    local out_dir = V5.out_dir_for(audio)
+    os.remove(V5.layout_path(out_dir, "script",
+      V5.audio_base(audio) .. "_translation_edited.txt", false))
   end
   if audio == "" then
     ui_set_banner("error", "Pick an English audio file first.")
@@ -3151,7 +3273,9 @@ local function enter_review_phase(m)
     tr_buffer   = tr_raw,               -- fallback editor (no-table ReaImGui)
     use_table   = reaper.ImGui_BeginTable ~= nil,
     base        = base,
-    edited_path = (m.out_dir or "") .. SEP .. base .. "_translation_edited.txt",
+    -- v0.15.7: 02_Script/ in a tidy folder, flat in a legacy one.
+    edited_path = V5.layout_path(m.out_dir or "", "script",
+                                 base .. "_translation_edited.txt"),
     dirty       = false,
   }
   -- Remember (and persist) the run's out_dir for the regen section.
@@ -3246,7 +3370,8 @@ function V5.history_write()
 end
 
 -- Record a milestone for the CURRENT project. Newest first, deduped by
--- out_dir (a dub after a review replaces the review entry), capped at 20.
+-- out_dir + audio (a dub after a review replaces the review entry; since
+-- v0.15.7 several audios share one FastSyncs/ out_dir), capped at 20.
 function V5.history_record(status, m)
   m = m or {}
   if (m.out_dir or "") == "" then return end
@@ -3261,7 +3386,8 @@ function V5.history_record(status, m)
   }
   local kept = { e }
   for _, old in ipairs(V5.hist) do
-    if old.out_dir ~= e.out_dir and #kept < 20 then kept[#kept + 1] = old end
+    local same = old.out_dir == e.out_dir and (old.audio or "") == e.audio
+    if not same and #kept < 20 then kept[#kept + 1] = old end
   end
   V5.hist = kept
   V5.history_write()
@@ -3291,10 +3417,12 @@ function V5.ui_history(ctx)
     reaper.ImGui_TextWrapped(ctx, label)
     reaper.ImGui_PopStyleColor(ctx)
 
-    local mpath = (e.out_dir or "") .. SEP .. "engine_done.json"
+    -- v0.15.7: _work/<base>_engine_done.json in a tidy folder, the old
+    -- out_dir/engine_done.json otherwise.
+    local mpath = V5.find_manifest_copy(e.out_dir, e.audio)
     if e.status == "review" then
       if reaper.ImGui_SmallButton(ctx, 'Resume review##h' .. i) then
-        local m = file_exists(mpath) and load_manifest_json(mpath) or nil
+        local m = mpath and load_manifest_json(mpath) or nil
         if m and m.status == "review" then
           local ok, why = enter_review_phase(m)
           if not ok then
@@ -3309,7 +3437,7 @@ function V5.ui_history(ctx)
       reaper.ImGui_SameLine(ctx)
     elseif e.status == "ok" then
       if reaper.ImGui_SmallButton(ctx, 'Import to timeline##h' .. i) then
-        local m = file_exists(mpath) and load_manifest_json(mpath) or nil
+        local m = mpath and load_manifest_json(mpath) or nil
         if m and m.status == "ok" then
           reaper.ShowMessageBox(import_to_timeline(m),
                                 "Import Dub Results", 0)
@@ -3445,7 +3573,11 @@ local function start_regen(item, text, voice_id)
 
   local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
   local n = math.floor(pos * 1000 + 0.5)
-  local regen_dir = _regen_out_dir .. SEP .. "regen"
+  -- v0.15.7: 03_Voice/Redo/regen/ in a tidy folder; <out_dir>/regen/ in a
+  -- pre-0.15.7 flat one, as before.
+  local regen_dir = V5.is_tidy(_regen_out_dir)
+                    and V5.layout_path(_regen_out_dir, "regen")
+                    or (_regen_out_dir .. SEP .. "regen")
   reaper.RecursiveCreateDirectory(regen_dir, 0)
 
   -- Indic text never travels on argv: it goes through this UTF-8 file.
@@ -3871,7 +4003,8 @@ end
 -- pipeline, without manual browsing. A track with exactly ONE untrimmed,
 -- unstretched item plays its source file as-is — use that file directly
 -- (no render). Anything else (multiple items, trims, offsets, play-rate)
--- is rendered to <project media path>/DubSource/ first.
+-- is rendered to FastSyncs/01_Source/ (saved project, v0.15.7) or
+-- <project media path>/DubSource/ (unsaved) first.
 -- Returns (path, nil, rendered_bool) or (nil, reason).
 local function audio_from_track(track)
   local n_items = reaper.CountTrackMediaItems(track)
@@ -3907,7 +4040,11 @@ local function audio_from_track(track)
   local _, tname = reaper.GetSetMediaTrackInfo_String(track, "P_NAME",
                                                       "", false)
   if not tname or tname == "" then tname = "track" end
-  local out_dir = reaper.GetProjectPath("") .. SEP .. "DubSource"
+  -- v0.15.7: saved project -> FastSyncs/01_Source/; unsaved -> the project
+  -- media path's DubSource/, as before.
+  local root = V5.tidy_root(true)
+  local out_dir = root and V5.layout_path(root, "source")
+                  or (reaper.GetProjectPath("") .. SEP .. "DubSource")
   local name_base = _sanitize_filename(tname) .. os.date("_%Y%m%d_%H%M%S")
   local wav, why = render_track_stem(track, out_dir, name_base)
   if not wav then return nil, why end
@@ -3943,8 +4080,11 @@ local function start_voice_change()
   local py = preflight_engine()
   if not py then return false end
 
-  -- Rendered + converted audio go to <project media path>/VoiceChange/.
-  local out_dir = reaper.GetProjectPath("") .. SEP .. "VoiceChange"
+  -- Rendered + converted audio go to FastSyncs/03_Voice/Redo/VoiceChange/
+  -- (v0.15.7) — <project media path>/VoiceChange/ for an unsaved project.
+  local vc_root = V5.tidy_root(true)
+  local out_dir = vc_root and V5.layout_path(vc_root, "voicechange")
+                  or (reaper.GetProjectPath("") .. SEP .. "VoiceChange")
   local name_base = _sanitize_filename(tname) .. os.date("_%Y%m%d_%H%M%S")
 
   local in_wav, why = render_track_stem(track, out_dir, name_base)
@@ -5652,7 +5792,9 @@ function V5.start_tts()
       "⚙ Settings → Voices.")
     return false
   end
-  -- Audio lands next to the project, like DubSource/ and VoiceChange/ do.
+  -- Audio lands next to the project, like the track renders do: v0.15.7
+  -- FastSyncs/03_Voice/Redo/TTS/ for a saved project, the media folder's
+  -- TTS/ otherwise.
   local proj = reaper.GetProjectPath("")
   if (proj or "") == "" then
     ui_set_banner("error",
@@ -5660,7 +5802,9 @@ function V5.start_tts()
       "its media folder.")
     return false
   end
-  local dir = proj .. SEP .. "TTS"
+  local tts_root = V5.tidy_root(true)
+  local dir = tts_root and V5.layout_path(tts_root, "tts")
+              or (proj .. SEP .. "TTS")
   reaper.RecursiveCreateDirectory(dir, 0)
 
   -- Indic text never travels on argv: it goes through this UTF-8 file.

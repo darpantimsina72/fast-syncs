@@ -42,6 +42,9 @@ Usage:
     "<python>" run_dub.py --audio "<audio path>" --language <Language> \
         --steps translate
 
+    # v0.15.7: any audio run may add --project-dir "<folder of the .RPP>"
+    # so its files land in <that folder>/FastSyncs/
+
     # staged: resume with the reviewed/edited translation text file
     "<python>" run_dub.py --audio "<audio path>" --language <Language> \
         --steps dub --script "<abs .txt>" [--no-emotion]
@@ -223,6 +226,11 @@ def main() -> int:
     ap.add_argument("--list-voices", dest="list_voices", action="store_true",
                     help="Fetch the ElevenLabs voice catalogue for "
                          "--language and write a {status, voices} manifest")
+    ap.add_argument("--project-dir", dest="project_dir", default=None,
+                    help="v0.15.7: folder of the saved REAPER project; new "
+                         "runs write into <project-dir>/FastSyncs/. "
+                         "Forwarded to the engine for full/translate/dub "
+                         "runs, ignored by the utility modes.")
     ap.add_argument("--status-dir", dest="status_dir", default=None,
                     help="Per-run status directory (log/pid/done/manifest). "
                          "Must live inside engine/status/. The panel passes "
@@ -368,6 +376,8 @@ def main() -> int:
                 cmd += ["--sync-mode", args.sync_mode]
             if args.chunk_mode:
                 cmd += ["--chunk-mode", args.chunk_mode]
+            if args.project_dir:
+                cmd += ["--project-dir", args.project_dir]
         if args.voice_id and args.voice_id.strip():
             cmd += ["--voice-id", args.voice_id.strip()]
         # Tri-state emotion pass-through: only forward an explicit choice so
