@@ -3,6 +3,8 @@ config/
 dub_panel_settings.json
 reaper/voice_bookmarks.json
 reaper/voice_cache.json
+reaper/voice_bookmarks_cartesia.json
+reaper/voice_cache_cartesia.json
 reaper/model_cache.txt
 engine/engine_settings.json
 

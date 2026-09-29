@@ -8,7 +8,8 @@
 -- Two jobs:
 --
 -- 1. archive_log(opts) — when a run ends, copy its log next to the REAPER
---    project it belongs to:  <project folder>/FastSyncs_Logs/
+--    project it belongs to:  <project folder>/FastSyncs/Logs/
+--    (v0.15.7 tidy output folder; before that it was FastSyncs_Logs/)
 --        2026-09-26_14-05-33_AutoSync_failed.txt
 --    One folder per video, newest 50 kept. The live log files are wiped at
 --    every launch (the poller needs a clean file), so without this copy the
@@ -107,14 +108,35 @@ local function project_info(proj)
   return dirname(fn), (fn:match("([^/\\]+)$") or fn)
 end
 
+-- v0.15.7: the archive lives in the tidy output folder's Logs/. Creating
+-- that folder also writes its marker file, so the dubbing engine and panel
+-- recognise it (KEEP IN SYNC with LAYOUT_MARKER in
+-- dubbing/engine/pipeline/config.py).
+local LAYOUT_DIRNAME = "FastSyncs"
+local LAYOUT_MARKER  = ".fastsyncs-layout"
+
+local function ensure_tidy_root(root)
+  reaper.RecursiveCreateDirectory(root, 0)
+  local mk = root .. SEP .. LAYOUT_MARKER
+  local f = io.open(mk, "rb")
+  if f then f:close() return end
+  f = io.open(mk, "wb")
+  if f then f:write("2\n") f:close() end
+end
+
 -- Newest-last list of archived logs in `dir`, pruned to KEEP_LOGS.
+-- Only names shaped like ours (date_time_…) count: Logs/ also holds the
+-- engine's <base>_sync_log.txt, which must never be pruned — even when
+-- <base> itself starts with a date.
 local function prune(dir)
   if not reaper.EnumerateFiles then return end
   local names, i = {}, 0
   while true do
     local n = reaper.EnumerateFiles(dir, i)
     if not n then break end
-    if n:match("^%d%d%d%d%-%d%d%-%d%d_.*%.txt$") then names[#names + 1] = n end
+    if n:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%-%d%d%-%d%d_.*%.txt$") then
+      names[#names + 1] = n
+    end
     i = i + 1
   end
   table.sort(names)          -- timestamp prefix sorts oldest first
@@ -133,7 +155,9 @@ function M.archive_log(opts)
     local pdir, pname = project_info(opts.project)
     local dir
     if pdir and pdir ~= "" then
-      dir = pdir .. SEP .. "FastSyncs_Logs"
+      local root = pdir .. SEP .. LAYOUT_DIRNAME
+      ensure_tidy_root(root)
+      dir = root .. SEP .. "Logs"
     else
       dir = opts.app_root .. SEP .. "logs" .. SEP .. "unsaved"
     end

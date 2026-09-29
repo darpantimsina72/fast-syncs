@@ -56,19 +56,25 @@ memory WRITES, NO run-history recording. Translation-memory READS (from
 this repo's data/translation_memory.db) and Step-4 emotion enrichment
 mirror the bulk app's defaults (both ON). Emotion is toggleable:
 --no-emotion on the CLI, or {"emotion": false} in engine_settings.json.
-All outputs go to the app-convention per-file output folder next to the
-input audio (regen output goes wherever --out-wav points, typically
-<out_dir>/regen/).
+Outputs (v0.15.7) go to ONE tidy folder per project: <project dir>/FastSyncs/
+when --project-dir is given, else <audio dir>/FastSyncs/, sorted into
+01_Source/ 02_Script/ 03_Voice/ 04_Final/ Logs/ _work/ (see
+pipeline/config.py "Output folder layout"). A pre-0.15.7 flat folder
+(<audio dir>/<base>/) that already holds this audio's work keeps being used,
+flat, so an older run still resumes. Regen output goes wherever --out-wav
+points (the panel uses <out_dir>/03_Voice/Redo/regen/, or <out_dir>/regen/
+for a legacy folder).
 
 Secrets: read from this repo's gitignored config/ directory only —
 config/llm_settings.json + config/tts_settings.json (plus the key files
 they point at). Nothing sensitive is passed on argv.
 
 On success AND on failure a result manifest (engine_done.json) is written
-to <engine>/status/engine_done.json, and additionally to
-<out_dir>/engine_done.json whenever an out_dir is known (regen/test-llm/
-list-voices runs have no out_dir of their own, so they write the status
-copy only).
+to <engine>/status/engine_done.json, and additionally to a copy in the
+out_dir whenever one is known — <out_dir>/_work/<base>_engine_done.json in a
+tidy folder (several audios share it), <out_dir>/engine_done.json in a legacy
+one (regen/test-llm/list-voices runs have no out_dir of their own, so they
+write the status copy only).
 
 Run with --selfcheck to verify the pipeline package imports, every
 required symbol exists and every per-language prompt file is present
@@ -183,7 +189,10 @@ PROMPT_STAGES = ["Step1_Translation_Prompt", "Step2_Review_Prompt",
 # (and by --selfcheck). Defined across pipeline/config|stt|srt_tools|llm|
 # tts|sync — see ENGINE_NOTES.md for the module map.
 REQUIRED_FUNCTIONS = [
-    "_prepare_output_dir",           # per-file output folder + audio copy
+    "_prepare_output_dir",           # output folder (v0.15.7 tidy layout / legacy)
+    "layout_path",                   # v0.15.7 file kind -> subfolder (or flat)
+    "is_tidy",                       # v0.15.7 marker check
+    "manifest_copy_path",            # v0.15.7 per-audio out_dir manifest copy
     "_get_api_key",                  # ElevenLabs key from config/tts_settings.json
     "_validate_llm_config",          # fail fast if the LLM provider is unusable
     "_transcribe_audio",             # ElevenLabs Scribe STT
@@ -226,6 +235,14 @@ REQUIRED_FUNCTIONS = [
     "place_pieces",                  # windowed placement + bounded borrowing
     "synthesize_sentences_elevenlabs",# /with-timestamps TTS -> spans per sentence
     "_split_script_into_units",      # v0.12 clause-level units
+    # v0.15.8 second voice provider (pipeline/tts_cartesia.py + tts_backend.py)
+    "voice_backend",                 # provider switch: ElevenLabs | Cartesia
+    "tts_provider",                  # which one the settings / CLI chose
+    "synthesize_tts_cartesia",       # whole-script TTS -> WAV
+    "synthesize_sections_cartesia",  # per-section TTS -> one wav + spans
+    "synthesize_sentences_cartesia", # word-timed TTS -> spans per sentence
+    "voice_change_cartesia",         # Cartesia voice changer
+    "_fetch_cartesia_voices",        # Cartesia voice catalogue
 ]
 REQUIRED_ATTRIBUTES = [
     "GEMINI_DEFAULT_MODEL",
@@ -277,12 +294,27 @@ def _parse_args():
                          "the account voice catalogue when omitted")
     ap.add_argument("--el-model", default="eleven_v3",
                     help="ElevenLabs TTS model id (default: eleven_v3)")
+    ap.add_argument("--tts-provider", dest="tts_provider", default=None,
+                    choices=["elevenlabs", "cartesia"],
+                    help="v0.15.8: who speaks — ElevenLabs or Cartesia. "
+                         "Default: 'tts_provider' in config/tts_settings.json, "
+                         "else elevenlabs. Transcription always stays on "
+                         "ElevenLabs.")
+    ap.add_argument("--tts-model", dest="tts_model", default=None,
+                    help="v0.15.8: Cartesia model id (e.g. sonic-3.6) when "
+                         "the provider is cartesia. Default: "
+                         "'cartesia_model' in config/tts_settings.json.")
     ap.add_argument("--steps", default="full",
                     choices=["full", "translate", "dub"],
                     help="Pipeline scope: 'full' = one shot (v0.1), "
                          "'translate' = stop after S2c for script review, "
                          "'dub' = resume from a reviewed script "
                          "(requires --script)")
+    ap.add_argument("--project-dir", dest="project_dir", default=None,
+                    help="v0.15.7: folder of the saved REAPER project. New "
+                         "runs write their files into <project-dir>/"
+                         "FastSyncs/ (default: <audio dir>/FastSyncs/). "
+                         "Ignored by modes that write no run outputs.")
     ap.add_argument("--script", default=None,
                     help="Reviewed translation text file for --steps dub "
                          "(blank-line paragraph format, as written by the "
@@ -528,9 +560,11 @@ def _import_pipeline():
     if ENGINE_DIR not in sys.path:
         sys.path.insert(0, ENGINE_DIR)
     from pipeline import (config, stt, srt_tools, llm, tts, sync, tm,  # noqa: F401
-                          match, agent_splitter, agent_aligner)
+                          match, agent_splitter, agent_aligner,
+                          tts_cartesia, tts_backend)
     ns = types.SimpleNamespace()
-    for mod in (config, stt, srt_tools, llm, tts, sync, match, agent_splitter, agent_aligner):
+    for mod in (config, stt, srt_tools, llm, tts, sync, match, agent_splitter,
+                agent_aligner, tts_cartesia, tts_backend):
         for name, value in vars(mod).items():
             if name.startswith("__"):
                 continue
@@ -606,7 +640,7 @@ def _write_manifest(manifest, out_dir, keys=MANIFEST_KEYS):
     payload = {k: manifest.get(k, "") for k in keys}
     targets = [os.path.join(STATUS_DIR, "engine_done.json")]
     if out_dir:
-        targets.append(os.path.join(out_dir, "engine_done.json"))
+        targets.append(_manifest_copy_target(out_dir, manifest.get("audio")))
     os.makedirs(STATUS_DIR, exist_ok=True)
     for path in targets:
         try:
@@ -614,6 +648,27 @@ def _write_manifest(manifest, out_dir, keys=MANIFEST_KEYS):
                 json.dump(payload, f, ensure_ascii=False, indent=2)
         except Exception as e:
             _note(f"WARNING: could not write manifest {path}: {e}")
+
+
+def _manifest_copy_target(out_dir, audio_path):
+    """The out_dir copy of the manifest: per audio in a tidy folder
+    (_work/<base>_engine_done.json), out_dir/engine_done.json in a legacy
+    one. out_dir is only ever set after the pipeline imported, but this runs
+    on the error path too, so an import problem falls back to the old name
+    instead of losing the manifest."""
+    try:
+        if ENGINE_DIR not in sys.path:
+            sys.path.insert(0, ENGINE_DIR)
+        from pipeline.config import manifest_copy_path
+        return manifest_copy_path(out_dir, audio_path or "")
+    except Exception:
+        return os.path.join(out_dir, "engine_done.json")
+
+
+def _out(pl, ctx, kind, suffix):
+    """Path of one run output: <base><suffix> in the folder for *kind*
+    (tidy subfolder, or the flat legacy out_dir). v0.15.7."""
+    return pl.layout_path(ctx["out_dir"], kind, ctx["bname"] + suffix)
 
 
 def _write_text(path, text):
@@ -674,8 +729,11 @@ def _remember_tts(base, fingerprint, tts_path):
         pass            # a missing sidecar only costs one re-synthesis
 
 
-def _resolve_voice(pl, api_key, language, cli_voice_id):
+def _resolve_voice(pl, vb, language, cli_voice_id):
     """Return (voice_id, description) for the dub voice.
+
+    *vb* is the voice backend (pl.voice_backend): its sanitizer and voice
+    catalogue belong to whichever provider Settings chose (v0.15.8).
 
     Explicit --voice-id wins (after strict sanitizing). Otherwise the
     account's voice catalogue is fetched with the pipeline helper, which
@@ -686,8 +744,15 @@ def _resolve_voice(pl, api_key, language, cli_voice_id):
     Hard-errors with a clear message when no voice is available.
     """
     if cli_voice_id and cli_voice_id.strip():
-        vid = pl._sanitize_voice_id(cli_voice_id)
+        vid = vb.sanitize(cli_voice_id)
         if not vid:
+            if vb.provider == "cartesia":
+                raise RuntimeError(
+                    f"--voice-id {cli_voice_id!r} is not a Cartesia voice "
+                    "id (expected a UUID like "
+                    "a0e99841-438c-4a64-b679-ae501e7d6091). An ElevenLabs "
+                    "voice does not work with Cartesia — pick a Cartesia "
+                    "voice in Settings.")
             raise RuntimeError(
                 f"--voice-id {cli_voice_id!r} is not a valid ElevenLabs "
                 "voice_id (expected a 12-40 char alphanumeric token, not a "
@@ -695,16 +760,16 @@ def _resolve_voice(pl, api_key, language, cli_voice_id):
         return vid, "from --voice-id"
 
     _note(f"No --voice-id given — resolving a {language} voice from the "
-          "ElevenLabs account catalogue…")
+          f"{vb.label} account catalogue…")
     try:
-        voices = pl._fetch_voices_for_language(api_key, language)
+        voices = vb.fetch_voices(language)
     except Exception as e:
-        raise RuntimeError(f"Could not fetch the ElevenLabs voice "
+        raise RuntimeError(f"Could not fetch the {vb.label} voice "
                            f"catalogue: {e}")
     if not voices:
         raise RuntimeError(
-            "The ElevenLabs account has no voices — add a voice on "
-            "elevenlabs.io or pass --voice-id explicitly.")
+            f"The {vb.label} account has no voices — add one there "
+            "or pass --voice-id explicitly.")
     matched = [v for v in voices
                if str(v.get("label", "")).startswith("✦")]
     if matched:
@@ -713,16 +778,21 @@ def _resolve_voice(pl, api_key, language, cli_voice_id):
                                   f"'{pick['name']}'")
     pick = voices[0]
     _note(f"WARNING: no voice on the account advertises {language} support "
-          f"— falling back to the first account voice '{pick['name']}' "
-          "(eleven_v3 auto-detects the language from the text).")
+          f"— falling back to the first account voice '{pick['name']}'.")
     return pick["voice_id"], f"auto-fallback: first account voice '{pick['name']}'"
 
 
-def _load_pipeline_and_keys(args, need_llm=True):
+def _load_pipeline_and_keys(args, need_llm=True, need_stt=True,
+                            need_tts=True):
     """Import + symbol-check the pipeline and fail fast on credentials.
 
-    Returns (pl, api_key). The LLM check is skipped for --regen-chunk,
-    which never calls a language model.
+    Returns (pl, api_key, vb): api_key is the ElevenLabs key (transcription
+    always runs on ElevenLabs Scribe), vb the voice backend of the provider
+    Settings chose (pl.voice_backend). The LLM check is skipped for
+    --regen-chunk / --voice-change, which never call a language model.
+    need_stt=False: no transcription in this mode, so a Cartesia-only
+    install needs no ElevenLabs key. need_tts=False: nothing is spoken
+    (translate stage), so a missing voice key does not block it.
     """
     _note("Importing pipeline modules…")
     pl = _import_pipeline()
@@ -730,44 +800,79 @@ def _load_pipeline_and_keys(args, need_llm=True):
     if args.language not in pl.TTS_LANGUAGES:
         raise RuntimeError(f"Language {args.language!r} is not registered "
                            "in the pipeline's TTS_LANGUAGES table.")
+    provider = pl.tts_provider(getattr(args, "tts_provider", None))
+    api_key = ""
+    if need_stt or provider == "elevenlabs":
+        try:
+            api_key = pl._get_api_key()
+        except Exception as e:
+            raise RuntimeError(f"ElevenLabs API key unavailable: {e}")
     try:
-        api_key = pl._get_api_key()
+        vb = pl.voice_backend(provider, el_model=args.el_model,
+                              ca_model=getattr(args, "tts_model", None),
+                              sts_model=getattr(args, "sts_model", None),
+                              need_key=need_tts)
     except Exception as e:
-        raise RuntimeError(f"ElevenLabs API key unavailable: {e}")
+        raise RuntimeError(f"{provider.capitalize()} API key unavailable: {e}")
+    _note(f"Voice provider: {vb.label} (model {vb.model}).")
     if need_llm:
         try:
             pl._validate_llm_config()
         except Exception as e:
             raise RuntimeError(f"LLM provider not usable: {e}")
-    return pl, api_key
+    return pl, api_key, vb
 
 
-def _prepare_out_dir(pl, audio_path, manifest):
-    """Create/reuse the app-convention output folder next to the audio.
+def _project_dir(args):
+    """--project-dir when it names an existing folder, else None."""
+    p = getattr(args, "project_dir", None)
+    if not p:
+        return None
+    p = os.path.abspath(os.path.expanduser(p))
+    if not os.path.isdir(p):
+        _note(f"WARNING: --project-dir {p} is not a folder — writing next "
+              "to the audio instead.")
+        return None
+    return p
 
-    Done BEFORE any paid API work (cheap mkdir+copy): an unwritable input
-    location (mounted DMG, read-only share) must fail fast, not after the
-    S1a transcription spend. Setting manifest["out_dir"] up front also
-    means even early failures write the manifest copy next to the audio.
-    Returns (out_dir, base).
+
+def _prepare_out_dir(pl, audio_path, manifest, args=None, script_path=None):
+    """Create/reuse the output folder (v0.15.7 tidy layout or a legacy one).
+
+    Done BEFORE any paid API work (cheap mkdir): an unwritable location
+    (mounted DMG, read-only share) must fail fast, not after the S1a
+    transcription spend. Setting manifest["out_dir"] up front also means
+    even early failures write the manifest copy. *script_path* (the dub
+    --script or a --provided-script) lets a run continue in the folder that
+    already holds the earlier half of its work. Returns (out_dir, bname).
     """
-    out_dir = pl._prepare_output_dir(audio_path)
+    out_dir = pl._prepare_output_dir(audio_path, _project_dir(args),
+                                     script_path)
     if not os.access(out_dir, os.W_OK):
         raise RuntimeError(f"Output folder is not writable: {out_dir} — "
                            "move the audio to a writable location.")
-    base = os.path.join(
-        out_dir, os.path.splitext(os.path.basename(audio_path))[0])
+    bname = os.path.splitext(os.path.basename(audio_path))[0]
     manifest["out_dir"] = out_dir
-    copied_audio = os.path.join(out_dir, os.path.basename(audio_path))
-    manifest["en_audio"] = copied_audio if os.path.exists(copied_audio) else ""
-    return out_dir, base
+    if pl.is_tidy(out_dir):
+        # v0.15.7: no audio copy — the importer loads the original file.
+        manifest["en_audio"] = audio_path
+        _note(f"Output folder: {out_dir}")
+    else:
+        # Legacy flat folder (pre-0.15.7 run being continued): it holds the
+        # copy those versions made; fall back to the original otherwise.
+        copied_audio = os.path.join(out_dir, os.path.basename(audio_path))
+        manifest["en_audio"] = (copied_audio if os.path.exists(copied_audio)
+                                else audio_path)
+        _note(f"Output folder (older flat layout, kept so this audio's "
+              f"earlier work is reused): {out_dir}")
+    return out_dir, bname
 
 
 def _stage_translate(pl, args, api_key, manifest, ctx):
     """S1a..S2c: transcription, regions/SRT, translation chain.
 
     Fills *ctx* with everything the dub half (or the review-file writer)
-    needs: out_dir, base, raw_eng, words, regions, en_audio_dur, final_srt,
+    needs: out_dir, bname, raw_eng, words, regions, en_audio_dur, final_srt,
     punc_result. Shared verbatim between --steps full and --steps translate.
     """
     audio_path = ctx["audio_path"]
@@ -789,8 +894,10 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
               f"({len(provided_text)} chars) — the LLM translation chain "
               "will be skipped.")
 
-    out_dir, base = _prepare_out_dir(pl, audio_path, manifest)
-    ctx["out_dir"], ctx["base"] = out_dir, base
+    out_dir, bname = _prepare_out_dir(
+        pl, audio_path, manifest, args,
+        script_path=getattr(args, "provided_script", None))
+    ctx["out_dir"], ctx["bname"] = out_dir, bname
 
     # ── [S1a] Transcribe the English audio ─────────────────────────────────
     _say("S1a", "Transcribing English audio (ElevenLabs Scribe)…")
@@ -822,11 +929,11 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
     ctx["regions"] = regions
 
     final_srt = pl._build_subtitle_srt(regions, words)
-    srt_path = base + ".srt"
+    srt_path = _out(pl, ctx, "script", ".srt")
     _write_text(srt_path, final_srt)
     manifest["en_srt"] = srt_path
     formatted_srt = pl._parse_srt_to_analysis_format(final_srt)
-    _write_text(base + "_analyzed.txt", formatted_srt)
+    _write_text(_out(pl, ctx, "script", "_analyzed.txt"), formatted_srt)
     _say("S1b", f"{len(regions)} regions — English SRT saved: "
                 f"{os.path.basename(srt_path)}")
     ctx["final_srt"] = final_srt
@@ -879,11 +986,11 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
         _say("S2b", "Review step done (ran inside the translation chain).")
         _say("S2c", "Punctuation step done (ran inside the translation chain).")
 
-    _write_text(base + "_TranslationStep.txt", tr_result)
-    _write_text(base + "_ReviewStep.txt", rev_result)
+    _write_text(_out(pl, ctx, "script", "_TranslationStep.txt"), tr_result)
+    _write_text(_out(pl, ctx, "script", "_ReviewStep.txt"), rev_result)
     combined = (f"=== ENGLISH TRANSCRIPTION ===\n{raw_eng}\n\n"
                 f"=== {language.upper()} TRANSLATION ===\n{punc_result}")
-    _write_text(base + "_FinalScript.txt", combined)
+    _write_text(_out(pl, ctx, "script", "_FinalScript.txt"), combined)
     _say("S2c", "FinalScript saved.")
     ctx["punc_result"] = punc_result
 
@@ -924,14 +1031,15 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     first would break the sentence-id mapping).
     """
     language = args.language
-    out_dir, base = ctx["out_dir"], ctx["base"]
+    out_dir = ctx["out_dir"]
     audio_path = ctx["audio_path"]
     script_text = ctx["script_text"]
     grain = _chunk_mode(args)
+    vb = ctx["vb"]
 
     # English cue list: reuse the persisted sync SRT (dub resume) or build
     # it from the in-memory S1a transcription (full run).
-    en_sync_path = base + "_sync_en.srt"
+    en_sync_path = _out(pl, ctx, "work", "_sync_en.srt")
     if ctx.get("en_srt_text"):
         en_srt = ctx["en_srt_text"]
     else:
@@ -967,8 +1075,8 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
         en_entries, sentences, language, pl.GEMINI_DEFAULT_MODEL,
         status_cb=lambda m: _say("S2d", m))
 
-    tts_path = os.path.join(
-        out_dir, pl._tts_output_name(language, audio_path, "_tts"))
+    tts_path = pl.layout_path(
+        out_dir, "voice", pl._tts_output_name(language, audio_path, "_tts"))
 
     if grain != "section":
         pieces = pl.build_pieces(sections, unmatched_tr, sentences,
@@ -982,11 +1090,11 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
                     f"{len(unmatched_en)} English cue(s) without a "
                     "translation.")
         _say("S2d", f"Synthesizing {len(texts)} sentence(s) in long "
-                    f"stretches ({language}, voice {voice_id}, model "
-                    f"{args.el_model})…")
-        tts_path, spans = pl.synthesize_sentences_elevenlabs(
-            texts, tts_path, api_key=api_key, voice_id=voice_id,
-            model_id=args.el_model, status_cb=lambda m: _say("S2d", m))
+                    f"stretches ({language}, {vb.label} voice {voice_id}, "
+                    f"model {vb.model})…")
+        tts_path, spans = vb.sentences(
+            texts, tts_path, voice_id, language,
+            lambda m: _say("S2d", m))
     else:
         chunks = pl.build_chunks(sections, unmatched_tr, sentences)
         if not chunks:
@@ -998,10 +1106,10 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
                     f"{len(unmatched_en)} English cue(s) without a "
                     "translation.")
         _say("S2d", f"Synthesizing {len(chunks)} section(s) ({language}, "
-                    f"voice {voice_id}, model {args.el_model})…")
-        tts_path, spans = pl.synthesize_sections_elevenlabs(
-            texts, tts_path, api_key=api_key, voice_id=voice_id,
-            model_id=args.el_model, status_cb=lambda m: _say("S2d", m))
+                    f"{vb.label} voice {voice_id}, model {vb.model})…")
+        tts_path, spans = vb.sections(
+            texts, tts_path, voice_id, language,
+            lambda m: _say("S2d", m))
     manifest["tts_wav"] = tts_path
     _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)} "
                 f"({len(spans)} piece span(s)).")
@@ -1033,14 +1141,14 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
             "synced_start_ms": int(round(p["position"] * 1000)),
             "sync_status":     p["status"],
         })
-    sync_ts_path = base + "_sync_timestamps.txt"
+    sync_ts_path = _out(pl, ctx, "work", "_sync_timestamps.txt")
     _write_text(sync_ts_path, pl._format_timestamps_as_text(entries))
     manifest["timestamps_txt"] = sync_ts_path
 
     # Texts sidecar: block N (blank-line separated) = timestamps index N.
     # The importers use it for item notes on BOTH tracks (the synced SRT
     # below only covers the synced pieces).
-    texts_path = base + "_sync_texts.txt"
+    texts_path = _out(pl, ctx, "work", "_sync_texts.txt")
     _write_text(texts_path, "\n\n".join(
         " ".join((t or "").split()) or EMPTY_PARAGRAPH_PLACEHOLDER
         for t in texts) + "\n")
@@ -1062,7 +1170,7 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
         text = " ".join((texts[e["index"] - 1] or "").split())
         srt_lines += [str(n), f"{pl._srt_ts(start_s)} --> {pl._srt_ts(end_s)}",
                       text, ""]
-    synced_srt_path = base + "_sync_synced.srt"
+    synced_srt_path = _out(pl, ctx, "final", "_sync_synced.srt")
     _write_text(synced_srt_path, "\n".join(srt_lines))
     manifest["synced_srt"] = synced_srt_path
     _say("S3d", f"{len(synced_entries)} synced / {unsynced_n} unsync — "
@@ -1074,8 +1182,8 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
                     "skipped (all chunks go to the Un sync track).")
         return
     _say("S3e", "Rendering the synced audio…")
-    synced_path = os.path.join(
-        out_dir, pl._tts_output_name(language, audio_path, "_synced"))
+    synced_path = pl.layout_path(
+        out_dir, "final", pl._tts_output_name(language, audio_path, "_synced"))
     synced_path = pl.ensure_writable_output(
         synced_path, status_cb=lambda m: _say("S3e", m))
     pl.sync_audio_with_timestamps(
@@ -1088,7 +1196,7 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
 def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     """S2d..S3e: emotion + TTS + sync + render (v0.1-v0.6 behaviour).
 
-    Consumes from *ctx*: out_dir, base, audio_path, en_audio_dur and the
+    Consumes from *ctx*: out_dir, bname, audio_path, en_audio_dur and the
     dub script text (script_text). The English sync SRT comes from the
     in-memory transcription (regions+words, full run) or from the
     _sync_en.srt file the translate stage persisted (dub resume) —
@@ -1096,9 +1204,10 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     """
     language = args.language
     gemini_model = pl.GEMINI_DEFAULT_MODEL
-    out_dir, base = ctx["out_dir"], ctx["base"]
+    out_dir = ctx["out_dir"]
     audio_path = ctx["audio_path"]
     script_text = ctx["script_text"]
+    vb = ctx["vb"]
 
     # ── [S2d] Step-4 emotion enrichment + TTS (ElevenLabs, single voice) ───
     # Single-voice only: a saved per-paragraph speaker voice map (which the
@@ -1107,7 +1216,8 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     _speakers_map = getattr(pl, "_speakers_voice_map", None)
     if callable(_speakers_map):
         try:
-            spk_map = _speakers_map(base) or {}
+            spk_map = _speakers_map(pl.layout_path(
+                out_dir, "script", ctx["bname"], make=False)) or {}
         except Exception:
             spk_map = {}
         if spk_map:
@@ -1122,7 +1232,13 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     # the tags for its non-ElevenLabs Google TTS path, which this engine
     # does not have). Best-effort: on any LLM failure the original text
     # comes back unchanged.
-    if _emotion_enabled(args):
+    if _emotion_enabled(args) and vb.provider == "cartesia":
+        # The Step-4 tags ([calm], [pause]…) are an ElevenLabs v3 feature;
+        # Cartesia would have them stripped anyway, so skip the paid pass.
+        tts_text = script_text
+        _say("S2d", "Emotion enrichment skipped — its tags are an "
+                    "ElevenLabs feature and Cartesia does not use them.")
+    elif _emotion_enabled(args):
         _say("S2d", f"Step-4 emotion enrichment on {gemini_model}…")
         # strict=True: ANY failure here stops the run. This is the last free
         # moment before the ElevenLabs spend, and every sync mode still needs
@@ -1141,30 +1257,35 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     # run got this far and then died later — the mapping call at S3c is the
     # usual culprit — the same audio and the same transcription are already
     # on disk, and redoing them buys nothing but a second bill.
-    te_srt_path = base + "_sync_te.srt"
-    fingerprint = _dub_fingerprint(tts_text, voice_id, args.el_model)
-    reused_tts = _reusable_tts(base, fingerprint, te_srt_path)
+    te_srt_path = _out(pl, ctx, "work", "_sync_te.srt")
+    # ElevenLabs keeps its old fingerprint input (the bare model id) so a
+    # wav made before v0.15.8 is still reused; Cartesia is namespaced.
+    fingerprint = _dub_fingerprint(
+        tts_text, voice_id,
+        vb.model if vb.provider == "elevenlabs" else "cartesia:" + vb.model)
+    # <base>_tts_state.json lives with the TTS pieces (03_Voice/pieces/ in a
+    # tidy folder, flat in a legacy one).
+    state_base = _out(pl, ctx, "pieces", "")
+    reused_tts = _reusable_tts(state_base, fingerprint, te_srt_path)
     if reused_tts:
         tts_path = reused_tts
         _say("S2d", "Reusing the speech from the previous run — same script, "
                     "same voice, same model: "
                     f"{os.path.basename(tts_path)}")
     else:
-        _say("S2d", f"Synthesizing {language} speech (voice {voice_id}, "
-                    f"model {args.el_model})…")
-        tts_path = os.path.join(
-            out_dir, pl._tts_output_name(language, audio_path, "_tts"))
+        _say("S2d", f"Synthesizing {language} speech ({vb.label} voice "
+                    f"{voice_id}, model {vb.model})…")
+        tts_path = pl.layout_path(
+            out_dir, "voice", pl._tts_output_name(language, audio_path, "_tts"))
         # synthesize_tts_elevenlabs may divert to a "-2" name when the previous
         # wav is still locked (open REAPER project) — use the returned path.
-        tts_path = pl.synthesize_tts_elevenlabs(
-            tts_text, tts_path, api_key=api_key, voice_id=voice_id,
-            model_id=args.el_model,
-            status_cb=lambda m: _say("S2d", m))
+        tts_path = vb.whole(tts_text, tts_path, voice_id, language,
+                            lambda m: _say("S2d", m))
         _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)}")
     manifest["tts_wav"] = tts_path
 
     # ── [S3a] English sync SRT ──────────────────────────────────────────────
-    en_sync_path = base + "_sync_en.srt"
+    en_sync_path = _out(pl, ctx, "work", "_sync_en.srt")
     if ctx.get("en_srt_text"):
         # Dub resume: the translate stage already built and persisted this
         # SRT from its S1a transcription — no second Scribe call needed.
@@ -1202,13 +1323,13 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
         _say("S3b", f"{language} sync SRT saved.")
         # Written only now: both paid calls are done and their outputs are on
         # disk, so a re-run that fails later can pick up from here.
-        _remember_tts(base, fingerprint, tts_path)
+        _remember_tts(state_base, fingerprint, tts_path)
 
     # ── [S3c] LLM subtitle mapping ──────────────────────────────────────────
     _say("S3c", "Calling the LLM for EN <-> target subtitle mapping…")
     mapping_text = pl._call_gemini_mapping(
         en_srt, te_srt, script_text, gemini_model, language=language)
-    _write_text(base + "_sync_mapping.txt", mapping_text)
+    _write_text(_out(pl, ctx, "work", "_sync_mapping.txt"), mapping_text)
     _say("S3c", "Mapping received and saved.")
 
     # ── [S3d] Sync algorithm ────────────────────────────────────────────────
@@ -1216,7 +1337,7 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     synced_subs, orig_te_subs, sync_log = pl.run_sync_from_strings(
         en_srt, te_srt, mapping_text,
         en_audio_duration=ctx.get("en_audio_dur", 0.0))
-    _write_text(base + "_sync_log.txt", sync_log)
+    _write_text(_out(pl, ctx, "logs", "_sync_log.txt"), sync_log)
     n_bleed = sync_log.count("[bleed-over]")
     if n_bleed:
         _say("S3d", f"{len(synced_subs)} subtitles synced — {n_bleed} long "
@@ -1226,20 +1347,20 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
         _say("S3d", f"{len(synced_subs)} subtitles synced.")
 
     synced_srt_text = pl._write_srt_from_dict(synced_subs)
-    synced_srt_path = base + "_sync_synced.srt"
+    synced_srt_path = _out(pl, ctx, "final", "_sync_synced.srt")
     _write_text(synced_srt_path, synced_srt_text)
     manifest["synced_srt"] = synced_srt_path
 
     ts_list = pl._build_timestamps(orig_te_subs, synced_subs)
-    sync_ts_path = base + "_sync_timestamps.txt"
+    sync_ts_path = _out(pl, ctx, "work", "_sync_timestamps.txt")
     _write_text(sync_ts_path, pl._format_timestamps_as_text(ts_list))
     manifest["timestamps_txt"] = sync_ts_path
     _say("S3d", "Synced SRT + timestamps saved.")
 
     # ── [S3e] Render the synced audio ───────────────────────────────────────
     _say("S3e", "Rendering the synced audio…")
-    synced_path = os.path.join(
-        out_dir, pl._tts_output_name(language, audio_path, "_synced"))
+    synced_path = pl.layout_path(
+        out_dir, "final", pl._tts_output_name(language, audio_path, "_synced"))
     # Same lock hazard as the TTS wav: a previous _synced.wav imported into
     # an open REAPER project holds a share lock — divert instead of Errno 13.
     synced_path = pl.ensure_writable_output(
@@ -1370,12 +1491,13 @@ def _begin_run(args, manifest):
     manifest["language"] = args.language
     if not os.path.isfile(audio_path):
         raise RuntimeError(f"Audio file not found: {audio_path}")
-    pl, api_key = _load_pipeline_and_keys(args, need_llm=True)
+    pl, api_key, vb = _load_pipeline_and_keys(
+        args, need_llm=True, need_tts=(args.steps != "translate"))
     # _llm_provider_label(), not GEMINI_DEFAULT_MODEL: the constant is the
     # Gemini default and says nothing about the provider this install actually
     # calls, so a gateway run used to advertise "gemini-2.5-pro" in its log.
     _note(f"Pipeline loaded. LLM: {pl._llm_provider_label()}; "
-          f"TTS model: {args.el_model}.")
+          f"TTS: {vb.label} {vb.model}.")
     _roles = getattr(pl, "_llm_role_overrides_label", None)
     if callable(_roles) and _roles():
         _note(f"Per-stage model overrides: {_roles()}")
@@ -1386,7 +1508,7 @@ def _begin_run(args, manifest):
     if args.steps in ("full", "dub") or not args.provided_script:
         _preflight_prompts(pl, args)
         _preflight_llm(pl)
-    return pl, api_key, {"audio_path": audio_path}
+    return pl, api_key, {"audio_path": audio_path, "vb": vb}
 
 
 def _run_full(args, manifest):
@@ -1394,7 +1516,7 @@ def _run_full(args, manifest):
     pl, api_key, ctx = _begin_run(args, manifest)
     # Resolve the dub voice up-front so a bad voice fails before any
     # expensive transcription/translation work happens.
-    voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
+    voice_id, voice_how = _resolve_voice(pl, ctx["vb"], args.language,
                                          args.voice_id)
     _note(f"Dub voice: {voice_id} ({voice_how})")
     _stage_translate(pl, args, api_key, manifest, ctx)
@@ -1446,17 +1568,16 @@ def _run_translate(args, manifest):
     """
     pl, api_key, ctx = _begin_run(args, manifest)
     _stage_translate(pl, args, api_key, manifest, ctx)
-    base = ctx["base"]
 
     # Persist the sync-quality English SRT now (the pipeline builds it at
     # S3a from the same S1a transcription) — this is what lets --steps dub
     # resume without a second paid Scribe call.
     en_sync_srt = pl._build_english_subtitle_srt(ctx["regions"],
                                                  ctx["words"])
-    _write_text(base + "_sync_en.srt", en_sync_srt)
+    _write_text(_out(pl, ctx, "work", "_sync_en.srt"), en_sync_srt)
 
     # Delete any stale edited translation script from a previous run
-    edited_path = base + "_translation_edited.txt"
+    edited_path = _out(pl, ctx, "script", "_translation_edited.txt")
     if os.path.exists(edited_path):
         try:
             os.remove(edited_path)
@@ -1465,13 +1586,13 @@ def _run_translate(args, manifest):
 
     en_text, tr_text, n_rows = _paired_paragraph_texts(
         pl, ctx["final_srt"], ctx["punc_result"])
-    en_text_path = base + "_review_en.txt"
-    tr_text_path = base + "_review_translation.txt"
+    en_text_path = _out(pl, ctx, "script", "_review_en.txt")
+    tr_text_path = _out(pl, ctx, "script", "_review_translation.txt")
     _write_text(en_text_path, en_text)
     _write_text(tr_text_path, tr_text)
     manifest["en_text"] = en_text_path
     manifest["translation_text"] = tr_text_path
-    manifest["final_script"] = base + "_FinalScript.txt"
+    manifest["final_script"] = _out(pl, ctx, "script", "_FinalScript.txt")
     _say("S2c", f"Review files saved ({n_rows} paragraph pair(s)) — "
                 "waiting for script review.")
 
@@ -1479,7 +1600,7 @@ def _run_translate(args, manifest):
 def _run_dub(args, manifest):
     """--steps dub --script <file>: resume after review, S2d..S3e.
 
-    Re-derives out_dir from --audio exactly like a full run, validates the
+    Re-derives out_dir from --audio (+ --script/--project-dir), validates the
     translate-stage artifacts, reads the (possibly edited) translation from
     --script, rewrites FinalScript to match what actually gets dubbed
     (mirroring the bulk app's post-review behaviour), then runs the dub
@@ -1487,18 +1608,24 @@ def _run_dub(args, manifest):
     ok manifest at the end.
     """
     pl, api_key, ctx = _begin_run(args, manifest)
-    voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
+    voice_id, voice_how = _resolve_voice(pl, ctx["vb"], args.language,
                                          args.voice_id)
     _note(f"Dub voice: {voice_id} ({voice_how})")
 
-    out_dir, base = _prepare_out_dir(pl, ctx["audio_path"], manifest)
-    ctx["out_dir"], ctx["base"] = out_dir, base
+    # script_path: continue in the folder the translate stage wrote to —
+    # a pre-0.15.7 flat folder stays flat (see config._choose_output_dir).
+    out_dir, bname = _prepare_out_dir(pl, ctx["audio_path"], manifest, args,
+                                      script_path=args.script)
+    ctx["out_dir"], ctx["bname"] = out_dir, bname
 
     # The translate stage must have run first in this out_dir.
     required = {
-        "English SRT": base + ".srt",
-        "English sync SRT": base + "_sync_en.srt",
-        "FinalScript": base + "_FinalScript.txt",
+        "English SRT": pl.layout_path(out_dir, "script", bname + ".srt",
+                                      make=False),
+        "English sync SRT": pl.layout_path(out_dir, "work",
+                                           bname + "_sync_en.srt", make=False),
+        "FinalScript": pl.layout_path(out_dir, "script",
+                                      bname + "_FinalScript.txt", make=False),
     }
     missing = [f"{name}: {path}" for name, path in required.items()
                if not os.path.isfile(path)]
@@ -1563,9 +1690,10 @@ def _run_regen(args, manifest):
     if not text:
         raise RuntimeError(f"--text-file is empty: {text_path}")
 
-    pl, api_key = _load_pipeline_and_keys(args, need_llm=False)
+    pl, api_key, vb = _load_pipeline_and_keys(args, need_llm=False,
+                                              need_stt=False)
     _require_ffmpeg(pl, hard=True)
-    voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
+    voice_id, voice_how = _resolve_voice(pl, vb, args.language,
                                          args.voice_id)
     _note(f"Regen voice: {voice_id} ({voice_how})")
 
@@ -1582,14 +1710,17 @@ def _run_regen(args, manifest):
     if out_parent:
         os.makedirs(out_parent, exist_ok=True)
 
-    _say("S2d", f"Regenerating chunk ({len(text)} chars, voice {voice_id}, "
-                f"model {args.el_model})…")
+    _say("S2d", f"Regenerating chunk ({len(text)} chars, {vb.label} voice "
+                f"{voice_id}, model {vb.model})…")
     # A locked --out-wav (previous regen still loaded in REAPER) diverts to
     # a "-2" name; the panel applies whatever path the manifest reports.
-    out_wav = pl.synthesize_tts_elevenlabs(
-        text, out_wav, api_key=api_key, voice_id=voice_id,
-        model_id=args.el_model,
-        status_cb=lambda m: _say("S2d", m))
+    out_wav = vb.whole(
+        text, out_wav, voice_id, args.language,
+        lambda m: _say("S2d", m),
+        # v0.15.7: one request for the whole text when it fits, so a redo of
+        # several joined chunks is one take in one voice (separate requests
+        # drift apart in tone).
+        max_chars=vb.one_take_chars)
     manifest["regen_wav"] = out_wav
     _say("S2d", f"Regen chunk saved: {os.path.basename(out_wav)}")
 
@@ -1608,20 +1739,19 @@ def _run_voice_change(args, manifest):
         raise RuntimeError(f"--in-wav not found: {in_wav}")
     out_wav = os.path.abspath(os.path.expanduser(args.out_wav))
 
-    pl, api_key = _load_pipeline_and_keys(args, need_llm=False)
+    pl, api_key, vb = _load_pipeline_and_keys(args, need_llm=False,
+                                              need_stt=False)
     _require_ffmpeg(pl, hard=True)
-    voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
+    voice_id, voice_how = _resolve_voice(pl, vb, args.language,
                                          args.voice_id)
-    _note(f"Voice-change target voice: {voice_id} ({voice_how})")
+    _note(f"Voice-change target voice: {voice_id} ({voice_how}, "
+          f"{vb.label})")
 
     # Same lock hazard as the dub outputs: a previous vc wav still loaded in
     # an open REAPER project would fail the save AFTER the STS credits are
     # spent — divert to a "-2" name up front instead.
     out_wav = pl.ensure_writable_output(out_wav, status_cb=lambda m: _note(m))
-    pl.voice_change_elevenlabs(
-        in_wav, out_wav, api_key=api_key, voice_id=voice_id,
-        model_id=args.sts_model,
-        status_cb=lambda m: _note(m))
+    vb.voice_change(in_wav, out_wav, voice_id, lambda m: _note(m))
     manifest["vc_wav"] = out_wav
     _note(f"Voice-changed audio saved: {os.path.basename(out_wav)}")
 
@@ -1685,10 +1815,10 @@ def _run_list_voices(args, manifest):
     if args.language not in pl.TTS_LANGUAGES:
         raise RuntimeError(f"Language {args.language!r} is not registered "
                            "in the pipeline's TTS_LANGUAGES table.")
-    api_key = pl._get_api_key()
-    _note(f"Fetching the ElevenLabs voice catalogue ({args.language})…")
-    voices = pl._fetch_voices_for_language(api_key, args.language,
-                                           force_refresh=True)
+    vb = pl.voice_backend(args.tts_provider, el_model=args.el_model,
+                          ca_model=args.tts_model)
+    _note(f"Fetching the {vb.label} voice catalogue ({args.language})…")
+    voices = vb.fetch_voices(args.language, force_refresh=True)
     manifest["voices"] = [{"id": v["voice_id"], "name": v["name"]}
                           for v in voices]
     _note(f"{len(manifest['voices'])} voice(s) fetched.")

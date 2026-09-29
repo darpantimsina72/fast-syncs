@@ -137,8 +137,8 @@ from those files only — they are never placed on a command line.
    - **From track → Use track** — take it straight from a project track,
      no file browsing. A track holding one clean item uses that item's
      source file directly; anything else (chunks, trims, offsets) is
-     rendered to `<project path>/DubSource/` automatically and that wav
-     is used.
+     rendered to `FastSyncs/01_Source/` next to the saved project
+     (`<project path>/DubSource/` for an unsaved one) and that wav is used.
 3. **Already have the translation?** Use the **Paste Translation** tab:
    pick the audio + language there and paste the translated script (one
    blank line between paragraphs — **📥 Paste from clipboard** works too).
@@ -242,7 +242,8 @@ from those files only — they are never placed on a command line.
    tab, select a chunk item on a "Dub Chunks" track, edit the item's text,
    click **⟳ Regenerate**. The engine synthesizes just that text and the
    panel swaps the item's take source to the new wav — non-destructively,
-   new files only ever land in `<out_dir>/regen/` with auto-incrementing
+   new files only ever land in `FastSyncs/03_Voice/Redo/regen/` (older
+   flat run folders: `<out_dir>/regen/`) with auto-incrementing
    version suffixes.
    Below the button, **Regenerate in another voice (optional)** re-does the
    same chunk in a different ElevenLabs voice — same bookmarks + search as
@@ -264,7 +265,8 @@ from those files only — they are never placed on a command line.
    voice changer (speech-to-speech — timing and pacing are kept, so a synced
    dub stays synced), and imported as a new track directly below the
    original. The original track is muted but never modified. Files land in
-   `<project path>/VoiceChange/`.
+   `FastSyncs/03_Voice/Redo/VoiceChange/` (unsaved project:
+   `<project path>/VoiceChange/`).
 9. **Just speak some text** — go to the **Text to Speech** tab, paste (or
    type) any text, pick a voice, click **🔊 Generate + import**. The audio
    is synthesized and dropped straight onto a `TTS` track at the edit

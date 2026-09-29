@@ -4,10 +4,12 @@
 -- Plain Lua, no ReaImGui required.
 --
 -- Asks the user for an engine_done.json result manifest (fallback: pick the
--- *_sync_timestamps.txt directly and derive sibling file names), then builds
+-- *_sync_timestamps.txt directly and derive sibling file names — flat
+-- pre-0.15.7 folder or the v0.15.7 tidy FastSyncs/ layout), then builds
 -- the contract import layout, appended at the end of the project:
 --
---   1. "EN Original"        - one item: the copied original audio, position 0
+--   1. "EN Original"        - one item: the original audio, position 0 (a
+--                             copy in the run folder before v0.15.7)
 --   2. "Dub Chunks"         - one item per timestamps line, cut from tts_wav
 --                             (D_STARTOFFS = orig start, D_LENGTH = orig dur,
 --                              D_POSITION = synced start; cue text stored in
@@ -333,6 +335,20 @@ local function find_file_by_suffix(dir, suffix_lc, stem)
   return ""
 end
 
+-- v0.15.7 tidy output folder: "<root>/_work/<stem>_sync_timestamps.txt"
+-- with a ".fastsyncs-layout" marker in <root>. Its siblings live in
+-- subfolders (KEEP IN SYNC with LAYOUT_SUBDIRS in
+-- dubbing/engine/pipeline/config.py). Returns the root, or nil for a
+-- pre-0.15.7 flat folder.
+local function tidy_root_of(dir)
+  if basename(dir) ~= "_work" then return nil end
+  local root = dirname(dir)
+  if root ~= "" and file_exists(root .. SEP .. ".fastsyncs-layout") then
+    return root
+  end
+  return nil
+end
+
 local function manifest_from_timestamps(ts_path)
   local base
   if ends_with_ci(ts_path, TS_SUFFIX) then
@@ -342,11 +358,12 @@ local function manifest_from_timestamps(ts_path)
   end
   local dir  = dirname(ts_path)
   local stem = basename(base)
+  local root = tidy_root_of(dir)
 
   local m = {
     status         = "ok",
     error          = "",
-    out_dir        = dir,
+    out_dir        = root or dir,
     timestamps_txt = ts_path,
     en_audio       = "",
     tts_wav        = "",
@@ -354,6 +371,24 @@ local function manifest_from_timestamps(ts_path)
     synced_srt     = "",
     sync_texts     = "",
   }
+
+  if root then
+    -- Tidy layout: final files in 04_Final/, speech in 03_Voice/, the
+    -- English audio is the original (not copied) — the per-audio manifest
+    -- copy in _work/ knows where it is (read by pick_manifest).
+    local srt = root .. SEP .. "04_Final" .. SEP .. stem .. "_sync_synced.srt"
+    if file_exists(srt) then m.synced_srt = srt end
+    local texts = base .. "_sync_texts.txt"
+    if file_exists(texts) then m.sync_texts = texts end
+    local src = root .. SEP .. "01_Source" .. SEP .. stem
+    for _, ext in ipairs(AUDIO_EXTS) do
+      if file_exists(src .. ext) then m.en_audio = src .. ext break end
+    end
+    m.manifest_copy = dir .. SEP .. stem .. "_engine_done.json"
+    m.tts_wav    = find_file_by_suffix(root .. SEP .. "03_Voice", "_tts.wav", stem)
+    m.synced_wav = find_file_by_suffix(root .. SEP .. "04_Final", "_synced.wav", stem)
+    return m
+  end
 
   local srt = base .. "_sync_synced.srt"
   if file_exists(srt) then m.synced_srt = srt end
@@ -555,7 +590,16 @@ local function pick_manifest()
     if not ok then return nil end
   end
   if ends_with_ci(picked, ".txt") then
-    return manifest_from_timestamps(picked)
+    local m = manifest_from_timestamps(picked)
+    -- v0.15.7 tidy folder: the English audio is not copied into the run
+    -- folder any more; take its path from the per-audio manifest copy.
+    if m.en_audio == "" and m.manifest_copy and file_exists(m.manifest_copy) then
+      local mm = load_manifest_json(m.manifest_copy)
+      if mm and (mm.en_audio or "") ~= "" and file_exists(mm.en_audio) then
+        m.en_audio = mm.en_audio
+      end
+    end
+    return m
   end
   local m, err = load_manifest_json(picked)
   if not m then

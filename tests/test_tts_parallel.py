@@ -195,7 +195,7 @@ def test_sections_and_legacy_order(tmp):
     # Legacy: chunks joined in order. _split_text_for_elevenlabs is stubbed
     # so each chunk is one known text.
     real_split = tts._split_text_for_elevenlabs
-    tts._split_text_for_elevenlabs = lambda text: list(secs)
+    tts._split_text_for_elevenlabs = lambda text, max_chars=None: list(secs)
     try:
         wavs = []
         for w, name in ((1, "lg1_tts.wav"), (4, "lg4_tts.wav")):

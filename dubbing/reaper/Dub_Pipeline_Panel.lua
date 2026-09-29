@@ -39,7 +39,8 @@
 --   - Windows support: OS-aware setup hints (setup_windows.bat).
 --   - "From track": pick the English audio straight from a project
 --     track — one clean item uses its source file, anything else is
---     rendered to <project>/DubSource/ first.
+--     rendered to <project>/DubSource/ first (v0.15.7: saved project →
+--     FastSyncs/01_Source/).
 --
 -- v0.3 additions (standalone app):
 --   - ⚙ Settings section (setup phase): LLM provider/model/keys and
@@ -62,7 +63,8 @@
 --   - Chunk regeneration: select a "Dub Chunks" item, edit its stored
 --     text, hit Regenerate — the engine synthesizes just that text
 --     ("--regen-chunk") and the panel swaps the item's take source to
---     the new wav. Non-destructive: new files go to <out_dir>/regen/.
+--     the new wav. Non-destructive: new files go to <out_dir>/regen/
+--     (v0.15.7 tidy folder: <out_dir>/03_Voice/Redo/regen/).
 --     v0.8: an optional voice picker under the button re-synthesizes the
 --     same text in a different voice (empty = the Settings voice).
 --
@@ -131,9 +133,17 @@ local V5 = {
   -- v0.13 UI state. Declared here because load_settings() runs long before
   -- the UI helpers are defined and must not have its values overwritten.
   adv           = {},        -- "Show advanced" reveal key -> true
-  settings_open = false,     -- the settings window (own window, not a tab)
+  settings_open = false,     -- v0.15.7: "select the Settings tab next frame"
   settings_pane = "connection",
   tool          = "tts",     -- Tools tab: tts | regen | voice
+  -- v0.15.8: second voice provider (ElevenLabs | Cartesia). The ACTIVE
+  -- provider's voices live in the old variables (VOICE_ID, VC_VOICE_ID,
+  -- the fetched list); the other provider's wait in voice_stash until
+  -- V5.set_tts_provider() swaps them back. Transcription stays ElevenLabs.
+  tts_provider  = "elevenlabs",
+  ca_key        = "",
+  ca_model      = "sonic-3.6",
+  voice_stash   = { elevenlabs = {}, cartesia = {} },
 }
 
 -- An UNSAVED project has no filename to hash, and every one of them used to
@@ -370,6 +380,120 @@ end
 local function open_url(url) open_path(url) end
 
 -- ---------------------------------------------------------------------------
+-- v0.15.7 output layout. New runs put one video's files into ONE tidy folder
+-- "<folder of the saved .RPP>/FastSyncs/" (unsaved project: next to the
+-- audio), sorted into subfolders. A folder WITHOUT the marker file is a
+-- pre-0.15.7 flat folder and keeps its flat paths, so old runs still resume.
+-- KEEP IN SYNC with LAYOUT_SUBDIRS / _choose_output_dir in
+-- dubbing/engine/pipeline/config.py (the engine decides where a run's files
+-- go; the panel must agree for the files it writes itself).
+-- All on V5 — the main chunk is at Lua's 200-locals limit.
+-- ---------------------------------------------------------------------------
+V5.LAYOUT_DIRNAME = "FastSyncs"
+V5.LAYOUT_MARKER  = ".fastsyncs-layout"
+V5.LAYOUT_SUB = {
+  source = "01_Source", script = "02_Script", voice = "03_Voice",
+  pieces = "03_Voice/pieces", regen = "03_Voice/Redo/regen",
+  voicechange = "03_Voice/Redo/VoiceChange", tts = "03_Voice/Redo/TTS",
+  final = "04_Final", logs = "Logs", work = "_work",
+}
+
+function V5.is_tidy(dir)
+  return (dir or "") ~= "" and file_exists(dir .. SEP .. V5.LAYOUT_MARKER)
+end
+
+-- Create the tidy root + its marker (idempotent). Subfolders come lazily.
+function V5.make_tidy_root(root)
+  reaper.RecursiveCreateDirectory(root, 0)
+  local mk = root .. SEP .. V5.LAYOUT_MARKER
+  if not file_exists(mk) then
+    local f = io.open(mk, "wb")
+    if f then f:write("2\n") f:close() end
+  end
+  return root
+end
+
+-- Tidy folder -> out_dir/<subfolder of kind>/filename (subfolder created
+-- unless make == false). Legacy flat folder -> out_dir/filename, as before.
+-- An empty filename returns the folder.
+function V5.layout_path(out_dir, kind, filename, make)
+  local d = out_dir or ""
+  if V5.is_tidy(d) then
+    local sub = (V5.LAYOUT_SUB[kind] or ""):gsub("/", SEP)
+    d = d .. SEP .. sub
+    if make ~= false then reaper.RecursiveCreateDirectory(d, 0) end
+  end
+  if filename and filename ~= "" then return d .. SEP .. filename end
+  return d
+end
+
+-- Folder of the saved ACTIVE project, or nil when it was never saved.
+function V5.project_dir()
+  local _, fn = reaper.EnumProjects(-1, "")
+  if not fn or fn == "" then return nil end
+  local d = dirname(fn)
+  if d == "" then return nil end
+  return d
+end
+
+-- "<project folder>/FastSyncs" (created with its marker when make), or nil
+-- for an unsaved project.
+function V5.tidy_root(make)
+  local pd = V5.project_dir()
+  if not pd then return nil end
+  local root = pd .. SEP .. V5.LAYOUT_DIRNAME
+  if make then V5.make_tidy_root(root) end
+  return root
+end
+
+function V5.audio_base(path)
+  return (basename(path or ""):gsub("%.[^.]+$", ""))
+end
+
+-- Where the engine will write a NEW run for *audio* (mirror of
+-- config._choose_output_dir without the script-path rule). Returns
+-- (dir, is_tidy). Creates nothing.
+function V5.out_dir_for(audio)
+  local src  = dirname(audio or "")
+  local base = V5.audio_base(audio)
+  if basename(src) == base and not V5.is_tidy(src) then return src, false end
+  local pd = V5.project_dir()
+  local root
+  if pd then
+    root = pd .. SEP .. V5.LAYOUT_DIRNAME
+  elseif V5.is_tidy(src) then
+    root = src
+  elseif V5.is_tidy(dirname(src)) then
+    root = dirname(src)
+  else
+    root = src .. SEP .. V5.LAYOUT_DIRNAME
+  end
+  local legacy = src .. SEP .. base
+  if not V5.is_tidy(legacy) and file_exists(legacy .. SEP .. base .. ".srt")
+     and not file_exists(root .. SEP .. "02_Script" .. SEP .. base .. ".srt") then
+    return legacy, false
+  end
+  return root, true
+end
+
+-- The out_dir copy of a run's engine_done.json: per audio in a tidy folder
+-- (_work/<base>_engine_done.json), the old out_dir/engine_done.json in a
+-- legacy one. Returns the first that exists, or nil.
+function V5.find_manifest_copy(out_dir, audio)
+  if (out_dir or "") == "" then return nil end
+  local cands = {}
+  if (audio or "") ~= "" then
+    cands[#cands + 1] = out_dir .. SEP .. "_work" .. SEP ..
+                        V5.audio_base(audio) .. "_engine_done.json"
+  end
+  cands[#cands + 1] = out_dir .. SEP .. "engine_done.json"
+  for _, p in ipairs(cands) do
+    if file_exists(p) then return p end
+  end
+  return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- Minimal tolerant JSON reader (flat string / number / bool fields only).
 -- Same as Import_Dub_Results.lua — engine_done.json is a flat object of
 -- strings. Byte-safe for UTF-8 (escapes and quotes are ASCII; continuation
@@ -520,6 +644,35 @@ for ui, js in pairs(PROVIDER_TO_JSON) do PROVIDER_FROM_JSON[js] = ui end
 -- ElevenLabs model choices (contract v0.3).
 local EL_MODELS = { "eleven_v3", "eleven_multilingual_v2",
                     "eleven_turbo_v2_5", "eleven_flash_v2_5" }
+-- v0.15.8: Cartesia model choices (engine: config.CARTESIA_TTS_MODELS).
+V5.CA_MODELS = { "sonic-3.6", "sonic-3.5", "sonic-3", "sonic-latest" }
+V5.PROVIDER_LABEL = { elevenlabs = "ElevenLabs", cartesia = "Cartesia" }
+
+-- Label of the provider that speaks right now ("ElevenLabs" / "Cartesia").
+function V5.tts_label()
+  return V5.PROVIDER_LABEL[V5.tts_provider] or "ElevenLabs"
+end
+
+-- A provider's voice of one kind ("voice" = default voice, "vc" = track
+-- voice-change target), wherever it currently lives.
+function V5.voice_of(provider, kind)
+  if provider == V5.tts_provider then
+    if kind == "vc" then return VC_VOICE_ID or "" end
+    return VOICE_ID or ""
+  end
+  return (V5.voice_stash[provider] or {})[kind] or ""
+end
+
+-- Swap only the two voice ids. The fetched list / bookmarks are swapped by
+-- V5.set_tts_provider(), defined further down next to their loaders.
+function V5.swap_voice_ids(provider)
+  if provider == V5.tts_provider then return end
+  V5.voice_stash[V5.tts_provider] = { voice = VOICE_ID or "",
+                                      vc = VC_VOICE_ID or "" }
+  local n = V5.voice_stash[provider] or {}
+  VOICE_ID, VC_VOICE_ID = n.voice or "", n.vc or ""
+  V5.tts_provider = provider
+end
 
 local function load_settings()
   local content = read_all(PANEL_SETTINGS_PATH)
@@ -545,6 +698,7 @@ local function load_settings()
   v = jval("el_model")    if v and v ~= "" then EL_MODEL   = v end
   v = jval("last_audio")  if v then LAST_AUDIO = v end
   v = jval("vc_voice_id") if v then VC_VOICE_ID = v end
+  v = jval("ca_vc_voice_id") if v then V5.voice_stash.cartesia.vc = v end
   v = jval("script_mode")
   if v == "auto" or v == "have" then SCRIPT_MODE = v end
   local b = json_field(content, "full_run")
@@ -583,7 +737,10 @@ local function save_settings()
   f:write(string.format('  "language": "%s",\n',   je(LANGUAGE)))
   f:write(string.format('  "full_run": %s,\n',     FULL_RUN and 'true' or 'false'))
   f:write(string.format('  "script_mode": "%s",\n', je(SCRIPT_MODE)))
-  f:write(string.format('  "vc_voice_id": "%s",\n', je(VC_VOICE_ID)))
+  f:write(string.format('  "vc_voice_id": "%s",\n',
+                        je(V5.voice_of("elevenlabs", "vc"))))
+  f:write(string.format('  "ca_vc_voice_id": "%s",\n',
+                        je(V5.voice_of("cartesia", "vc"))))
   -- v0.13 UI state: reveals stay open across launches for power users, and
   -- the Tools/Settings panes reopen where they were left.
   local adv_keys = {}
@@ -658,6 +815,12 @@ local function load_tts_config()
   v = jval("el_model")            if v and v ~= "" then EL_MODEL = v end
   v = jval("voice_id")            if v then VOICE_ID = v end
   v = jval("google_tts_key_path") if v then GOOGLE_TTS_KEY_PATH = v end
+  -- v0.15.8 Cartesia fields (absent in older files = ElevenLabs, as before).
+  v = jval("cartesia_api_key")    if v then V5.ca_key = v end
+  v = jval("cartesia_model")      if v and v ~= "" then V5.ca_model = v end
+  v = jval("cartesia_voice_id")   if v then V5.voice_stash.cartesia.voice = v end
+  v = jval("tts_provider")
+  if v == "cartesia" or v == "elevenlabs" then V5.startup_provider = v end
 end
 
 -- Normalise the OpenAI-compatible base URL before it reaches the engine, which
@@ -806,6 +969,8 @@ function V5.keep_stored_credentials()
                           LLM_SETTINGS_PATH, "server_token")
   EL_KEY           = keep("el",     EL_KEY,
                           TTS_SETTINGS_PATH, "elevenlabs_api_key")
+  V5.ca_key        = keep("ca",     V5.ca_key,
+                          TTS_SETTINGS_PATH, "cartesia_api_key")
   V5.cred_cleared = {}
 end
 
@@ -911,8 +1076,16 @@ local function save_config_files()
   f:write('{\n')
   f:write(string.format('  "elevenlabs_api_key": "%s",\n', _json_escape(EL_KEY)))
   f:write(string.format('  "el_model": "%s",\n',           _json_escape(EL_MODEL)))
-  f:write(string.format('  "voice_id": "%s",\n',           _json_escape(VOICE_ID)))
-  f:write(string.format('  "google_tts_key_path": "%s"\n', _json_escape(GOOGLE_TTS_KEY_PATH)))
+  -- voice_id stays the ElevenLabs voice whichever provider is active.
+  f:write(string.format('  "voice_id": "%s",\n',
+                        _json_escape(V5.voice_of("elevenlabs", "voice"))))
+  f:write(string.format('  "google_tts_key_path": "%s",\n', _json_escape(GOOGLE_TTS_KEY_PATH)))
+  -- v0.15.8 (appended, optional): the voice provider + Cartesia settings.
+  f:write(string.format('  "tts_provider": "%s",\n',       _json_escape(V5.tts_provider)))
+  f:write(string.format('  "cartesia_api_key": "%s",\n',   _json_escape(V5.ca_key)))
+  f:write(string.format('  "cartesia_model": "%s",\n',     _json_escape(V5.ca_model)))
+  f:write(string.format('  "cartesia_voice_id": "%s"\n',
+                        _json_escape(V5.voice_of("cartesia", "voice"))))
   f:write('}\n')
   f:close()
 
@@ -1022,6 +1195,9 @@ if APP_DIR == "" then APP_DIR = resolve_default_app_dir() end
 -- written into config/ on the next save).
 load_llm_config()
 load_tts_config()
+-- v0.15.8: the saved provider becomes the active one. Only the two voice
+-- ids swap here; the fetched lists load per provider further down.
+if V5.startup_provider then V5.swap_voice_ids(V5.startup_provider) end
 -- Then fill any credential this tab still lacks from Auto Sync's file, so the
 -- two never disagree and nothing is lost the first time Settings is saved.
 seed_credentials_from_sync()
@@ -1249,7 +1425,7 @@ local STAGE_LABELS = {
   S2a = "Translate",
   S2b = "Review",
   S2c = "Punctuation",
-  S2d = "Match + TTS (ElevenLabs)",
+  S2d = "Match + TTS",
   S3a = "Sync SRT (EN)",
   S3b = "Chunk boundaries",
   S3c = "EN ↔ script mapping",
@@ -1658,6 +1834,53 @@ local function _ensure_lang_font(ctx)
   _ui_font = _lang_fonts[script] or nil
 end
 
+-- v0.15.7: ONE font for the whole window that has Latin AND all 12 target
+-- scripts, so no text anywhere (Sync tab, Tools, chunk lists, logs, combos)
+-- falls back to '?' just because it was not the current language's script.
+-- Windows: Nirmala UI ships with 8.1+ and covers every Indic script here.
+-- macOS: Arial Unicode ships with the OS and covers all 12 (checked against
+-- its cmap). A user-installed Noto Sans is not needed. Returns nil when none
+-- is found (the per-language font still applies where it was used before).
+V5.ALL_SCRIPT_FONTS_WIN = { "C:/Windows/Fonts/Nirmala.ttf",
+                            "C:/Windows/Fonts/NirmalaS.ttf" }
+V5.ALL_SCRIPT_FONTS_MAC = { "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+                            "/Library/Fonts/Arial Unicode.ttf" }
+function V5.global_font(ctx)
+  if V5.gfont ~= nil then return V5.gfont or nil end
+  V5.gfont = false
+  if not (reaper.ImGui_CreateFontFromFile or reaper.ImGui_CreateFont) then
+    return nil
+  end
+  local list = _is_windows() and V5.ALL_SCRIPT_FONTS_WIN
+                              or V5.ALL_SCRIPT_FONTS_MAC
+  for _, p in ipairs(list) do
+    if file_exists(p) then
+      local ok, font
+      if reaper.ImGui_CreateFontFromFile then
+        ok, font = pcall(reaper.ImGui_CreateFontFromFile, p, 0, 0)
+      else
+        ok, font = pcall(reaper.ImGui_CreateFont, p, 14)
+      end
+      if ok and font and pcall(reaper.ImGui_Attach, ctx, font) then
+        V5.gfont = font
+        return font
+      end
+    end
+  end
+  return nil
+end
+
+-- Push the all-scripts font at the window's normal size. Returns true when
+-- pushed (caller pops with _pop_font before ImGui_End).
+function V5.push_global_font(ctx)
+  local font = V5.global_font(ctx)
+  if not font then return false end
+  local size = reaper.ImGui_GetFontSize and reaper.ImGui_GetFontSize(ctx) or 14
+  if pcall(reaper.ImGui_PushFont, ctx, font, size) then return true end
+  if pcall(reaper.ImGui_PushFont, ctx, font) then return true end
+  return false
+end
+
 -- ReaImGui older than 0.9 rasterizes only a fixed Latin glyph range — an
 -- Indic font may load fine and STILL draw every character as '?'. 0.9+
 -- rasterizes glyphs on demand. Cached; used to explain '?' text honestly.
@@ -1687,7 +1910,7 @@ function V5.script_font_warning(ctx)
     msg = "Your ReaImGui version is too old to draw " .. script ..
           " text — it shows every character as '?'. Update it via " ..
           "Extensions → ReaPack → Synchronize packages, then restart REAPER."
-  elseif _ui_font == nil then
+  elseif _ui_font == nil and not V5.gfont then
     msg = "No " .. script .. " font was found on this system — the text " ..
           "shows as '?'. Install \"Noto Sans " .. script ..
           "\" (free, fonts.google.com), then restart REAPER. " ..
@@ -1697,6 +1920,19 @@ function V5.script_font_warning(ctx)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
   reaper.ImGui_TextWrapped(ctx, msg)
   reaper.ImGui_PopStyleColor(ctx)
+  -- v0.15.7: one click instead of a menu hunt — runs ReaPack's own
+  -- "Synchronize packages" action, which updates ReaImGui with the rest.
+  if V5.reaimgui_pre09() and reaper.NamedCommandLookup then
+    local cmd = reaper.NamedCommandLookup("_REAPACK_SYNC")
+    if cmd and cmd ~= 0 then
+      if reaper.ImGui_SmallButton(ctx, 'Update ReaImGui now##fontupd') then
+        reaper.Main_OnCommand(cmd, 0)
+        reaper.MB("ReaPack is updating your extensions. When it finishes, " ..
+                  "restart REAPER so the new ReaImGui loads.",
+                  "Updating ReaImGui", 0)
+      end
+    end
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -2366,6 +2602,14 @@ local function build_engine_cmd(py, opts)
     parts[#parts + 1] = '--test-llm'
     return table.concat(parts, ' ')
   end
+  -- v0.15.8: who speaks (and whose voices get listed) — what Settings show.
+  parts[#parts + 1] = '--tts-provider'
+  parts[#parts + 1] = q((V5.tts_provider == "cartesia") and 'cartesia'
+                        or 'elevenlabs')
+  if V5.tts_provider == "cartesia" and (V5.ca_model or ""):match("%S") then
+    parts[#parts + 1] = '--tts-model'
+    parts[#parts + 1] = q(V5.ca_model)
+  end
   if opts.list_voices then
     -- Voice catalogue for the current language; no audio/voice flags.
     parts[#parts + 1] = '--list-voices'
@@ -2386,6 +2630,13 @@ local function build_engine_cmd(py, opts)
   if opts.audio and opts.audio ~= '' then
     parts[#parts + 1] = '--audio'
     parts[#parts + 1] = q(opts.audio)
+    -- v0.15.7: saved project -> the run's files go to <its folder>/FastSyncs/.
+    -- Only the audio runs (full/translate/dub) write run outputs.
+    local pd = V5.project_dir()
+    if pd then
+      parts[#parts + 1] = '--project-dir'
+      parts[#parts + 1] = q(pd)
+    end
   end
   parts[#parts + 1] = '--language'
   parts[#parts + 1] = q(opts.language or LANGUAGE)
@@ -2801,6 +3052,12 @@ local function preflight_engine(need_llm)
     -- SIGKILLed / crash / logout) plus PID recycling would otherwise make
     -- this guard refuse forever on an unrelated process.
     if pid_is_engine(prev_pid) then
+      if V5.reattach_running and V5.reattach_running() then
+        ui_set_banner("warn",
+          "A run started earlier was still going — it is shown again now. " ..
+          "Wait for it to finish, or press Cancel.")
+        return nil
+      end
       ui_set_banner("error",
         "A previous dub run is still in progress (worker pid " .. prev_pid ..
         ") — Cancel it first, or wait for it to finish before starting " ..
@@ -2902,21 +3159,80 @@ local function launch_engine(cmd, mode, header_lines)
   return true
 end
 
+-- v0.15.7: pick up an engine run that is still going in the background.
+-- Closing the panel mid-run keeps the engine running on purpose, but the
+-- reopened panel used to know nothing about it: no progress, no Cancel, and
+-- every new launch refused with "A previous dub run is still in progress".
+-- Now the panel re-attaches to it — polls its log/done files like any run it
+-- started itself, so Cancel works again. Returns true when a live run was
+-- found and handled.
+function V5.reattach_running()
+  if _ui_phase ~= "setup" then return false end
+  local prev = read_all(PID_PATH)
+  local pid = prev and prev:match("(%d+)")
+  if not pid or not pid_is_engine(pid) then return false end
+  -- run_dub.py writes its own launch line first; the flags name the mode.
+  local head = (read_all(LOG_PATH) or ""):match("^[^\r\n]*") or ""
+  local mode = (head:find("--test-llm", 1, true) and "test_llm")
+               or (head:find("--list-voices", 1, true) and "list_voices")
+               or head:match("%-%-steps%s+(%a+)")
+  -- v0.15.7: a Tools > text-to-speech run (its text file is TTS_<stamp>.txt)
+  -- only needs the wav from the manifest and the text to label the item, so
+  -- it can be finished — and imported — by this reopened window too.
+  local tfile = head:match('%-%-text%-file%s+"([^"]+)"')
+                or head:match('%-%-text%-file%s+(%S+)')
+  if not mode and tfile and basename(tfile):match("^TTS_%d+_%d+%.txt$") then
+    mode = "tts"
+    V5.tts_pending = { text = read_all(tfile) or "" }
+    V5.tts_return_phase = "setup"
+  end
+  if mode ~= "full" and mode ~= "translate" and mode ~= "dub"
+     and mode ~= "test_llm" and mode ~= "list_voices" and mode ~= "tts" then
+    -- A voice-tool run (chunk regen, voice change, preview): applying its
+    -- result needs details this reopened window no longer has. Offer to
+    -- stop it instead of leaving it unreachable.
+    local r = reaper.MB("A voice tool job started before this window was " ..
+      "closed is still running (pid " .. pid .. ").\n\nStop it now?",
+      "Earlier job still running", 4)
+    if r == 6 then _try_cancel_kill() end
+    return true
+  end
+  V5.run_project = reaper.EnumProjects(-1, "")
+  _log_buffer = {}
+  log_append("[panel] Picked up a run that was still going (worker pid " ..
+             pid .. ") — Cancel works again.")
+  _run_mode          = mode
+  _util_return_phase = "setup"
+  _ui_stage_tag      = nil
+  _ui_progress       = 0.02
+  _ui_cancelled      = false
+  _cancel_pending    = false
+  if not UTIL_MODES[mode] then
+    _manifest, _import_summary, _imported = nil, nil, false
+    _review, _resume_manifest = nil, nil
+  end
+  _poll_last_size  = 0       -- re-read the whole log from the start
+  _poll_partial    = ""
+  _poll_start_time = os.time()
+  _ui_phase        = "running"
+  return true
+end
+
 -- v0.4: write the pasted translation where the engine's own outputs live.
--- Mirrors pipeline/config._prepare_output_dir: outputs go to a sibling
--- folder named after the audio file (reused when the audio already sits
--- inside its own output folder). Returns the file path, or nil + banner.
+-- v0.15.7: V5.out_dir_for mirrors pipeline/config._choose_output_dir — the
+-- tidy FastSyncs/02_Script/, or the audio's pre-0.15.7 flat folder when that
+-- already holds its work. The engine picks the same folder back up from
+-- this file's location. Returns the file path, or nil + banner.
 local function write_provided_script(audio, text)
-  local adir = dirname(audio)
-  local base = basename(audio):gsub("%.[^.]+$", "")
-  local out_dir
-  if basename(adir) == base then
-    out_dir = adir
+  local base = V5.audio_base(audio)
+  local out_dir, tidy = V5.out_dir_for(audio)
+  if tidy then
+    V5.make_tidy_root(out_dir)
   else
-    out_dir = adir .. SEP .. base
     reaper.RecursiveCreateDirectory(out_dir, 0)
   end
-  local path = out_dir .. SEP .. base .. "_provided_translation.txt"
+  local path = V5.layout_path(out_dir, "script",
+                              base .. "_provided_translation.txt")
   local f = io.open(path, "wb")
   if not f then
     ui_set_banner("error",
@@ -2938,12 +3254,11 @@ local function start_dub_run()
 
   local audio = LAST_AUDIO
   if audio and audio ~= "" then
-    local base = audio:match("^.-([^\\/]+)%.[^\\/]+$")
-    local out_dir = audio:match("^(.*)[\\/]")
-    if out_dir and base then
-      local edited_path = out_dir .. SEP .. base .. "_translation_edited.txt"
-      os.remove(edited_path)
-    end
+    -- A stale edited translation from an earlier run of this audio must not
+    -- be picked up. v0.15.7: look where the new run will write.
+    local out_dir = V5.out_dir_for(audio)
+    os.remove(V5.layout_path(out_dir, "script",
+      V5.audio_base(audio) .. "_translation_edited.txt", false))
   end
   if audio == "" then
     ui_set_banner("error", "Pick an English audio file first.")
@@ -3014,9 +3329,12 @@ local function start_fetch_voices()
   if not py then return false end
   local cmd = build_engine_cmd(py, { list_voices = true, language = LANGUAGE })
   _util_return_phase = _ui_phase
+  -- v0.15.8: remember whose voices these are, so a provider switch while
+  -- the fetch runs cannot file them under the wrong provider.
+  V5.fetch_provider = V5.tts_provider
   return launch_engine(cmd, "list_voices", {
     "[panel] Python : " .. py,
-    "[panel] Mode   : list ElevenLabs voices (--list-voices)",
+    "[panel] Mode   : list " .. V5.tts_label() .. " voices (--list-voices)",
     "[panel] Lang   : " .. LANGUAGE,
   })
 end
@@ -3096,7 +3414,9 @@ local function enter_review_phase(m)
     tr_buffer   = tr_raw,               -- fallback editor (no-table ReaImGui)
     use_table   = reaper.ImGui_BeginTable ~= nil,
     base        = base,
-    edited_path = (m.out_dir or "") .. SEP .. base .. "_translation_edited.txt",
+    -- v0.15.7: 02_Script/ in a tidy folder, flat in a legacy one.
+    edited_path = V5.layout_path(m.out_dir or "", "script",
+                                 base .. "_translation_edited.txt"),
     dirty       = false,
   }
   -- Remember (and persist) the run's out_dir for the regen section.
@@ -3191,7 +3511,8 @@ function V5.history_write()
 end
 
 -- Record a milestone for the CURRENT project. Newest first, deduped by
--- out_dir (a dub after a review replaces the review entry), capped at 20.
+-- out_dir + audio (a dub after a review replaces the review entry; since
+-- v0.15.7 several audios share one FastSyncs/ out_dir), capped at 20.
 function V5.history_record(status, m)
   m = m or {}
   if (m.out_dir or "") == "" then return end
@@ -3206,7 +3527,8 @@ function V5.history_record(status, m)
   }
   local kept = { e }
   for _, old in ipairs(V5.hist) do
-    if old.out_dir ~= e.out_dir and #kept < 20 then kept[#kept + 1] = old end
+    local same = old.out_dir == e.out_dir and (old.audio or "") == e.audio
+    if not same and #kept < 20 then kept[#kept + 1] = old end
   end
   V5.hist = kept
   V5.history_write()
@@ -3236,10 +3558,12 @@ function V5.ui_history(ctx)
     reaper.ImGui_TextWrapped(ctx, label)
     reaper.ImGui_PopStyleColor(ctx)
 
-    local mpath = (e.out_dir or "") .. SEP .. "engine_done.json"
+    -- v0.15.7: _work/<base>_engine_done.json in a tidy folder, the old
+    -- out_dir/engine_done.json otherwise.
+    local mpath = V5.find_manifest_copy(e.out_dir, e.audio)
     if e.status == "review" then
       if reaper.ImGui_SmallButton(ctx, 'Resume review##h' .. i) then
-        local m = file_exists(mpath) and load_manifest_json(mpath) or nil
+        local m = mpath and load_manifest_json(mpath) or nil
         if m and m.status == "review" then
           local ok, why = enter_review_phase(m)
           if not ok then
@@ -3254,7 +3578,7 @@ function V5.ui_history(ctx)
       reaper.ImGui_SameLine(ctx)
     elseif e.status == "ok" then
       if reaper.ImGui_SmallButton(ctx, 'Import to timeline##h' .. i) then
-        local m = file_exists(mpath) and load_manifest_json(mpath) or nil
+        local m = mpath and load_manifest_json(mpath) or nil
         if m and m.status == "ok" then
           reaper.ShowMessageBox(import_to_timeline(m),
                                 "Import Dub Results", 0)
@@ -3387,10 +3711,33 @@ local function start_regen(item, text, voice_id)
     ui_set_banner("error", "Chunk text is empty — nothing to synthesize.")
     return false
   end
+  -- v0.15.7: a chunk is a line or two. Far more text than one take holds
+  -- means the item carries something else (on 2026-09-27 five selected
+  -- items each carried the WHOLE script, and a redo sent 42,589 characters
+  -- to ElevenLabs). Ask before spending credits on it.
+  local nchars = V5._rg_chars(text)
+  if nchars > V5.ONE_TAKE_CHARS then
+    local r = reaper.MB(string.format(
+      "This would generate %d characters of speech (about %d " .. V5.tts_label() .. " " ..
+      "requests) — far more than a normal chunk. The selected item(s) may " ..
+      "carry the whole script instead of one line.\n\nGenerate anyway?",
+      nchars, math.ceil(nchars / V5.ONE_TAKE_CHARS)),
+      "Unusually long text", 4)
+    if r ~= 6 then
+      ui_set_banner("warn", string.format(
+        "Not generated: %d characters is too long for a chunk. Check the " ..
+        "text stored on the selected item(s).", nchars))
+      return false
+    end
+  end
 
   local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
   local n = math.floor(pos * 1000 + 0.5)
-  local regen_dir = _regen_out_dir .. SEP .. "regen"
+  -- v0.15.7: 03_Voice/Redo/regen/ in a tidy folder; <out_dir>/regen/ in a
+  -- pre-0.15.7 flat one, as before.
+  local regen_dir = V5.is_tidy(_regen_out_dir)
+                    and V5.layout_path(_regen_out_dir, "regen")
+                    or (_regen_out_dir .. SEP .. "regen")
   reaper.RecursiveCreateDirectory(regen_dir, 0)
 
   -- Indic text never travels on argv: it goes through this UTF-8 file.
@@ -3468,8 +3815,67 @@ local function apply_regen_result(wav)
   end
   reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", basename(wav), true)
   V5.set_item_text(item, p.note or "")
-  reaper.Undo_EndBlock("Regenerate dub chunk", -1)
+  -- v0.15.7 "Redo as one voice": the other chunks that were joined into this
+  -- one take are removed, so the new audio is ONE item where they were.
+  local removed = 0
+  for _, g in ipairs(p.merge or {}) do
+    local other = _find_item_by_guid(g)
+    if other and other ~= item then
+      local tr = reaper.GetMediaItem_Track(other)
+      if tr and reaper.DeleteTrackMediaItem(tr, other) then
+        removed = removed + 1
+      end
+    end
+  end
+  reaper.Undo_EndBlock(removed > 0 and "Regenerate chunks as one voice"
+                       or "Regenerate dub chunk", -1)
   reaper.UpdateArrange()
+  return true
+end
+
+-- v0.15.7: redo several chunks as ONE take. ElevenLabs gives every request
+-- its own delivery, so chunks redone one by one can sound like different
+-- speakers. This joins their texts in timeline order, synthesizes them in a
+-- single request (the engine allows ~2800 characters per take for a redo),
+-- and puts the result back as one item at the first chunk's position; the
+-- other selected chunks are removed in the same undo step.
+V5.ONE_TAKE_CHARS = 2800   -- same as the engine's ELEVENLABS_ONE_TAKE_CHARS
+
+function V5.regen_merge_start(items)
+  local list = {}
+  for _, it in ipairs(items or {}) do
+    if it and reaper.ValidatePtr(it, "MediaItem*") then list[#list + 1] = it end
+  end
+  table.sort(list, function(a, b)
+    return reaper.GetMediaItemInfo_Value(a, "D_POSITION")
+         < reaper.GetMediaItemInfo_Value(b, "D_POSITION")
+  end)
+  local texts, guids, seen = {}, {}, {}
+  for _, it in ipairs(list) do
+    local txt = (V5.get_item_text(it) or ""):match("^%s*(.-)%s*$")
+    if txt ~= "" then
+      -- Every selected item is replaced, but the same text is spoken once:
+      -- items that carry identical text (a split item keeps its note on
+      -- every piece) would otherwise be read out several times over.
+      if not seen[txt] then
+        seen[txt] = true
+        texts[#texts + 1] = txt
+      end
+      guids[#guids + 1] = _item_guid(it)
+    end
+  end
+  if #guids < 2 then
+    ui_set_banner("error", "Select at least two chunks that have text stored " ..
+                           "on them to join them into one voice.")
+    return false
+  end
+  local first = _find_item_by_guid(guids[1])
+  -- One take, one voice: the first chunk's own voice choice if it has one,
+  -- else the main voice from Settings.
+  local voice = V5.regen_voice_of[guids[1]] or ""
+  local joined = table.concat(texts, "\n")
+  if not start_regen(first, joined, voice) then return false end
+  if _regen_pending then _regen_pending.merge = guids end
   return true
 end
 
@@ -3765,7 +4171,8 @@ end
 -- pipeline, without manual browsing. A track with exactly ONE untrimmed,
 -- unstretched item plays its source file as-is — use that file directly
 -- (no render). Anything else (multiple items, trims, offsets, play-rate)
--- is rendered to <project media path>/DubSource/ first.
+-- is rendered to FastSyncs/01_Source/ (saved project, v0.15.7) or
+-- <project media path>/DubSource/ (unsaved) first.
 -- Returns (path, nil, rendered_bool) or (nil, reason).
 local function audio_from_track(track)
   local n_items = reaper.CountTrackMediaItems(track)
@@ -3801,7 +4208,11 @@ local function audio_from_track(track)
   local _, tname = reaper.GetSetMediaTrackInfo_String(track, "P_NAME",
                                                       "", false)
   if not tname or tname == "" then tname = "track" end
-  local out_dir = reaper.GetProjectPath("") .. SEP .. "DubSource"
+  -- v0.15.7: saved project -> FastSyncs/01_Source/; unsaved -> the project
+  -- media path's DubSource/, as before.
+  local root = V5.tidy_root(true)
+  local out_dir = root and V5.layout_path(root, "source")
+                  or (reaper.GetProjectPath("") .. SEP .. "DubSource")
   local name_base = _sanitize_filename(tname) .. os.date("_%Y%m%d_%H%M%S")
   local wav, why = render_track_stem(track, out_dir, name_base)
   if not wav then return nil, why end
@@ -3837,8 +4248,11 @@ local function start_voice_change()
   local py = preflight_engine()
   if not py then return false end
 
-  -- Rendered + converted audio go to <project media path>/VoiceChange/.
-  local out_dir = reaper.GetProjectPath("") .. SEP .. "VoiceChange"
+  -- Rendered + converted audio go to FastSyncs/03_Voice/Redo/VoiceChange/
+  -- (v0.15.7) — <project media path>/VoiceChange/ for an unsaved project.
+  local vc_root = V5.tidy_root(true)
+  local out_dir = vc_root and V5.layout_path(vc_root, "voicechange")
+                  or (reaper.GetProjectPath("") .. SEP .. "VoiceChange")
   local name_base = _sanitize_filename(tname) .. os.date("_%Y%m%d_%H%M%S")
 
   local in_wav, why = render_track_stem(track, out_dir, name_base)
@@ -3975,15 +4389,19 @@ local function _finish_run(exit_code)
     elseif m and m.status == "ok" and exit_code == 0 then
       local raw = read_all(DONE_JSON) or ""
       local voices = parse_voices_json(raw)
-      if #voices > 0 then
+      if V5.fetch_provider and V5.fetch_provider ~= V5.tts_provider then
+        ui_set_banner("warn",
+          "The voice provider changed while the voices were loading — " ..
+          "press Fetch voices again.")
+      elseif #voices > 0 then
         _voices = voices
         _voices_language = LANGUAGE
         -- v0.11: keep it for the next panel session too.
         V5.voice_cache_save()
         ui_set_banner("info", string.format(
-          "Fetched %d ElevenLabs voices for %s — pick one in any Voice list " ..
+          "Fetched %d %s voices for %s — pick one in any Voice list " ..
           "(the Tools tab, or ⚙ Settings → Voices).",
-          #voices, LANGUAGE))
+          #voices, V5.tts_label(), LANGUAGE))
       else
         ui_set_banner("warn",
           "Voice fetch finished, but the manifest had no voices — use the " ..
@@ -4332,11 +4750,11 @@ end
 local function _stage_line()
   if _run_mode == "regen"        then return "Regenerating chunk audio (TTS)…" end
   if _run_mode == "test_llm"     then return "Testing LLM connection…" end
-  if _run_mode == "list_voices"  then return "Fetching ElevenLabs voices…" end
-  if _run_mode == "tts"          then return "Generating speech (ElevenLabs)…" end
+  if _run_mode == "list_voices"  then return "Fetching " .. V5.tts_label() .. " voices…" end
+  if _run_mode == "tts"          then return "Generating speech (" .. V5.tts_label() .. ")…" end
   if _run_mode == "preview"      then return "Generating a voice preview…" end
   if _run_mode == "voice_change" then
-    return "Changing track voice (ElevenLabs speech-to-speech)…"
+    return "Changing track voice (" .. V5.tts_label() .. " voice changer)…"
   end
   if not _ui_stage_tag then return "Starting engine…" end
   return string.format("[%s]  %s", _ui_stage_tag,
@@ -4653,6 +5071,21 @@ function V5.ui_regen_multi(ctx, sel)
   _grey_hint(ctx, 'Stops at the first chunk that fails, so a bad voice id or '
                .. 'a dead connection cannot burn credits on the rest. Chunks '
                .. 'already done stay done.')
+
+  -- v0.15.7: the same selection, generated as ONE take in ONE voice.
+  if #sel >= 2 then
+    reaper.ImGui_Dummy(ctx, 0, 6)
+    _ui_begin_disabled(ctx, not can or _ui_phase == "running")
+    if reaper.ImGui_Button(ctx, string.format('Redo as ONE voice  (%d → 1)',
+                                              #sel), 230, 30) and can then
+      V5.regen_merge_start(sel)
+    end
+    _ui_end_disabled(ctx)
+    _grey_hint(ctx, 'Joins the selected chunks into one text and generates it '
+                 .. 'in a single take, so it is the same voice all the way '
+                 .. 'through. The result replaces them as ONE item at the '
+                 .. 'first chunk\'s position (Ctrl/Cmd+Z undoes it).')
+  end
 end
 
 local function ui_regen_section(ctx, default_open)
@@ -5054,12 +5487,22 @@ V5.BOOKMARKS_PATH = SCRIPT_DIR .. SEP .. "voice_bookmarks.json"
 V5.bookmarks      = {}      -- { {id=, name=}, … }
 V5.voice_filter   = {}      -- per-picker search text, keyed by widget id
 
+-- v0.15.8: each voice provider keeps its OWN bookmarks and fetched list —
+-- a Cartesia voice id means nothing to ElevenLabs and vice versa. The
+-- ElevenLabs files keep their old names, so nothing existing moves;
+-- Cartesia gets "<name>_cartesia.json" beside them.
+function V5.provider_file(path)
+  if V5.tts_provider ~= "cartesia" then return path end
+  return (path:gsub("%.json$", "_cartesia.json"))
+end
+
 function V5.bookmarks_load()
-  V5.bookmarks = parse_voices_json(read_all(V5.BOOKMARKS_PATH) or "")
+  V5.bookmarks = parse_voices_json(
+    read_all(V5.provider_file(V5.BOOKMARKS_PATH)) or "")
 end
 
 function V5.bookmarks_save()
-  local f = io.open(V5.BOOKMARKS_PATH, "wb")
+  local f = io.open(V5.provider_file(V5.BOOKMARKS_PATH), "wb")
   if not f then return false end
   f:write('{\n  "voices": [\n')
   for i, v in ipairs(V5.bookmarks) do
@@ -5085,7 +5528,7 @@ end
 V5.VOICE_CACHE_PATH = SCRIPT_DIR .. SEP .. "voice_cache.json"
 
 function V5.voice_cache_load()
-  local raw = read_all(V5.VOICE_CACHE_PATH) or ""
+  local raw = read_all(V5.provider_file(V5.VOICE_CACHE_PATH)) or ""
   local voices = parse_voices_json(raw)
   if #voices == 0 then return end
   _voices = voices
@@ -5094,7 +5537,7 @@ function V5.voice_cache_load()
 end
 
 function V5.voice_cache_save()
-  local f = io.open(V5.VOICE_CACHE_PATH, "wb")
+  local f = io.open(V5.provider_file(V5.VOICE_CACHE_PATH), "wb")
   if not f then return false end
   f:write(string.format('{\n  "language": "%s",\n  "voices": [\n',
                         _json_escape(_voices_language or "")))
@@ -5207,7 +5650,7 @@ function V5.start_voice_preview(voice, text)
     local ok, why = V5.play_wav(last.wav)
     ui_set_banner(ok and "info" or "error", ok and
       ("Replaying the preview of " .. V5.voice_label_for_banner(voice) ..
-       " (no new ElevenLabs call).") or why)
+       " (no new " .. V5.tts_label() .. " call).") or why)
     return ok
   end
 
@@ -5386,7 +5829,7 @@ function V5.ui_voice_picker(ctx, key, cur, label)
   if #_voices == 0 and #V5.bookmarks == 0 then
     _grey_hint(ctx,
       'No voices loaded — "Fetch voices" pulls the catalogue for ' ..
-      (LANGUAGE or '?') .. ' from your ElevenLabs account.')
+      (LANGUAGE or '?') .. ' from your ' .. V5.tts_label() .. ' account.')
   elseif #_voices > 0 and _voices_language ~= ""
          and _voices_language ~= LANGUAGE then
     _grey_hint(ctx, string.format(
@@ -5398,6 +5841,23 @@ end
 
 V5.bookmarks_load()
 V5.voice_cache_load()
+
+-- v0.15.8: switch who speaks. The current provider's voices go to the
+-- stash, the other provider's come back, and its own bookmarks + fetched
+-- list load. One-off picks (Tools tab voice, per-chunk redo voices) are
+-- cleared: they belong to the provider they were picked for.
+function V5.set_tts_provider(provider)
+  if provider ~= "cartesia" then provider = "elevenlabs" end
+  if provider == V5.tts_provider then return end
+  V5.swap_voice_ids(provider)
+  _voices, _voices_language = {}, ""
+  V5.bookmarks = {}
+  V5.bookmarks_load()
+  V5.voice_cache_load()
+  V5.tts_voice, V5.regen_voice = "", ""
+  V5.regen_voice_of = {}
+  V5.preview_last = nil
+end
 
 local function ui_voice_change_section(ctx, default_open)
   local flags = 0
@@ -5411,7 +5871,7 @@ local function ui_voice_change_section(ctx, default_open)
   reaper.ImGui_Indent(ctx, 12)
   _grey_hint(ctx,
     'Re-voice a whole track: it is rendered to a wav, converted to the ' ..
-    'chosen ElevenLabs voice (timing and pacing are kept), and added ' ..
+    'chosen ' .. V5.tts_label() .. ' voice (timing and pacing are kept), and added ' ..
     'back as a new track. The original track is muted, never modified.')
 
   -- Track picker (rebuilt every frame — tracks can change any time).
@@ -5513,6 +5973,21 @@ function V5.tts_import(wav)
   reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", basename(wav), true)
   V5.set_item_text(item, (V5.tts_pending and V5.tts_pending.text) or "")
   reaper.Undo_EndBlock("Import TTS audio", -1)
+  -- v0.15.7: select the new item and bring it into view — it used to land
+  -- on a TTS track that could be scrolled out of sight, and looked like
+  -- nothing had been imported.
+  reaper.SelectAllMediaItems(0, false)
+  reaper.SetMediaItemSelected(item, true)
+  reaper.SetOnlyTrackSelected(tr)
+  reaper.Main_OnCommand(40913, 0)   -- Track: vertical scroll selected into view
+  if reaper.GetSet_ArrangeView2 then
+    local s, e = reaper.GetSet_ArrangeView2(0, false, 0, 0)
+    if s and e and (pos < s or pos > e) then
+      local w = e - s
+      reaper.GetSet_ArrangeView2(0, true, 0, 0, math.max(0, pos - w * 0.1),
+                                 math.max(0, pos - w * 0.1) + w)
+    end
+  end
   reaper.UpdateArrange()
   return true
 end
@@ -5531,7 +6006,9 @@ function V5.start_tts()
       "⚙ Settings → Voices.")
     return false
   end
-  -- Audio lands next to the project, like DubSource/ and VoiceChange/ do.
+  -- Audio lands next to the project, like the track renders do: v0.15.7
+  -- FastSyncs/03_Voice/Redo/TTS/ for a saved project, the media folder's
+  -- TTS/ otherwise.
   local proj = reaper.GetProjectPath("")
   if (proj or "") == "" then
     ui_set_banner("error",
@@ -5539,7 +6016,9 @@ function V5.start_tts()
       "its media folder.")
     return false
   end
-  local dir = proj .. SEP .. "TTS"
+  local tts_root = V5.tidy_root(true)
+  local dir = tts_root and V5.layout_path(tts_root, "tts")
+              or (proj .. SEP .. "TTS")
   reaper.RecursiveCreateDirectory(dir, 0)
 
   -- Indic text never travels on argv: it goes through this UTF-8 file.
@@ -5634,8 +6113,13 @@ function V5.ui_tts_tab(ctx)
   _grey_hint(ctx, 'Leave empty to use the ⚙ Settings voice'
                   .. ((VOICE_ID or "") ~= "" and (' (' .. VOICE_ID .. ')')
                       or ' (none set yet)') .. '.')
-  _grey_hint(ctx, 'Model ' .. (EL_MODEL or '?') ..
-                  '  ·  eleven_v3 detects the language from the text itself.')
+  if V5.tts_provider == "cartesia" then
+    _grey_hint(ctx, 'Cartesia ' .. (V5.ca_model or '?') ..
+                    '  ·  speaks ' .. (LANGUAGE or '?') .. ' (from the Language setting).')
+  else
+    _grey_hint(ctx, 'Model ' .. (EL_MODEL or '?') ..
+                    '  ·  eleven_v3 detects the language from the text itself.')
+  end
 
   reaper.ImGui_Dummy(ctx, 0, 6)
   local voice = ((V5.tts_voice or "") ~= "" and V5.tts_voice) or VOICE_ID
@@ -5698,7 +6182,7 @@ function V5.ui_tools_tab(ctx)
       'its voice) and regenerate just that line. Non-destructive: new files ' ..
       'go to the run\'s regen/ folder.' },
     { 'voice', 'Re-voice a track',
-      'Convert a whole track to a different voice with the ElevenLabs voice ' ..
+      'Convert a whole track to a different voice with the voice ' ..
       'changer. Timing is preserved, so a synced dub stays synced.' },
   })
   if tool ~= V5.tool then
@@ -6043,13 +6527,28 @@ function V5.pane_connection(ctx)
 end
 
 -- ── Voices pane ─────────────────────────────────────────────
--- The ElevenLabs key, the synthesis model, and the default voice every
--- stage falls back to.
+-- Who speaks (ElevenLabs or Cartesia, v0.15.8), the keys, the synthesis
+-- model, and the default voice every stage falls back to.
 function V5.pane_voices(ctx)
   V5.heading(ctx, 'Voices',
-    'Your ElevenLabs key, the synthesis model, and the default voice')
+    'Who speaks, the keys, the synthesis model, and the default voice')
   local rv
   local pw = V5.pw_flags()
+  local cartesia = (V5.tts_provider == "cartesia")
+
+  -- v0.15.8: the provider switch. Everything that speaks follows it: dub
+  -- runs, chunk redo, Text to Speech, Track Voice, Test voice, voice lists.
+  V5.field(ctx, 'Voice provider', 260)
+  _ui_begin_disabled(ctx, _ui_phase == "running")
+  local chg, picked = _ui_combo(ctx, '##ttsprov', V5.tts_label(),
+                                { "ElevenLabs", "Cartesia" })
+  _ui_end_disabled(ctx)
+  if chg and _ui_phase ~= "running" then
+    V5.set_tts_provider(picked == "Cartesia" and "cartesia" or "elevenlabs")
+    cartesia = (V5.tts_provider == "cartesia")
+  end
+  V5.hint(ctx, 'Who speaks the dub, chunk redos, Text to Speech and Track ' ..
+               'Voice. Each provider keeps its own voices and bookmarks.')
 
   V5.field(ctx, 'ElevenLabs key', 260)
   rv, EL_KEY = reaper.ImGui_InputText(ctx, '##elkey', EL_KEY or '', pw)
@@ -6057,26 +6556,46 @@ function V5.pane_voices(ctx)
   if reaper.ImGui_SmallButton(ctx, 'Clear##elk') then
     EL_KEY, V5.cred_cleared.el = '', true
   end
-  V5.hint(ctx, 'Transcription and every voice stage need this key.')
+  V5.hint(ctx, cartesia and
+    'Still needed: transcription always runs on ElevenLabs.' or
+    'Transcription and every voice stage need this key.')
+
+  if cartesia then
+    V5.field(ctx, 'Cartesia key', 260)
+    rv, V5.ca_key = reaper.ImGui_InputText(ctx, '##cakey', V5.ca_key or '', pw)
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Clear##cak') then
+      V5.ca_key, V5.cred_cleared.ca = '', true
+    end
+    V5.hint(ctx, 'From play.cartesia.ai → API keys. Speaks every voice stage.')
+  end
 
   -- Model combo: keep an unknown persisted model visible by prepending it.
+  local models = cartesia and V5.CA_MODELS or EL_MODELS
+  local cur_model = cartesia and V5.ca_model or EL_MODEL
   local model_items = {}
   local known = false
-  for _, mdl in ipairs(EL_MODELS) do
+  for _, mdl in ipairs(models) do
     model_items[#model_items + 1] = mdl
-    if mdl == EL_MODEL then known = true end
+    if mdl == cur_model then known = true end
   end
-  if not known and (EL_MODEL or "") ~= "" then
-    table.insert(model_items, 1, EL_MODEL)
+  if not known and (cur_model or "") ~= "" then
+    table.insert(model_items, 1, cur_model)
   end
   V5.field(ctx, 'Voice model', 260)
-  _, EL_MODEL = _ui_combo(ctx, '##elmodel', EL_MODEL, model_items)
+  if cartesia then
+    _, V5.ca_model = _ui_combo(ctx, '##camodel', V5.ca_model, model_items)
+    V5.hint(ctx, 'Sonic 3.6 is the newest. Cartesia has no Assamese ' ..
+                 'model — Assamese is spoken with the Bengali one.')
+  else
+    _, EL_MODEL = _ui_combo(ctx, '##elmodel', EL_MODEL, model_items)
+  end
 
   reaper.ImGui_Dummy(ctx, 0, 4)
   if reaper.ImGui_Button(ctx, 'Fetch voices', 150, 26) then
     start_fetch_voices()
   end
-  V5.hint(ctx, 'Pulls the ElevenLabs voice catalogue for ' ..
+  V5.hint(ctx, 'Pulls the ' .. V5.tts_label() .. ' voice catalogue for ' ..
                (LANGUAGE or '?') .. ' into the pickers.')
 
   -- v0.7: bookmarks + search, shared with the Tools tab. The manual id field
@@ -6088,8 +6607,8 @@ function V5.pane_voices(ctx)
     reaper.ImGui_Indent(ctx, 12)
     V5.field(ctx, 'Voice id', 260)
     rv, VOICE_ID = reaper.ImGui_InputText(ctx, '##vidmanual', VOICE_ID or '')
-    V5.hint(ctx, 'An ElevenLabs voice id, for a voice that is not in your ' ..
-                 'fetched list. It overrides the picker above.')
+    V5.hint(ctx, 'A ' .. V5.tts_label() .. ' voice id, for a voice that ' ..
+                 'is not in your fetched list. It overrides the picker above.')
     V5.field(ctx, 'Google TTS key', 260)
     rv, GOOGLE_TTS_KEY_PATH = reaper.ImGui_InputText(
       ctx, '##gttskey', GOOGLE_TTS_KEY_PATH or '')
@@ -6117,9 +6636,11 @@ function V5.pane_voices(ctx)
     llm_key_summary = 'openai key ' ..
       (LLM_OPENAI_KEY ~= '' and _mask_key(LLM_OPENAI_KEY) or '(not set)')
   end
-  _grey_hint(ctx, string.format('%s  ·  EL key %s',
+  _grey_hint(ctx, string.format('%s  ·  EL key %s%s',
     llm_key_summary,
-    EL_KEY ~= '' and _mask_key(EL_KEY) or '(not set)'))
+    EL_KEY ~= '' and _mask_key(EL_KEY) or '(not set)',
+    cartesia and ('  ·  Cartesia key ' .. ((V5.ca_key or '') ~= ''
+                  and _mask_key(V5.ca_key) or '(not set)')) or ''))
 end
 
 -- Kept for the setup phase, which still offers the credentials inline behind
@@ -6712,7 +7233,7 @@ function V5.pane_advanced(ctx)
   local cm = V5.segmented(ctx, 'chunkmode', V5.chunk_mode, {
     { 'clause',   'Clause',
       'Default. The voice is generated in long natural stretches, then cut ' ..
-      'at the exact times ElevenLabs reports — at sentence ends, and inside ' ..
+      'at the exact times the voice provider reports — at sentence ends, and inside ' ..
       'a long sentence at its ; : , or dash. That is the granularity the old ' ..
       'pipeline got from cutting at every silence.' },
     { 'sentence', 'Sentence', 'One piece per sentence.' },
@@ -6830,7 +7351,10 @@ function V5.ui_settings_body(ctx)
   _ui_begin_disabled(ctx, locked)
 
   -- Sidebar. A child window so the pane beside it can scroll on its own.
-  if reaper.ImGui_BeginChild(ctx, '##panes', 132, -38) then
+  -- Room under the panes for the Save row (and, inside the main window,
+  -- for the status bar below the tab bar too).
+  local bottom = V5.settings_bottom or 38
+  if reaper.ImGui_BeginChild(ctx, '##panes', 132, -bottom) then
     for _, pane in ipairs(V5.PANES) do
       local on = (V5.settings_pane == pane[1])
       reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),
@@ -6851,7 +7375,7 @@ function V5.ui_settings_body(ctx)
   end
 
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_BeginChild(ctx, '##pane_body', -1, -38) then
+  if reaper.ImGui_BeginChild(ctx, '##pane_body', -1, -bottom) then
     local drawn = false
     for _, pane in ipairs(V5.PANES) do
       if V5.settings_pane == pane[1] then pane[3](ctx); drawn = true end
@@ -6888,8 +7412,11 @@ function V5.ui_settings_body(ctx)
   _ui_end_disabled(ctx)
 end
 
--- Its own top-level window, so it can be moved, resized and closed without
--- disturbing the work surface behind it.
+-- v0.15.7: Settings is a TAB of the main window now (see the tab bar in
+-- main()). As its own top-level window it opened floating on a fresh
+-- machine, had to be dragged around, and docking it into the main window or
+-- a REAPER docker could leave no obvious way back to the other tabs. This
+-- separate window survives only for ReaImGui builds without tab support.
 function V5.ui_settings_window(ctx)
   if not V5.settings_open then return end
   reaper.ImGui_SetNextWindowSize(ctx, 620, 470,
@@ -6924,20 +7451,20 @@ end
 -- One readiness light for the whole app, instead of each tab working it out
 -- again when you press Start.
 function V5.ui_header(ctx)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-  reaper.ImGui_Text(ctx, 'Fast Syncs'
-    .. (V5.APP_VERSION ~= '' and ('  v' .. V5.APP_VERSION) or ''))
-  reaper.ImGui_PopStyleColor(ctx)
-
+  -- v0.15.7: the version moved into the top tab's label.
   local why = V5.llm_creds_error()
   local no_voice_key = (EL_KEY or '') == ''
-  reaper.ImGui_SameLine(ctx, 0, 16)
-  if why or no_voice_key then
+  -- v0.15.8: with Cartesia speaking, its key is needed too.
+  local no_ca_key = V5.tts_provider == "cartesia" and (V5.ca_key or '') == ''
+  if why or no_voice_key or no_ca_key then
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
     reaper.ImGui_Text(ctx, '●  needs setup')
     reaper.ImGui_PopStyleColor(ctx)
-    V5.hint(ctx, why or 'No ElevenLabs key yet — transcription and every ' ..
-                        'voice stage need one. Open settings to add it.')
+    V5.hint(ctx, why or (no_voice_key and
+      'No ElevenLabs key yet — transcription needs one. Open settings ' ..
+      'to add it.') or
+      'No Cartesia key yet — Cartesia is chosen to speak. Open settings ' ..
+      'to add it.')
   else
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55DD77FF)
     reaper.ImGui_Text(ctx, '●  keys ready')
@@ -6947,7 +7474,9 @@ function V5.ui_header(ctx)
   local ww = reaper.ImGui_GetWindowWidth(ctx)
   reaper.ImGui_SameLine(ctx, math.max(220, ww - 122))
   if reaper.ImGui_Button(ctx, '⚙  Settings', 104, 22) then
-    V5.settings_open = not V5.settings_open
+    -- Selects the Settings tab on the next frame (or opens the fallback
+    -- window on a ReaImGui without tabs).
+    V5.settings_open = true
   end
 end
 
@@ -6955,6 +7484,37 @@ end
 -- to print its own version of this.
 function V5.ui_status_bar(ctx)
   reaper.ImGui_Separator(ctx)
+  -- v0.15.7: a job can be started from Tools or Settings, but its Cancel
+  -- lived only on the Dub tab's running screen — from anywhere else a
+  -- runaway job could not be stopped. The Stop button is here, on every tab.
+  if _ui_phase == "running" or V5.regen_queue then
+    local what = ({ regen = "Redoing chunk audio", tts = "Generating speech",
+                    preview = "Making a voice preview", test_llm =
+                    "Testing the connection", list_voices = "Fetching voices",
+                    voice_change = "Changing the voice" })[_run_mode]
+                 or "Dub run"
+    if V5.regen_queue and V5.regen_qstat then
+      what = string.format("Redoing chunks (%d of %d)", math.max(1, V5.regen_qi or 1),
+                           V5.regen_qstat.total or 0)
+    end
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55AAFFFF)
+    reaper.ImGui_Text(ctx, _spinner_glyph() .. '  ' .. what .. '…')
+    reaper.ImGui_PopStyleColor(ctx)
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x883333FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0xAA4444FF)
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x661111FF)
+    if reaper.ImGui_SmallButton(ctx, 'Stop##statusstop') then
+      if _ui_phase == "running" then cancel_engine() end
+      if V5.regen_queue then
+        -- Between two chunks nothing is running: just drop the rest.
+        V5.regen_queue, V5.regen_qi, V5.regen_cur = nil, 0, nil
+        V5.regen_next_due, V5.regen_qstat = nil, nil
+        ui_set_banner("warn", "Chunk batch stopped. Chunks already done stay done.")
+      end
+    end
+    reaper.ImGui_PopStyleColor(ctx, 3)
+  end
   local voice = V5.voice_name(VOICE_ID or '')
   if voice == '' then
     voice = (VOICE_ID or '') ~= '' and 'voice set' or 'no voice'
@@ -6962,7 +7522,9 @@ function V5.ui_status_bar(ctx)
   local parts = {
     LANGUAGE or '?',
     (LLM_MODEL or '') ~= '' and LLM_MODEL or 'no model',
-    (EL_MODEL or '') ~= '' and EL_MODEL or 'eleven_v3',
+    V5.tts_provider == "cartesia"
+      and ('Cartesia ' .. ((V5.ca_model or '') ~= '' and V5.ca_model or 'sonic'))
+      or ((EL_MODEL or '') ~= '' and EL_MODEL or 'eleven_v3'),
     voice,
     FULL_RUN and 'straight through' or 'pauses for review',
     SCRIPT_MODE == 'have' and 'own script' or 'AI translation',
@@ -7346,18 +7908,27 @@ local function main()
     -- Outside the `visible` guard on purpose: a fully off-screen window can
     -- report itself as not visible, which is the case we must still rescue.
     check_offscreen(_ui_ctx)
+    -- v0.15.7: polling moved OUT of the `visible` guard. A panel docked in a
+    -- REAPER docker whose tab is not showing reports not-visible, and runs
+    -- used to freeze there — a finished text-to-speech was never imported
+    -- until the panel was looked at again. None of this draws anything.
+    -- Once per launch, pick up a run the previous window left going in the
+    -- background (closing the panel never stops the engine).
+    if not V5.reattach_checked then
+      V5.reattach_checked = true
+      V5.reattach_running()
+    end
+    if _ui_phase == "running" then poll_engine() end
+    -- v0.15.3: a multi-chunk batch waits here between chunks.
+    V5.regen_queue_tick()
+    -- v0.5: the embedded Auto Sync run polls every frame too — it is
+    -- independent of the dub run and of which tab is showing.
+    if V5.SYNC then V5.SYNC.poll() end
     if visible then
       -- Follow the language combo with a matching Indic font (v0.4).
       _ensure_lang_font(_ui_ctx)
-      -- Poll OUTSIDE the tab bar: the run must keep progressing even
-      -- while the user sits on the Log tab.
-      if _ui_phase == "running" then poll_engine() end
-      -- v0.15.3: a multi-chunk batch waits here between chunks, so it keeps
-      -- moving whichever tab the user is looking at.
-      V5.regen_queue_tick()
-      -- v0.5: the embedded Auto Sync run polls every frame too — it is
-      -- independent of the dub run and of which tab is showing.
-      if V5.SYNC then V5.SYNC.poll() end
+      -- v0.15.7: every piece of text in the window uses the all-scripts font.
+      V5.gfont_pushed = V5.push_global_font(_ui_ctx)
 
       -- v0.13: the Script control on the Dub tab decides where the translated
       -- script comes from, so there is nothing left for the caller to
@@ -7386,36 +7957,66 @@ local function main()
       -- entirely, into the settings window the header opens. What used to be
       -- "Paste Translation" is a Script mode on the Dub tab, and the three
       -- utility tabs are a segmented row inside Tools.
-      V5.ui_header(_ui_ctx)
-      reaper.ImGui_Dummy(_ui_ctx, 0, 2)
-
+      -- v0.15.7: tabs at the very top, like browser/terminal tabs:
+      --   [Fast Syncs vX]  [Log]  [Settings]
+      -- The first holds the work (Dub / Sync / Tools). Log and Settings are
+      -- their own top-level tabs, so you can flip to the log or the settings
+      -- mid-run and back — the run keeps going (it is polled above, outside
+      -- every tab). All three live in ONE window: nothing floats, nothing
+      -- has to be docked, and it looks the same on every machine.
       if reaper.ImGui_BeginTabBar
-         and reaper.ImGui_BeginTabBar(_ui_ctx, '##tabs') then
-        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Dub  ') then
-          render_phase()
-          reaper.ImGui_EndTabItem(_ui_ctx)
+         and reaper.ImGui_BeginTabBar(_ui_ctx, '##toptabs') then
+        local sflags = 0
+        if V5.settings_open and reaper.ImGui_TabItemFlags_SetSelected then
+          sflags = reaper.ImGui_TabItemFlags_SetSelected()
         end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Sync  ') then
-          V5.load_sync()
-          if V5.SYNC then
-            V5.SYNC.render(_ui_ctx, close_window)
-          else
-            reaper.ImGui_Dummy(_ui_ctx, 0, 8)
-            reaper.ImGui_PushStyleColor(_ui_ctx, reaper.ImGui_Col_Text(),
-                                        0xFFAA55FF)
-            reaper.ImGui_TextWrapped(_ui_ctx,
-              V5.sync_err or 'Sync module is not loaded.')
-            reaper.ImGui_PopStyleColor(_ui_ctx)
+        V5.settings_open = false
+        local main_label = 'Fast Syncs'
+          .. (V5.APP_VERSION ~= '' and ('  v' .. V5.APP_VERSION) or '')
+          .. '###top_main'
+        if reaper.ImGui_BeginTabItem(_ui_ctx, main_label) then
+          V5.ui_header(_ui_ctx)
+          reaper.ImGui_Dummy(_ui_ctx, 0, 2)
+          if reaper.ImGui_BeginTabBar(_ui_ctx, '##tabs') then
+            if reaper.ImGui_BeginTabItem(_ui_ctx, '  Dub  ') then
+              render_phase()
+              reaper.ImGui_EndTabItem(_ui_ctx)
+            end
+            if reaper.ImGui_BeginTabItem(_ui_ctx, '  Sync  ') then
+              V5.load_sync()
+              if V5.SYNC then
+                V5.SYNC.render(_ui_ctx, close_window)
+              else
+                reaper.ImGui_Dummy(_ui_ctx, 0, 8)
+                reaper.ImGui_PushStyleColor(_ui_ctx, reaper.ImGui_Col_Text(),
+                                            0xFFAA55FF)
+                reaper.ImGui_TextWrapped(_ui_ctx,
+                  V5.sync_err or 'Sync module is not loaded.')
+                reaper.ImGui_PopStyleColor(_ui_ctx)
+              end
+              reaper.ImGui_EndTabItem(_ui_ctx)
+            end
+            if reaper.ImGui_BeginTabItem(_ui_ctx, '  Tools  ') then
+              reaper.ImGui_Dummy(_ui_ctx, 0, 4)
+              V5.ui_tools_tab(_ui_ctx)
+              reaper.ImGui_EndTabItem(_ui_ctx)
+            end
+            reaper.ImGui_EndTabBar(_ui_ctx)
           end
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Tools  ') then
-          reaper.ImGui_Dummy(_ui_ctx, 0, 4)
-          V5.ui_tools_tab(_ui_ctx)
+        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Log  ###top_log') then
+          _render_log_child(_ui_ctx, -34)
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
-        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Log  ') then
-          _render_log_child(_ui_ctx, -34)
+        if reaper.ImGui_BeginTabItem(_ui_ctx, '  Settings  ###top_settings',
+                                     nil, sflags) then
+          V5.settings_bottom = 72   -- Save row + the status bar below
+          reaper.ImGui_PushStyleVar(_ui_ctx, reaper.ImGui_StyleVar_ItemSpacing(), 10.0, 8.0)
+          reaper.ImGui_PushStyleVar(_ui_ctx, reaper.ImGui_StyleVar_FrameRounding(), 6.0)
+          reaper.ImGui_PushStyleVar(_ui_ctx, reaper.ImGui_StyleVar_FramePadding(), 8.0, 5.0)
+          V5.ui_settings_body(_ui_ctx)
+          reaper.ImGui_PopStyleVar(_ui_ctx, 3)
           reaper.ImGui_EndTabItem(_ui_ctx)
         end
         reaper.ImGui_EndTabBar(_ui_ctx)
@@ -7423,12 +8024,14 @@ local function main()
         -- Very old ReaImGui without tab support: the Dub phase inline. The
         -- settings window is a separate window, so the header's gear still
         -- reaches everything else.
+        V5.no_tabs = true
         render_phase()
         if _ui_phase == "setup" then ui_settings_section(_ui_ctx, false) end
         if _ui_phase == "running" then _render_log_child(_ui_ctx, -34) end
       end
 
       V5.ui_status_bar(_ui_ctx)
+      if V5.gfont_pushed then _pop_font(_ui_ctx); V5.gfont_pushed = false end
       -- Inside the guard: see the note in V5.ui_settings_window. NoCollapse
       -- hid this one, but Begin() also reports not-visible for a fully
       -- clipped window — the very case check_offscreen() above exists for.
@@ -7437,7 +8040,10 @@ local function main()
 
     -- v0.13: the settings window is a sibling top-level window, drawn after
     -- the main one closes its Begin/End pair. Closing it never closes the app.
-    V5.ui_settings_window(_ui_ctx)
+    if V5.no_tabs then
+      V5.settings_bottom = 38
+      V5.ui_settings_window(_ui_ctx)
+    end
 
     V5.pump_peaks()
 

@@ -39,7 +39,8 @@ from .config import (_urlopen, ELEVENLABS_CHUNK_CHARS, ELEVENLABS_TTS_MODEL,
                      ELEVENLABS_TTS_VOICE_ID, CONFIG_DIR, PYDUB_AVAILABLE,
                      TTS_DEFAULT_LANGUAGE, TTS_DEFAULT_VOICE, TTS_LANGUAGES,
                      TTS_MAX_BYTES, _AudioSegment, _strip_emotion_tags,
-                     load_tts_settings, _env_int, _run_parallel)
+                     load_tts_settings, _env_int, _run_parallel,
+                     pieces_base)
 from .stt import _sanitize_voice_id
 
 try:
@@ -184,7 +185,9 @@ def synthesize_tts(text: str, output_path: str, status_cb=None,
         audio_encoding=_tts_module.AudioEncoding.LINEAR16,
         sample_rate_hertz=_SAMPLE_RATE)
 
-    out_base         = os.path.splitext(output_path)[0]
+    # v0.15.7: side files go to 03_Voice/pieces/ in a tidy folder, next to
+    # the wav otherwise (same names either way) — see config.pieces_base.
+    out_base         = pieces_base(output_path)
     chunk_log_path   = out_base + "_chunks.txt"
     chunk_log_lines  = [
         f"TTS Chunk Log — {os.path.basename(output_path)}",
@@ -582,11 +585,13 @@ def _el_retry_after(exc: BaseException) -> float:
         return 0.0
 
 
-def _el_send(make_request, timeout: float) -> bytes:
+def _el_send(make_request, timeout: float, label: str = "ElevenLabs") -> bytes:
     """POST through config._urlopen (TLS policy unchanged) and return the
     body, retrying transient failures per _EL_RETRY_DELAYS. The request is
     rebuilt per attempt (urlopen consumes a Request). The final failure is
-    re-raised unchanged, so the callers' HTTP-code messages still apply."""
+    re-raised unchanged, so the callers' HTTP-code messages still apply.
+    *label* only names the provider in the retry log line (the Cartesia
+    module reuses this retry loop)."""
     attempts = len(_EL_RETRY_DELAYS) + 1
     for attempt in range(1, attempts + 1):
         try:
@@ -605,7 +610,7 @@ def _el_send(make_request, timeout: float) -> bytes:
                     pass
             else:
                 detail = type(e).__name__
-            _tts_log(f"ElevenLabs request failed ({detail}), attempt "
+            _tts_log(f"{label} request failed ({detail}), attempt "
                      f"{attempt}/{attempts} — retrying in {delay:g}s")
             time.sleep(delay)
 
@@ -750,7 +755,8 @@ def ensure_writable_output(output_path: str, status_cb=None) -> str:
 def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
                                voice_id: str = ELEVENLABS_TTS_VOICE_ID,
                                model_id: str = ELEVENLABS_TTS_MODEL,
-                               status_cb=None, workers: int = None) -> str:
+                               status_cb=None, workers: int = None,
+                               max_chars: int = None) -> str:
     """
     Convert target-language text to speech using ElevenLabs TTS (eleven_v3
     auto-detects the script) and save to output_path (MP3 decoded to WAV via
@@ -802,10 +808,13 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
     if status_cb:
         status_cb("TTS: Connecting to ElevenLabs…")
 
-    chunks = _split_text_for_elevenlabs(text)
+    # max_chars: a caller may ask for bigger requests (chunk redo = one take).
+    chunks = _split_text_for_elevenlabs(
+        text, max_chars or ELEVENLABS_CHUNK_CHARS)
     total  = len(chunks)
 
-    out_base        = os.path.splitext(output_path)[0]
+    # v0.15.7: tidy folder -> 03_Voice/pieces/, else next to the wav.
+    out_base        = pieces_base(output_path)
     chunk_log_path  = out_base + "_chunks.txt"
     chunk_log_lines = [
         f"TTS Chunk Log — {os.path.basename(output_path)}",
@@ -966,7 +975,9 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
             "pydub not installed — the sectioned TTS mode needs it to "
             "assemble the per-section audio. Re-run the setup script.")
 
-    out_base = os.path.splitext(output_path)[0]
+    # v0.15.7: tidy folder -> 03_Voice/pieces/ (the _sec_/_str_ reuse
+    # sidecars too), else next to the wav — see config.pieces_base.
+    out_base = pieces_base(output_path)
     log_lines = [
         f"TTS Section Log — {os.path.basename(output_path)}",
         "Platform : ElevenLabs (sectioned, request-stitched)",
@@ -1282,7 +1293,9 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
             "assemble the audio. Re-run the setup script.")
 
     groups = _pack_sentences(sentences, ELEVENLABS_CHUNK_CHARS)
-    out_base = os.path.splitext(output_path)[0]
+    # v0.15.7: tidy folder -> 03_Voice/pieces/ (the _sec_/_str_ reuse
+    # sidecars too), else next to the wav — see config.pieces_base.
+    out_base = pieces_base(output_path)
     log_lines = [
         f"TTS Sentence Log — {os.path.basename(output_path)}",
         "Platform : ElevenLabs (/with-timestamps, sentence-timed)",
