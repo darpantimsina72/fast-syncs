@@ -235,6 +235,14 @@ REQUIRED_FUNCTIONS = [
     "place_pieces",                  # windowed placement + bounded borrowing
     "synthesize_sentences_elevenlabs",# /with-timestamps TTS -> spans per sentence
     "_split_script_into_units",      # v0.12 clause-level units
+    # v0.15.8 second voice provider (pipeline/tts_cartesia.py + tts_backend.py)
+    "voice_backend",                 # provider switch: ElevenLabs | Cartesia
+    "tts_provider",                  # which one the settings / CLI chose
+    "synthesize_tts_cartesia",       # whole-script TTS -> WAV
+    "synthesize_sections_cartesia",  # per-section TTS -> one wav + spans
+    "synthesize_sentences_cartesia", # word-timed TTS -> spans per sentence
+    "voice_change_cartesia",         # Cartesia voice changer
+    "_fetch_cartesia_voices",        # Cartesia voice catalogue
 ]
 REQUIRED_ATTRIBUTES = [
     "GEMINI_DEFAULT_MODEL",
@@ -286,6 +294,16 @@ def _parse_args():
                          "the account voice catalogue when omitted")
     ap.add_argument("--el-model", default="eleven_v3",
                     help="ElevenLabs TTS model id (default: eleven_v3)")
+    ap.add_argument("--tts-provider", dest="tts_provider", default=None,
+                    choices=["elevenlabs", "cartesia"],
+                    help="v0.15.8: who speaks — ElevenLabs or Cartesia. "
+                         "Default: 'tts_provider' in config/tts_settings.json, "
+                         "else elevenlabs. Transcription always stays on "
+                         "ElevenLabs.")
+    ap.add_argument("--tts-model", dest="tts_model", default=None,
+                    help="v0.15.8: Cartesia model id (e.g. sonic-3.6) when "
+                         "the provider is cartesia. Default: "
+                         "'cartesia_model' in config/tts_settings.json.")
     ap.add_argument("--steps", default="full",
                     choices=["full", "translate", "dub"],
                     help="Pipeline scope: 'full' = one shot (v0.1), "
@@ -542,9 +560,11 @@ def _import_pipeline():
     if ENGINE_DIR not in sys.path:
         sys.path.insert(0, ENGINE_DIR)
     from pipeline import (config, stt, srt_tools, llm, tts, sync, tm,  # noqa: F401
-                          match, agent_splitter, agent_aligner)
+                          match, agent_splitter, agent_aligner,
+                          tts_cartesia, tts_backend)
     ns = types.SimpleNamespace()
-    for mod in (config, stt, srt_tools, llm, tts, sync, match, agent_splitter, agent_aligner):
+    for mod in (config, stt, srt_tools, llm, tts, sync, match, agent_splitter,
+                agent_aligner, tts_cartesia, tts_backend):
         for name, value in vars(mod).items():
             if name.startswith("__"):
                 continue
@@ -709,8 +729,11 @@ def _remember_tts(base, fingerprint, tts_path):
         pass            # a missing sidecar only costs one re-synthesis
 
 
-def _resolve_voice(pl, api_key, language, cli_voice_id):
+def _resolve_voice(pl, vb, language, cli_voice_id):
     """Return (voice_id, description) for the dub voice.
+
+    *vb* is the voice backend (pl.voice_backend): its sanitizer and voice
+    catalogue belong to whichever provider Settings chose (v0.15.8).
 
     Explicit --voice-id wins (after strict sanitizing). Otherwise the
     account's voice catalogue is fetched with the pipeline helper, which
@@ -721,8 +744,15 @@ def _resolve_voice(pl, api_key, language, cli_voice_id):
     Hard-errors with a clear message when no voice is available.
     """
     if cli_voice_id and cli_voice_id.strip():
-        vid = pl._sanitize_voice_id(cli_voice_id)
+        vid = vb.sanitize(cli_voice_id)
         if not vid:
+            if vb.provider == "cartesia":
+                raise RuntimeError(
+                    f"--voice-id {cli_voice_id!r} is not a Cartesia voice "
+                    "id (expected a UUID like "
+                    "a0e99841-438c-4a64-b679-ae501e7d6091). An ElevenLabs "
+                    "voice does not work with Cartesia — pick a Cartesia "
+                    "voice in Settings.")
             raise RuntimeError(
                 f"--voice-id {cli_voice_id!r} is not a valid ElevenLabs "
                 "voice_id (expected a 12-40 char alphanumeric token, not a "
@@ -730,16 +760,16 @@ def _resolve_voice(pl, api_key, language, cli_voice_id):
         return vid, "from --voice-id"
 
     _note(f"No --voice-id given — resolving a {language} voice from the "
-          "ElevenLabs account catalogue…")
+          f"{vb.label} account catalogue…")
     try:
-        voices = pl._fetch_voices_for_language(api_key, language)
+        voices = vb.fetch_voices(language)
     except Exception as e:
-        raise RuntimeError(f"Could not fetch the ElevenLabs voice "
+        raise RuntimeError(f"Could not fetch the {vb.label} voice "
                            f"catalogue: {e}")
     if not voices:
         raise RuntimeError(
-            "The ElevenLabs account has no voices — add a voice on "
-            "elevenlabs.io or pass --voice-id explicitly.")
+            f"The {vb.label} account has no voices — add one there "
+            "or pass --voice-id explicitly.")
     matched = [v for v in voices
                if str(v.get("label", "")).startswith("✦")]
     if matched:
@@ -748,16 +778,21 @@ def _resolve_voice(pl, api_key, language, cli_voice_id):
                                   f"'{pick['name']}'")
     pick = voices[0]
     _note(f"WARNING: no voice on the account advertises {language} support "
-          f"— falling back to the first account voice '{pick['name']}' "
-          "(eleven_v3 auto-detects the language from the text).")
+          f"— falling back to the first account voice '{pick['name']}'.")
     return pick["voice_id"], f"auto-fallback: first account voice '{pick['name']}'"
 
 
-def _load_pipeline_and_keys(args, need_llm=True):
+def _load_pipeline_and_keys(args, need_llm=True, need_stt=True,
+                            need_tts=True):
     """Import + symbol-check the pipeline and fail fast on credentials.
 
-    Returns (pl, api_key). The LLM check is skipped for --regen-chunk,
-    which never calls a language model.
+    Returns (pl, api_key, vb): api_key is the ElevenLabs key (transcription
+    always runs on ElevenLabs Scribe), vb the voice backend of the provider
+    Settings chose (pl.voice_backend). The LLM check is skipped for
+    --regen-chunk / --voice-change, which never call a language model.
+    need_stt=False: no transcription in this mode, so a Cartesia-only
+    install needs no ElevenLabs key. need_tts=False: nothing is spoken
+    (translate stage), so a missing voice key does not block it.
     """
     _note("Importing pipeline modules…")
     pl = _import_pipeline()
@@ -765,16 +800,27 @@ def _load_pipeline_and_keys(args, need_llm=True):
     if args.language not in pl.TTS_LANGUAGES:
         raise RuntimeError(f"Language {args.language!r} is not registered "
                            "in the pipeline's TTS_LANGUAGES table.")
+    provider = pl.tts_provider(getattr(args, "tts_provider", None))
+    api_key = ""
+    if need_stt or provider == "elevenlabs":
+        try:
+            api_key = pl._get_api_key()
+        except Exception as e:
+            raise RuntimeError(f"ElevenLabs API key unavailable: {e}")
     try:
-        api_key = pl._get_api_key()
+        vb = pl.voice_backend(provider, el_model=args.el_model,
+                              ca_model=getattr(args, "tts_model", None),
+                              sts_model=getattr(args, "sts_model", None),
+                              need_key=need_tts)
     except Exception as e:
-        raise RuntimeError(f"ElevenLabs API key unavailable: {e}")
+        raise RuntimeError(f"{provider.capitalize()} API key unavailable: {e}")
+    _note(f"Voice provider: {vb.label} (model {vb.model}).")
     if need_llm:
         try:
             pl._validate_llm_config()
         except Exception as e:
             raise RuntimeError(f"LLM provider not usable: {e}")
-    return pl, api_key
+    return pl, api_key, vb
 
 
 def _project_dir(args):
@@ -989,6 +1035,7 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     audio_path = ctx["audio_path"]
     script_text = ctx["script_text"]
     grain = _chunk_mode(args)
+    vb = ctx["vb"]
 
     # English cue list: reuse the persisted sync SRT (dub resume) or build
     # it from the in-memory S1a transcription (full run).
@@ -1043,11 +1090,11 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
                     f"{len(unmatched_en)} English cue(s) without a "
                     "translation.")
         _say("S2d", f"Synthesizing {len(texts)} sentence(s) in long "
-                    f"stretches ({language}, voice {voice_id}, model "
-                    f"{args.el_model})…")
-        tts_path, spans = pl.synthesize_sentences_elevenlabs(
-            texts, tts_path, api_key=api_key, voice_id=voice_id,
-            model_id=args.el_model, status_cb=lambda m: _say("S2d", m))
+                    f"stretches ({language}, {vb.label} voice {voice_id}, "
+                    f"model {vb.model})…")
+        tts_path, spans = vb.sentences(
+            texts, tts_path, voice_id, language,
+            lambda m: _say("S2d", m))
     else:
         chunks = pl.build_chunks(sections, unmatched_tr, sentences)
         if not chunks:
@@ -1059,10 +1106,10 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
                     f"{len(unmatched_en)} English cue(s) without a "
                     "translation.")
         _say("S2d", f"Synthesizing {len(chunks)} section(s) ({language}, "
-                    f"voice {voice_id}, model {args.el_model})…")
-        tts_path, spans = pl.synthesize_sections_elevenlabs(
-            texts, tts_path, api_key=api_key, voice_id=voice_id,
-            model_id=args.el_model, status_cb=lambda m: _say("S2d", m))
+                    f"{vb.label} voice {voice_id}, model {vb.model})…")
+        tts_path, spans = vb.sections(
+            texts, tts_path, voice_id, language,
+            lambda m: _say("S2d", m))
     manifest["tts_wav"] = tts_path
     _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)} "
                 f"({len(spans)} piece span(s)).")
@@ -1160,6 +1207,7 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     out_dir = ctx["out_dir"]
     audio_path = ctx["audio_path"]
     script_text = ctx["script_text"]
+    vb = ctx["vb"]
 
     # ── [S2d] Step-4 emotion enrichment + TTS (ElevenLabs, single voice) ───
     # Single-voice only: a saved per-paragraph speaker voice map (which the
@@ -1184,7 +1232,13 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     # the tags for its non-ElevenLabs Google TTS path, which this engine
     # does not have). Best-effort: on any LLM failure the original text
     # comes back unchanged.
-    if _emotion_enabled(args):
+    if _emotion_enabled(args) and vb.provider == "cartesia":
+        # The Step-4 tags ([calm], [pause]…) are an ElevenLabs v3 feature;
+        # Cartesia would have them stripped anyway, so skip the paid pass.
+        tts_text = script_text
+        _say("S2d", "Emotion enrichment skipped — its tags are an "
+                    "ElevenLabs feature and Cartesia does not use them.")
+    elif _emotion_enabled(args):
         _say("S2d", f"Step-4 emotion enrichment on {gemini_model}…")
         # strict=True: ANY failure here stops the run. This is the last free
         # moment before the ElevenLabs spend, and every sync mode still needs
@@ -1204,7 +1258,11 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     # usual culprit — the same audio and the same transcription are already
     # on disk, and redoing them buys nothing but a second bill.
     te_srt_path = _out(pl, ctx, "work", "_sync_te.srt")
-    fingerprint = _dub_fingerprint(tts_text, voice_id, args.el_model)
+    # ElevenLabs keeps its old fingerprint input (the bare model id) so a
+    # wav made before v0.15.8 is still reused; Cartesia is namespaced.
+    fingerprint = _dub_fingerprint(
+        tts_text, voice_id,
+        vb.model if vb.provider == "elevenlabs" else "cartesia:" + vb.model)
     # <base>_tts_state.json lives with the TTS pieces (03_Voice/pieces/ in a
     # tidy folder, flat in a legacy one).
     state_base = _out(pl, ctx, "pieces", "")
@@ -1215,16 +1273,14 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
                     "same voice, same model: "
                     f"{os.path.basename(tts_path)}")
     else:
-        _say("S2d", f"Synthesizing {language} speech (voice {voice_id}, "
-                    f"model {args.el_model})…")
+        _say("S2d", f"Synthesizing {language} speech ({vb.label} voice "
+                    f"{voice_id}, model {vb.model})…")
         tts_path = pl.layout_path(
             out_dir, "voice", pl._tts_output_name(language, audio_path, "_tts"))
         # synthesize_tts_elevenlabs may divert to a "-2" name when the previous
         # wav is still locked (open REAPER project) — use the returned path.
-        tts_path = pl.synthesize_tts_elevenlabs(
-            tts_text, tts_path, api_key=api_key, voice_id=voice_id,
-            model_id=args.el_model,
-            status_cb=lambda m: _say("S2d", m))
+        tts_path = vb.whole(tts_text, tts_path, voice_id, language,
+                            lambda m: _say("S2d", m))
         _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)}")
     manifest["tts_wav"] = tts_path
 
@@ -1435,12 +1491,13 @@ def _begin_run(args, manifest):
     manifest["language"] = args.language
     if not os.path.isfile(audio_path):
         raise RuntimeError(f"Audio file not found: {audio_path}")
-    pl, api_key = _load_pipeline_and_keys(args, need_llm=True)
+    pl, api_key, vb = _load_pipeline_and_keys(
+        args, need_llm=True, need_tts=(args.steps != "translate"))
     # _llm_provider_label(), not GEMINI_DEFAULT_MODEL: the constant is the
     # Gemini default and says nothing about the provider this install actually
     # calls, so a gateway run used to advertise "gemini-2.5-pro" in its log.
     _note(f"Pipeline loaded. LLM: {pl._llm_provider_label()}; "
-          f"TTS model: {args.el_model}.")
+          f"TTS: {vb.label} {vb.model}.")
     _roles = getattr(pl, "_llm_role_overrides_label", None)
     if callable(_roles) and _roles():
         _note(f"Per-stage model overrides: {_roles()}")
@@ -1451,7 +1508,7 @@ def _begin_run(args, manifest):
     if args.steps in ("full", "dub") or not args.provided_script:
         _preflight_prompts(pl, args)
         _preflight_llm(pl)
-    return pl, api_key, {"audio_path": audio_path}
+    return pl, api_key, {"audio_path": audio_path, "vb": vb}
 
 
 def _run_full(args, manifest):
@@ -1459,7 +1516,7 @@ def _run_full(args, manifest):
     pl, api_key, ctx = _begin_run(args, manifest)
     # Resolve the dub voice up-front so a bad voice fails before any
     # expensive transcription/translation work happens.
-    voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
+    voice_id, voice_how = _resolve_voice(pl, ctx["vb"], args.language,
                                          args.voice_id)
     _note(f"Dub voice: {voice_id} ({voice_how})")
     _stage_translate(pl, args, api_key, manifest, ctx)
@@ -1551,7 +1608,7 @@ def _run_dub(args, manifest):
     ok manifest at the end.
     """
     pl, api_key, ctx = _begin_run(args, manifest)
-    voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
+    voice_id, voice_how = _resolve_voice(pl, ctx["vb"], args.language,
                                          args.voice_id)
     _note(f"Dub voice: {voice_id} ({voice_how})")
 
@@ -1633,9 +1690,10 @@ def _run_regen(args, manifest):
     if not text:
         raise RuntimeError(f"--text-file is empty: {text_path}")
 
-    pl, api_key = _load_pipeline_and_keys(args, need_llm=False)
+    pl, api_key, vb = _load_pipeline_and_keys(args, need_llm=False,
+                                              need_stt=False)
     _require_ffmpeg(pl, hard=True)
-    voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
+    voice_id, voice_how = _resolve_voice(pl, vb, args.language,
                                          args.voice_id)
     _note(f"Regen voice: {voice_id} ({voice_how})")
 
@@ -1652,18 +1710,17 @@ def _run_regen(args, manifest):
     if out_parent:
         os.makedirs(out_parent, exist_ok=True)
 
-    _say("S2d", f"Regenerating chunk ({len(text)} chars, voice {voice_id}, "
-                f"model {args.el_model})…")
+    _say("S2d", f"Regenerating chunk ({len(text)} chars, {vb.label} voice "
+                f"{voice_id}, model {vb.model})…")
     # A locked --out-wav (previous regen still loaded in REAPER) diverts to
     # a "-2" name; the panel applies whatever path the manifest reports.
-    out_wav = pl.synthesize_tts_elevenlabs(
-        text, out_wav, api_key=api_key, voice_id=voice_id,
-        model_id=args.el_model,
-        status_cb=lambda m: _say("S2d", m),
+    out_wav = vb.whole(
+        text, out_wav, voice_id, args.language,
+        lambda m: _say("S2d", m),
         # v0.15.7: one request for the whole text when it fits, so a redo of
         # several joined chunks is one take in one voice (separate requests
         # drift apart in tone).
-        max_chars=getattr(pl, "ELEVENLABS_ONE_TAKE_CHARS", None))
+        max_chars=vb.one_take_chars)
     manifest["regen_wav"] = out_wav
     _say("S2d", f"Regen chunk saved: {os.path.basename(out_wav)}")
 
@@ -1682,20 +1739,19 @@ def _run_voice_change(args, manifest):
         raise RuntimeError(f"--in-wav not found: {in_wav}")
     out_wav = os.path.abspath(os.path.expanduser(args.out_wav))
 
-    pl, api_key = _load_pipeline_and_keys(args, need_llm=False)
+    pl, api_key, vb = _load_pipeline_and_keys(args, need_llm=False,
+                                              need_stt=False)
     _require_ffmpeg(pl, hard=True)
-    voice_id, voice_how = _resolve_voice(pl, api_key, args.language,
+    voice_id, voice_how = _resolve_voice(pl, vb, args.language,
                                          args.voice_id)
-    _note(f"Voice-change target voice: {voice_id} ({voice_how})")
+    _note(f"Voice-change target voice: {voice_id} ({voice_how}, "
+          f"{vb.label})")
 
     # Same lock hazard as the dub outputs: a previous vc wav still loaded in
     # an open REAPER project would fail the save AFTER the STS credits are
     # spent — divert to a "-2" name up front instead.
     out_wav = pl.ensure_writable_output(out_wav, status_cb=lambda m: _note(m))
-    pl.voice_change_elevenlabs(
-        in_wav, out_wav, api_key=api_key, voice_id=voice_id,
-        model_id=args.sts_model,
-        status_cb=lambda m: _note(m))
+    vb.voice_change(in_wav, out_wav, voice_id, lambda m: _note(m))
     manifest["vc_wav"] = out_wav
     _note(f"Voice-changed audio saved: {os.path.basename(out_wav)}")
 
@@ -1759,10 +1815,10 @@ def _run_list_voices(args, manifest):
     if args.language not in pl.TTS_LANGUAGES:
         raise RuntimeError(f"Language {args.language!r} is not registered "
                            "in the pipeline's TTS_LANGUAGES table.")
-    api_key = pl._get_api_key()
-    _note(f"Fetching the ElevenLabs voice catalogue ({args.language})…")
-    voices = pl._fetch_voices_for_language(api_key, args.language,
-                                           force_refresh=True)
+    vb = pl.voice_backend(args.tts_provider, el_model=args.el_model,
+                          ca_model=args.tts_model)
+    _note(f"Fetching the {vb.label} voice catalogue ({args.language})…")
+    voices = vb.fetch_voices(args.language, force_refresh=True)
     manifest["voices"] = [{"id": v["voice_id"], "name": v["name"]}
                           for v in voices]
     _note(f"{len(manifest['voices'])} voice(s) fetched.")

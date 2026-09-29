@@ -136,6 +136,14 @@ local V5 = {
   settings_open = false,     -- v0.15.7: "select the Settings tab next frame"
   settings_pane = "connection",
   tool          = "tts",     -- Tools tab: tts | regen | voice
+  -- v0.15.8: second voice provider (ElevenLabs | Cartesia). The ACTIVE
+  -- provider's voices live in the old variables (VOICE_ID, VC_VOICE_ID,
+  -- the fetched list); the other provider's wait in voice_stash until
+  -- V5.set_tts_provider() swaps them back. Transcription stays ElevenLabs.
+  tts_provider  = "elevenlabs",
+  ca_key        = "",
+  ca_model      = "sonic-3.6",
+  voice_stash   = { elevenlabs = {}, cartesia = {} },
 }
 
 -- An UNSAVED project has no filename to hash, and every one of them used to
@@ -636,6 +644,35 @@ for ui, js in pairs(PROVIDER_TO_JSON) do PROVIDER_FROM_JSON[js] = ui end
 -- ElevenLabs model choices (contract v0.3).
 local EL_MODELS = { "eleven_v3", "eleven_multilingual_v2",
                     "eleven_turbo_v2_5", "eleven_flash_v2_5" }
+-- v0.15.8: Cartesia model choices (engine: config.CARTESIA_TTS_MODELS).
+V5.CA_MODELS = { "sonic-3.6", "sonic-3.5", "sonic-3", "sonic-latest" }
+V5.PROVIDER_LABEL = { elevenlabs = "ElevenLabs", cartesia = "Cartesia" }
+
+-- Label of the provider that speaks right now ("ElevenLabs" / "Cartesia").
+function V5.tts_label()
+  return V5.PROVIDER_LABEL[V5.tts_provider] or "ElevenLabs"
+end
+
+-- A provider's voice of one kind ("voice" = default voice, "vc" = track
+-- voice-change target), wherever it currently lives.
+function V5.voice_of(provider, kind)
+  if provider == V5.tts_provider then
+    if kind == "vc" then return VC_VOICE_ID or "" end
+    return VOICE_ID or ""
+  end
+  return (V5.voice_stash[provider] or {})[kind] or ""
+end
+
+-- Swap only the two voice ids. The fetched list / bookmarks are swapped by
+-- V5.set_tts_provider(), defined further down next to their loaders.
+function V5.swap_voice_ids(provider)
+  if provider == V5.tts_provider then return end
+  V5.voice_stash[V5.tts_provider] = { voice = VOICE_ID or "",
+                                      vc = VC_VOICE_ID or "" }
+  local n = V5.voice_stash[provider] or {}
+  VOICE_ID, VC_VOICE_ID = n.voice or "", n.vc or ""
+  V5.tts_provider = provider
+end
 
 local function load_settings()
   local content = read_all(PANEL_SETTINGS_PATH)
@@ -661,6 +698,7 @@ local function load_settings()
   v = jval("el_model")    if v and v ~= "" then EL_MODEL   = v end
   v = jval("last_audio")  if v then LAST_AUDIO = v end
   v = jval("vc_voice_id") if v then VC_VOICE_ID = v end
+  v = jval("ca_vc_voice_id") if v then V5.voice_stash.cartesia.vc = v end
   v = jval("script_mode")
   if v == "auto" or v == "have" then SCRIPT_MODE = v end
   local b = json_field(content, "full_run")
@@ -699,7 +737,10 @@ local function save_settings()
   f:write(string.format('  "language": "%s",\n',   je(LANGUAGE)))
   f:write(string.format('  "full_run": %s,\n',     FULL_RUN and 'true' or 'false'))
   f:write(string.format('  "script_mode": "%s",\n', je(SCRIPT_MODE)))
-  f:write(string.format('  "vc_voice_id": "%s",\n', je(VC_VOICE_ID)))
+  f:write(string.format('  "vc_voice_id": "%s",\n',
+                        je(V5.voice_of("elevenlabs", "vc"))))
+  f:write(string.format('  "ca_vc_voice_id": "%s",\n',
+                        je(V5.voice_of("cartesia", "vc"))))
   -- v0.13 UI state: reveals stay open across launches for power users, and
   -- the Tools/Settings panes reopen where they were left.
   local adv_keys = {}
@@ -774,6 +815,12 @@ local function load_tts_config()
   v = jval("el_model")            if v and v ~= "" then EL_MODEL = v end
   v = jval("voice_id")            if v then VOICE_ID = v end
   v = jval("google_tts_key_path") if v then GOOGLE_TTS_KEY_PATH = v end
+  -- v0.15.8 Cartesia fields (absent in older files = ElevenLabs, as before).
+  v = jval("cartesia_api_key")    if v then V5.ca_key = v end
+  v = jval("cartesia_model")      if v and v ~= "" then V5.ca_model = v end
+  v = jval("cartesia_voice_id")   if v then V5.voice_stash.cartesia.voice = v end
+  v = jval("tts_provider")
+  if v == "cartesia" or v == "elevenlabs" then V5.startup_provider = v end
 end
 
 -- Normalise the OpenAI-compatible base URL before it reaches the engine, which
@@ -922,6 +969,8 @@ function V5.keep_stored_credentials()
                           LLM_SETTINGS_PATH, "server_token")
   EL_KEY           = keep("el",     EL_KEY,
                           TTS_SETTINGS_PATH, "elevenlabs_api_key")
+  V5.ca_key        = keep("ca",     V5.ca_key,
+                          TTS_SETTINGS_PATH, "cartesia_api_key")
   V5.cred_cleared = {}
 end
 
@@ -1027,8 +1076,16 @@ local function save_config_files()
   f:write('{\n')
   f:write(string.format('  "elevenlabs_api_key": "%s",\n', _json_escape(EL_KEY)))
   f:write(string.format('  "el_model": "%s",\n',           _json_escape(EL_MODEL)))
-  f:write(string.format('  "voice_id": "%s",\n',           _json_escape(VOICE_ID)))
-  f:write(string.format('  "google_tts_key_path": "%s"\n', _json_escape(GOOGLE_TTS_KEY_PATH)))
+  -- voice_id stays the ElevenLabs voice whichever provider is active.
+  f:write(string.format('  "voice_id": "%s",\n',
+                        _json_escape(V5.voice_of("elevenlabs", "voice"))))
+  f:write(string.format('  "google_tts_key_path": "%s",\n', _json_escape(GOOGLE_TTS_KEY_PATH)))
+  -- v0.15.8 (appended, optional): the voice provider + Cartesia settings.
+  f:write(string.format('  "tts_provider": "%s",\n',       _json_escape(V5.tts_provider)))
+  f:write(string.format('  "cartesia_api_key": "%s",\n',   _json_escape(V5.ca_key)))
+  f:write(string.format('  "cartesia_model": "%s",\n',     _json_escape(V5.ca_model)))
+  f:write(string.format('  "cartesia_voice_id": "%s"\n',
+                        _json_escape(V5.voice_of("cartesia", "voice"))))
   f:write('}\n')
   f:close()
 
@@ -1138,6 +1195,9 @@ if APP_DIR == "" then APP_DIR = resolve_default_app_dir() end
 -- written into config/ on the next save).
 load_llm_config()
 load_tts_config()
+-- v0.15.8: the saved provider becomes the active one. Only the two voice
+-- ids swap here; the fetched lists load per provider further down.
+if V5.startup_provider then V5.swap_voice_ids(V5.startup_provider) end
 -- Then fill any credential this tab still lacks from Auto Sync's file, so the
 -- two never disagree and nothing is lost the first time Settings is saved.
 seed_credentials_from_sync()
@@ -1365,7 +1425,7 @@ local STAGE_LABELS = {
   S2a = "Translate",
   S2b = "Review",
   S2c = "Punctuation",
-  S2d = "Match + TTS (ElevenLabs)",
+  S2d = "Match + TTS",
   S3a = "Sync SRT (EN)",
   S3b = "Chunk boundaries",
   S3c = "EN ↔ script mapping",
@@ -2542,6 +2602,14 @@ local function build_engine_cmd(py, opts)
     parts[#parts + 1] = '--test-llm'
     return table.concat(parts, ' ')
   end
+  -- v0.15.8: who speaks (and whose voices get listed) — what Settings show.
+  parts[#parts + 1] = '--tts-provider'
+  parts[#parts + 1] = q((V5.tts_provider == "cartesia") and 'cartesia'
+                        or 'elevenlabs')
+  if V5.tts_provider == "cartesia" and (V5.ca_model or ""):match("%S") then
+    parts[#parts + 1] = '--tts-model'
+    parts[#parts + 1] = q(V5.ca_model)
+  end
   if opts.list_voices then
     -- Voice catalogue for the current language; no audio/voice flags.
     parts[#parts + 1] = '--list-voices'
@@ -3261,9 +3329,12 @@ local function start_fetch_voices()
   if not py then return false end
   local cmd = build_engine_cmd(py, { list_voices = true, language = LANGUAGE })
   _util_return_phase = _ui_phase
+  -- v0.15.8: remember whose voices these are, so a provider switch while
+  -- the fetch runs cannot file them under the wrong provider.
+  V5.fetch_provider = V5.tts_provider
   return launch_engine(cmd, "list_voices", {
     "[panel] Python : " .. py,
-    "[panel] Mode   : list ElevenLabs voices (--list-voices)",
+    "[panel] Mode   : list " .. V5.tts_label() .. " voices (--list-voices)",
     "[panel] Lang   : " .. LANGUAGE,
   })
 end
@@ -3647,7 +3718,7 @@ local function start_regen(item, text, voice_id)
   local nchars = V5._rg_chars(text)
   if nchars > V5.ONE_TAKE_CHARS then
     local r = reaper.MB(string.format(
-      "This would generate %d characters of speech (about %d ElevenLabs " ..
+      "This would generate %d characters of speech (about %d " .. V5.tts_label() .. " " ..
       "requests) — far more than a normal chunk. The selected item(s) may " ..
       "carry the whole script instead of one line.\n\nGenerate anyway?",
       nchars, math.ceil(nchars / V5.ONE_TAKE_CHARS)),
@@ -4318,15 +4389,19 @@ local function _finish_run(exit_code)
     elseif m and m.status == "ok" and exit_code == 0 then
       local raw = read_all(DONE_JSON) or ""
       local voices = parse_voices_json(raw)
-      if #voices > 0 then
+      if V5.fetch_provider and V5.fetch_provider ~= V5.tts_provider then
+        ui_set_banner("warn",
+          "The voice provider changed while the voices were loading — " ..
+          "press Fetch voices again.")
+      elseif #voices > 0 then
         _voices = voices
         _voices_language = LANGUAGE
         -- v0.11: keep it for the next panel session too.
         V5.voice_cache_save()
         ui_set_banner("info", string.format(
-          "Fetched %d ElevenLabs voices for %s — pick one in any Voice list " ..
+          "Fetched %d %s voices for %s — pick one in any Voice list " ..
           "(the Tools tab, or ⚙ Settings → Voices).",
-          #voices, LANGUAGE))
+          #voices, V5.tts_label(), LANGUAGE))
       else
         ui_set_banner("warn",
           "Voice fetch finished, but the manifest had no voices — use the " ..
@@ -4675,11 +4750,11 @@ end
 local function _stage_line()
   if _run_mode == "regen"        then return "Regenerating chunk audio (TTS)…" end
   if _run_mode == "test_llm"     then return "Testing LLM connection…" end
-  if _run_mode == "list_voices"  then return "Fetching ElevenLabs voices…" end
-  if _run_mode == "tts"          then return "Generating speech (ElevenLabs)…" end
+  if _run_mode == "list_voices"  then return "Fetching " .. V5.tts_label() .. " voices…" end
+  if _run_mode == "tts"          then return "Generating speech (" .. V5.tts_label() .. ")…" end
   if _run_mode == "preview"      then return "Generating a voice preview…" end
   if _run_mode == "voice_change" then
-    return "Changing track voice (ElevenLabs speech-to-speech)…"
+    return "Changing track voice (" .. V5.tts_label() .. " voice changer)…"
   end
   if not _ui_stage_tag then return "Starting engine…" end
   return string.format("[%s]  %s", _ui_stage_tag,
@@ -5412,12 +5487,22 @@ V5.BOOKMARKS_PATH = SCRIPT_DIR .. SEP .. "voice_bookmarks.json"
 V5.bookmarks      = {}      -- { {id=, name=}, … }
 V5.voice_filter   = {}      -- per-picker search text, keyed by widget id
 
+-- v0.15.8: each voice provider keeps its OWN bookmarks and fetched list —
+-- a Cartesia voice id means nothing to ElevenLabs and vice versa. The
+-- ElevenLabs files keep their old names, so nothing existing moves;
+-- Cartesia gets "<name>_cartesia.json" beside them.
+function V5.provider_file(path)
+  if V5.tts_provider ~= "cartesia" then return path end
+  return (path:gsub("%.json$", "_cartesia.json"))
+end
+
 function V5.bookmarks_load()
-  V5.bookmarks = parse_voices_json(read_all(V5.BOOKMARKS_PATH) or "")
+  V5.bookmarks = parse_voices_json(
+    read_all(V5.provider_file(V5.BOOKMARKS_PATH)) or "")
 end
 
 function V5.bookmarks_save()
-  local f = io.open(V5.BOOKMARKS_PATH, "wb")
+  local f = io.open(V5.provider_file(V5.BOOKMARKS_PATH), "wb")
   if not f then return false end
   f:write('{\n  "voices": [\n')
   for i, v in ipairs(V5.bookmarks) do
@@ -5443,7 +5528,7 @@ end
 V5.VOICE_CACHE_PATH = SCRIPT_DIR .. SEP .. "voice_cache.json"
 
 function V5.voice_cache_load()
-  local raw = read_all(V5.VOICE_CACHE_PATH) or ""
+  local raw = read_all(V5.provider_file(V5.VOICE_CACHE_PATH)) or ""
   local voices = parse_voices_json(raw)
   if #voices == 0 then return end
   _voices = voices
@@ -5452,7 +5537,7 @@ function V5.voice_cache_load()
 end
 
 function V5.voice_cache_save()
-  local f = io.open(V5.VOICE_CACHE_PATH, "wb")
+  local f = io.open(V5.provider_file(V5.VOICE_CACHE_PATH), "wb")
   if not f then return false end
   f:write(string.format('{\n  "language": "%s",\n  "voices": [\n',
                         _json_escape(_voices_language or "")))
@@ -5565,7 +5650,7 @@ function V5.start_voice_preview(voice, text)
     local ok, why = V5.play_wav(last.wav)
     ui_set_banner(ok and "info" or "error", ok and
       ("Replaying the preview of " .. V5.voice_label_for_banner(voice) ..
-       " (no new ElevenLabs call).") or why)
+       " (no new " .. V5.tts_label() .. " call).") or why)
     return ok
   end
 
@@ -5744,7 +5829,7 @@ function V5.ui_voice_picker(ctx, key, cur, label)
   if #_voices == 0 and #V5.bookmarks == 0 then
     _grey_hint(ctx,
       'No voices loaded — "Fetch voices" pulls the catalogue for ' ..
-      (LANGUAGE or '?') .. ' from your ElevenLabs account.')
+      (LANGUAGE or '?') .. ' from your ' .. V5.tts_label() .. ' account.')
   elseif #_voices > 0 and _voices_language ~= ""
          and _voices_language ~= LANGUAGE then
     _grey_hint(ctx, string.format(
@@ -5756,6 +5841,23 @@ end
 
 V5.bookmarks_load()
 V5.voice_cache_load()
+
+-- v0.15.8: switch who speaks. The current provider's voices go to the
+-- stash, the other provider's come back, and its own bookmarks + fetched
+-- list load. One-off picks (Tools tab voice, per-chunk redo voices) are
+-- cleared: they belong to the provider they were picked for.
+function V5.set_tts_provider(provider)
+  if provider ~= "cartesia" then provider = "elevenlabs" end
+  if provider == V5.tts_provider then return end
+  V5.swap_voice_ids(provider)
+  _voices, _voices_language = {}, ""
+  V5.bookmarks = {}
+  V5.bookmarks_load()
+  V5.voice_cache_load()
+  V5.tts_voice, V5.regen_voice = "", ""
+  V5.regen_voice_of = {}
+  V5.preview_last = nil
+end
 
 local function ui_voice_change_section(ctx, default_open)
   local flags = 0
@@ -5769,7 +5871,7 @@ local function ui_voice_change_section(ctx, default_open)
   reaper.ImGui_Indent(ctx, 12)
   _grey_hint(ctx,
     'Re-voice a whole track: it is rendered to a wav, converted to the ' ..
-    'chosen ElevenLabs voice (timing and pacing are kept), and added ' ..
+    'chosen ' .. V5.tts_label() .. ' voice (timing and pacing are kept), and added ' ..
     'back as a new track. The original track is muted, never modified.')
 
   -- Track picker (rebuilt every frame — tracks can change any time).
@@ -6011,8 +6113,13 @@ function V5.ui_tts_tab(ctx)
   _grey_hint(ctx, 'Leave empty to use the ⚙ Settings voice'
                   .. ((VOICE_ID or "") ~= "" and (' (' .. VOICE_ID .. ')')
                       or ' (none set yet)') .. '.')
-  _grey_hint(ctx, 'Model ' .. (EL_MODEL or '?') ..
-                  '  ·  eleven_v3 detects the language from the text itself.')
+  if V5.tts_provider == "cartesia" then
+    _grey_hint(ctx, 'Cartesia ' .. (V5.ca_model or '?') ..
+                    '  ·  speaks ' .. (LANGUAGE or '?') .. ' (from the Language setting).')
+  else
+    _grey_hint(ctx, 'Model ' .. (EL_MODEL or '?') ..
+                    '  ·  eleven_v3 detects the language from the text itself.')
+  end
 
   reaper.ImGui_Dummy(ctx, 0, 6)
   local voice = ((V5.tts_voice or "") ~= "" and V5.tts_voice) or VOICE_ID
@@ -6075,7 +6182,7 @@ function V5.ui_tools_tab(ctx)
       'its voice) and regenerate just that line. Non-destructive: new files ' ..
       'go to the run\'s regen/ folder.' },
     { 'voice', 'Re-voice a track',
-      'Convert a whole track to a different voice with the ElevenLabs voice ' ..
+      'Convert a whole track to a different voice with the voice ' ..
       'changer. Timing is preserved, so a synced dub stays synced.' },
   })
   if tool ~= V5.tool then
@@ -6420,13 +6527,28 @@ function V5.pane_connection(ctx)
 end
 
 -- ── Voices pane ─────────────────────────────────────────────
--- The ElevenLabs key, the synthesis model, and the default voice every
--- stage falls back to.
+-- Who speaks (ElevenLabs or Cartesia, v0.15.8), the keys, the synthesis
+-- model, and the default voice every stage falls back to.
 function V5.pane_voices(ctx)
   V5.heading(ctx, 'Voices',
-    'Your ElevenLabs key, the synthesis model, and the default voice')
+    'Who speaks, the keys, the synthesis model, and the default voice')
   local rv
   local pw = V5.pw_flags()
+  local cartesia = (V5.tts_provider == "cartesia")
+
+  -- v0.15.8: the provider switch. Everything that speaks follows it: dub
+  -- runs, chunk redo, Text to Speech, Track Voice, Test voice, voice lists.
+  V5.field(ctx, 'Voice provider', 260)
+  _ui_begin_disabled(ctx, _ui_phase == "running")
+  local chg, picked = _ui_combo(ctx, '##ttsprov', V5.tts_label(),
+                                { "ElevenLabs", "Cartesia" })
+  _ui_end_disabled(ctx)
+  if chg and _ui_phase ~= "running" then
+    V5.set_tts_provider(picked == "Cartesia" and "cartesia" or "elevenlabs")
+    cartesia = (V5.tts_provider == "cartesia")
+  end
+  V5.hint(ctx, 'Who speaks the dub, chunk redos, Text to Speech and Track ' ..
+               'Voice. Each provider keeps its own voices and bookmarks.')
 
   V5.field(ctx, 'ElevenLabs key', 260)
   rv, EL_KEY = reaper.ImGui_InputText(ctx, '##elkey', EL_KEY or '', pw)
@@ -6434,26 +6556,46 @@ function V5.pane_voices(ctx)
   if reaper.ImGui_SmallButton(ctx, 'Clear##elk') then
     EL_KEY, V5.cred_cleared.el = '', true
   end
-  V5.hint(ctx, 'Transcription and every voice stage need this key.')
+  V5.hint(ctx, cartesia and
+    'Still needed: transcription always runs on ElevenLabs.' or
+    'Transcription and every voice stage need this key.')
+
+  if cartesia then
+    V5.field(ctx, 'Cartesia key', 260)
+    rv, V5.ca_key = reaper.ImGui_InputText(ctx, '##cakey', V5.ca_key or '', pw)
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Clear##cak') then
+      V5.ca_key, V5.cred_cleared.ca = '', true
+    end
+    V5.hint(ctx, 'From play.cartesia.ai → API keys. Speaks every voice stage.')
+  end
 
   -- Model combo: keep an unknown persisted model visible by prepending it.
+  local models = cartesia and V5.CA_MODELS or EL_MODELS
+  local cur_model = cartesia and V5.ca_model or EL_MODEL
   local model_items = {}
   local known = false
-  for _, mdl in ipairs(EL_MODELS) do
+  for _, mdl in ipairs(models) do
     model_items[#model_items + 1] = mdl
-    if mdl == EL_MODEL then known = true end
+    if mdl == cur_model then known = true end
   end
-  if not known and (EL_MODEL or "") ~= "" then
-    table.insert(model_items, 1, EL_MODEL)
+  if not known and (cur_model or "") ~= "" then
+    table.insert(model_items, 1, cur_model)
   end
   V5.field(ctx, 'Voice model', 260)
-  _, EL_MODEL = _ui_combo(ctx, '##elmodel', EL_MODEL, model_items)
+  if cartesia then
+    _, V5.ca_model = _ui_combo(ctx, '##camodel', V5.ca_model, model_items)
+    V5.hint(ctx, 'Sonic 3.6 is the newest. Cartesia has no Assamese ' ..
+                 'model — Assamese is spoken with the Bengali one.')
+  else
+    _, EL_MODEL = _ui_combo(ctx, '##elmodel', EL_MODEL, model_items)
+  end
 
   reaper.ImGui_Dummy(ctx, 0, 4)
   if reaper.ImGui_Button(ctx, 'Fetch voices', 150, 26) then
     start_fetch_voices()
   end
-  V5.hint(ctx, 'Pulls the ElevenLabs voice catalogue for ' ..
+  V5.hint(ctx, 'Pulls the ' .. V5.tts_label() .. ' voice catalogue for ' ..
                (LANGUAGE or '?') .. ' into the pickers.')
 
   -- v0.7: bookmarks + search, shared with the Tools tab. The manual id field
@@ -6465,8 +6607,8 @@ function V5.pane_voices(ctx)
     reaper.ImGui_Indent(ctx, 12)
     V5.field(ctx, 'Voice id', 260)
     rv, VOICE_ID = reaper.ImGui_InputText(ctx, '##vidmanual', VOICE_ID or '')
-    V5.hint(ctx, 'An ElevenLabs voice id, for a voice that is not in your ' ..
-                 'fetched list. It overrides the picker above.')
+    V5.hint(ctx, 'A ' .. V5.tts_label() .. ' voice id, for a voice that ' ..
+                 'is not in your fetched list. It overrides the picker above.')
     V5.field(ctx, 'Google TTS key', 260)
     rv, GOOGLE_TTS_KEY_PATH = reaper.ImGui_InputText(
       ctx, '##gttskey', GOOGLE_TTS_KEY_PATH or '')
@@ -6494,9 +6636,11 @@ function V5.pane_voices(ctx)
     llm_key_summary = 'openai key ' ..
       (LLM_OPENAI_KEY ~= '' and _mask_key(LLM_OPENAI_KEY) or '(not set)')
   end
-  _grey_hint(ctx, string.format('%s  ·  EL key %s',
+  _grey_hint(ctx, string.format('%s  ·  EL key %s%s',
     llm_key_summary,
-    EL_KEY ~= '' and _mask_key(EL_KEY) or '(not set)'))
+    EL_KEY ~= '' and _mask_key(EL_KEY) or '(not set)',
+    cartesia and ('  ·  Cartesia key ' .. ((V5.ca_key or '') ~= ''
+                  and _mask_key(V5.ca_key) or '(not set)')) or ''))
 end
 
 -- Kept for the setup phase, which still offers the credentials inline behind
@@ -7089,7 +7233,7 @@ function V5.pane_advanced(ctx)
   local cm = V5.segmented(ctx, 'chunkmode', V5.chunk_mode, {
     { 'clause',   'Clause',
       'Default. The voice is generated in long natural stretches, then cut ' ..
-      'at the exact times ElevenLabs reports — at sentence ends, and inside ' ..
+      'at the exact times the voice provider reports — at sentence ends, and inside ' ..
       'a long sentence at its ; : , or dash. That is the granularity the old ' ..
       'pipeline got from cutting at every silence.' },
     { 'sentence', 'Sentence', 'One piece per sentence.' },
@@ -7310,12 +7454,17 @@ function V5.ui_header(ctx)
   -- v0.15.7: the version moved into the top tab's label.
   local why = V5.llm_creds_error()
   local no_voice_key = (EL_KEY or '') == ''
-  if why or no_voice_key then
+  -- v0.15.8: with Cartesia speaking, its key is needed too.
+  local no_ca_key = V5.tts_provider == "cartesia" and (V5.ca_key or '') == ''
+  if why or no_voice_key or no_ca_key then
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
     reaper.ImGui_Text(ctx, '●  needs setup')
     reaper.ImGui_PopStyleColor(ctx)
-    V5.hint(ctx, why or 'No ElevenLabs key yet — transcription and every ' ..
-                        'voice stage need one. Open settings to add it.')
+    V5.hint(ctx, why or (no_voice_key and
+      'No ElevenLabs key yet — transcription needs one. Open settings ' ..
+      'to add it.') or
+      'No Cartesia key yet — Cartesia is chosen to speak. Open settings ' ..
+      'to add it.')
   else
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55DD77FF)
     reaper.ImGui_Text(ctx, '●  keys ready')
@@ -7373,7 +7522,9 @@ function V5.ui_status_bar(ctx)
   local parts = {
     LANGUAGE or '?',
     (LLM_MODEL or '') ~= '' and LLM_MODEL or 'no model',
-    (EL_MODEL or '') ~= '' and EL_MODEL or 'eleven_v3',
+    V5.tts_provider == "cartesia"
+      and ('Cartesia ' .. ((V5.ca_model or '') ~= '' and V5.ca_model or 'sonic'))
+      or ((EL_MODEL or '') ~= '' and EL_MODEL or 'eleven_v3'),
     voice,
     FULL_RUN and 'straight through' or 'pauses for review',
     SCRIPT_MODE == 'have' and 'own script' or 'AI translation',

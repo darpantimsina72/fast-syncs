@@ -585,11 +585,13 @@ def _el_retry_after(exc: BaseException) -> float:
         return 0.0
 
 
-def _el_send(make_request, timeout: float) -> bytes:
+def _el_send(make_request, timeout: float, label: str = "ElevenLabs") -> bytes:
     """POST through config._urlopen (TLS policy unchanged) and return the
     body, retrying transient failures per _EL_RETRY_DELAYS. The request is
     rebuilt per attempt (urlopen consumes a Request). The final failure is
-    re-raised unchanged, so the callers' HTTP-code messages still apply."""
+    re-raised unchanged, so the callers' HTTP-code messages still apply.
+    *label* only names the provider in the retry log line (the Cartesia
+    module reuses this retry loop)."""
     attempts = len(_EL_RETRY_DELAYS) + 1
     for attempt in range(1, attempts + 1):
         try:
@@ -608,7 +610,7 @@ def _el_send(make_request, timeout: float) -> bytes:
                     pass
             else:
                 detail = type(e).__name__
-            _tts_log(f"ElevenLabs request failed ({detail}), attempt "
+            _tts_log(f"{label} request failed ({detail}), attempt "
                      f"{attempt}/{attempts} — retrying in {delay:g}s")
             time.sleep(delay)
 

@@ -492,6 +492,20 @@ ELEVENLABS_TTS_MODELS   = {
     "eleven_turbo_v2_5":      "Turbo v2.5 — fast",
     "eleven_flash_v2_5":      "Flash v2.5 — fastest",
 }
+# ─── Cartesia TTS settings (v0.15.8) ──────────────────────────────────────────
+# Second voice provider, chosen with "tts_provider" in config/tts_settings.json
+# (or --tts-provider). Transcription (Scribe) stays on ElevenLabs either way:
+# only speech synthesis, the voice changer and the voice list switch.
+TTS_PROVIDER_ELEVENLABS = "elevenlabs"
+TTS_PROVIDER_CARTESIA   = "cartesia"
+TTS_PROVIDERS           = (TTS_PROVIDER_ELEVENLABS, TTS_PROVIDER_CARTESIA)
+CARTESIA_TTS_MODEL      = "sonic-3.6"
+CARTESIA_TTS_MODELS     = {
+    "sonic-3.6":    "Sonic 3.6 — newest (adds Odia)",
+    "sonic-3.5":    "Sonic 3.5",
+    "sonic-3":      "Sonic 3",
+    "sonic-latest": "Sonic latest — always the newest",
+}
 TTS_PLATFORMS           = ["ElevenLabs", "Google TTS"]
 TTS_DEFAULT_PLATFORM    = "ElevenLabs"
 
@@ -561,11 +575,18 @@ AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".aiff", ".aif", ".m4a"}
 # config/tts_settings.json schema (contract v0.3):
 #     {"elevenlabs_api_key": "...", "el_model": "...",
 #      "voice_id": "...", "google_tts_key_path": "..."}
+# v0.15.8 appends (optional, additive — an old file simply means ElevenLabs):
+#     {"tts_provider": "elevenlabs" | "cartesia", "cartesia_api_key": "...",
+#      "cartesia_model": "sonic-3.6", "cartesia_voice_id": "<uuid>"}
 _TTS_SETTINGS_DEFAULTS: Dict[str, str] = {
     "elevenlabs_api_key":  "",
     "el_model":            ELEVENLABS_TTS_MODEL,
     "voice_id":            "",
     "google_tts_key_path": "",
+    "tts_provider":        TTS_PROVIDER_ELEVENLABS,
+    "cartesia_api_key":    "",
+    "cartesia_model":      CARTESIA_TTS_MODEL,
+    "cartesia_voice_id":   "",
 }
 
 

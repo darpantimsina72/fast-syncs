@@ -171,6 +171,13 @@ def main() -> int:
                          "the account's voice catalogue when omitted)")
     ap.add_argument("--el-model", default="eleven_v3",
                     help="ElevenLabs TTS model id (default: eleven_v3)")
+    ap.add_argument("--tts-provider", dest="tts_provider", default=None,
+                    choices=["elevenlabs", "cartesia"],
+                    help="v0.15.8: voice provider (default: the Settings "
+                         "choice in config/tts_settings.json)")
+    ap.add_argument("--tts-model", dest="tts_model", default=None,
+                    help="v0.15.8: Cartesia model id when the provider is "
+                         "cartesia (default: from config/tts_settings.json)")
     ap.add_argument("--steps", default="full",
                     choices=["full", "translate", "dub"],
                     help="Pipeline scope: 'full' = one shot, 'translate' = "
@@ -380,6 +387,12 @@ def main() -> int:
                 cmd += ["--project-dir", args.project_dir]
         if args.voice_id and args.voice_id.strip():
             cmd += ["--voice-id", args.voice_id.strip()]
+        # v0.15.8: every mode speaks (or lists voices) through the chosen
+        # provider, so forward the choice for all of them.
+        if args.tts_provider:
+            cmd += ["--tts-provider", args.tts_provider]
+        if args.tts_model and args.tts_model.strip():
+            cmd += ["--tts-model", args.tts_model.strip()]
         # Tri-state emotion pass-through: only forward an explicit choice so
         # the engine's own default resolution (settings file, then ON) holds.
         if args.emotion is True:

@@ -6,6 +6,43 @@ The original app is READ-ONLY — never modify or write anything inside
 is only a one-time extraction source and optional key-migration source, never
 a runtime dependency.
 
+## v0.15.8 — Cartesia as a second voice provider
+
+Settings → Voices has a **Voice provider** switch: ElevenLabs (default) or
+Cartesia. Every stage that SPEAKS follows it — dub runs (all chunk modes),
+chunk redo, Tools > Text to speech, Test voice, Track voice change, Fetch
+voices. **Transcription (Scribe) always stays on ElevenLabs**, so the
+ElevenLabs key is still required for full / translate / dub runs.
+
+`config/tts_settings.json` — appended, optional fields (an older file = ElevenLabs):
+
+```json
+"tts_provider": "elevenlabs" | "cartesia",
+"cartesia_api_key": "...",
+"cartesia_model": "sonic-3.6",
+"cartesia_voice_id": "<uuid>"
+```
+
+`voice_id` stays the ElevenLabs default voice. The panel's
+`dub_panel_settings.json` gains `ca_vc_voice_id` (Cartesia track voice-change
+target) next to `vc_voice_id`. Each provider has its own
+`voice_bookmarks[_cartesia].json` and `voice_cache[_cartesia].json`.
+
+CLI (both `run_dub.py` and `dub_engine.py`, every mode):
+`--tts-provider elevenlabs|cartesia` (default: the settings file) and
+`--tts-model <cartesia model>` (default: `cartesia_model`). The panel always
+sends `--tts-provider`. `--voice-id` must match the provider: Cartesia ids
+are UUIDs, and an ElevenLabs id is rejected with a clear error.
+
+Engine: `pipeline/tts_backend.py` (`voice_backend()`) picks the provider;
+`pipeline/tts_cartesia.py` mirrors the three ElevenLabs synthesizers, the
+voice changer and the voice list (API version `2026-08-14`). Sentence/clause
+pieces are cut at Cartesia's WORD timestamps (`/tts/sse`, `add_timestamps`).
+Reuse sidecars are `_csec_NNN.wav` / `_cstr_NNN.wav`. ElevenLabs audio tags
+([calm] …) are stripped for Cartesia and the Step-4 emotion pass is skipped
+(legacy sync mode). Cartesia has no Assamese model; Assamese is spoken with
+the Bengali (`bn`) model and the log says so.
+
 ## v0.15.7 — One tidy output folder per project
 
 Up to v0.15.6 a run wrote ~30 files flat into `<audio dir>/<base>/` and
