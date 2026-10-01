@@ -751,11 +751,192 @@ def transcribe_elevenlabs(audio_path, language, api_key):
         print(f"    [11LABS] speech: {speech_start:.2f}s – {speech_end:.2f}s "
               f"({len(words)} words)")
 
+    # v0.15.7: keep the per-word timings. A long English clip that was never
+    # Dynamic-Split is cut into sentences from these (split_long_en_items).
+    # Scribe's list also carries "spacing" and "audio_event" entries — only
+    # real words are kept, rounded so the transcript cache stays small.
+    kept_words = []
+    for w in words:
+        if w.get("type", "word") != "word":
+            continue
+        wt = (w.get("text") or "").strip()
+        if not wt:
+            continue
+        try:
+            kept_words.append({"text": wt,
+                               "start": round(float(w.get("start", 0.0)), 3),
+                               "end":   round(float(w.get("end", 0.0)), 3)})
+        except (TypeError, ValueError):
+            continue
+
     return {
         "text": text,
         "speech_start": speech_start,
         "speech_end": speech_end,
+        "words": kept_words,
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# Long-English auto-split (v0.15.7)
+# ═══════════════════════════════════════════════════════════
+# Auto Sync matches DUB clips to EN clips and places each DUB inside its EN
+# clip's slot. That only works when the English track is cut into sentences
+# (Dynamic Split). When the English is ONE long clip, every DUB lands in the
+# same 100-second slot and gets packed back-to-back in the middle — the run
+# says "36/36 matched" and nothing lines up (field report, Nepali, 2026-09-29).
+#
+# Fix: Scribe already returns a timestamp for every word. A long EN clip is
+# cut into sentence-sized VIRTUAL clips from those timings — in memory only.
+# The English item in REAPER is never touched; only DUB clips move, exactly
+# as before. Cuts fall only BETWEEN words, never inside one:
+#   - a sentence end (. ? !) followed by any pause   → cut
+#   - a pause of _EN_SPLIT_GAP seconds or more       → cut
+#   - a piece longer than _EN_SPLIT_MAX_PIECE        → cut at its longest pause
+#   - a piece shorter than _EN_SPLIT_MIN_PIECE       → merged into a neighbour
+#
+# SYNC_EN_SPLIT_MIN_SEC  EN clips at least this long get split (default 20;
+#                        0 turns the feature off).
+# SYNC_EN_SPLIT_GAP      pause that counts as a cut, seconds (default 0.45).
+def _env_float(name, default):
+    try:
+        return float(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+_EN_SPLIT_MIN_SEC   = _env_float("SYNC_EN_SPLIT_MIN_SEC", 20.0)
+_EN_SPLIT_GAP       = _env_float("SYNC_EN_SPLIT_GAP", 0.45)
+_EN_SPLIT_END_GAP   = 0.12   # pause needed after . ? ! to count as a cut
+_EN_SPLIT_MAX_PIECE = 12.0   # seconds
+_EN_SPLIT_MIN_PIECE = 0.8    # seconds
+
+
+def _en_needs_split(item):
+    """True when this EN clip is long enough to be cut into sentences."""
+    return (_EN_SPLIT_MIN_SEC > 0
+            and float(item.get("duration", 0.0)) >= _EN_SPLIT_MIN_SEC)
+
+
+def split_words_into_pieces(words, gap=None):
+    """Group word dicts {text,start,end} into sentence-sized pieces.
+
+    Returns a list of lists of words. Pure function — no I/O — so it can be
+    tested without audio or API calls.
+    """
+    gap = _EN_SPLIT_GAP if gap is None else gap
+    words = [w for w in words if w.get("end", 0.0) >= w.get("start", 0.0)]
+    if not words:
+        return []
+
+    # 1. Cut at sentence ends and at long pauses.
+    pieces, cur = [], [words[0]]
+    for prev, w in zip(words, words[1:]):
+        pause = w["start"] - prev["end"]
+        sentence_end = prev["text"].rstrip("\"')]}”’").endswith((".", "?", "!"))
+        if pause >= gap or (sentence_end and pause >= _EN_SPLIT_END_GAP):
+            pieces.append(cur)
+            cur = []
+        cur.append(w)
+    pieces.append(cur)
+
+    # 2. Too long (fast talker, no pauses) → cut at the longest pause inside,
+    #    repeatedly, until every piece fits.
+    def _span(p):
+        return p[-1]["end"] - p[0]["start"]
+
+    out = []
+    stack = list(reversed(pieces))
+    while stack:
+        p = stack.pop()
+        if _span(p) <= _EN_SPLIT_MAX_PIECE or len(p) < 2:
+            out.append(p)
+            continue
+        k = max(range(1, len(p)), key=lambda i: p[i]["start"] - p[i - 1]["end"])
+        stack.append(p[k:])
+        stack.append(p[:k])
+
+    # 3. Too short ("Yes.", a lone "and") → merge into the neighbour with the
+    #    smaller pause between them, so a fragment never becomes its own slot.
+    merged = True
+    while merged and len(out) > 1:
+        merged = False
+        for i, p in enumerate(out):
+            if _span(p) >= _EN_SPLIT_MIN_PIECE:
+                continue
+            gap_prev = (p[0]["start"] - out[i - 1][-1]["end"]) if i > 0 else None
+            gap_next = (out[i + 1][0]["start"] - p[-1]["end"]) if i < len(out) - 1 else None
+            if gap_next is None or (gap_prev is not None and gap_prev <= gap_next):
+                out[i - 1] = out[i - 1] + p
+            else:
+                out[i + 1] = p + out[i + 1]
+            del out[i]
+            merged = True
+            break
+    return out
+
+
+def split_long_en_items(en_items):
+    """Replace each long EN clip that has word timings with virtual pieces.
+
+    Returns a NEW list of EN items, renumbered 1..N in timeline order. Items
+    that are short, or have no word timings, pass through unchanged. Each
+    piece's position is the absolute timeline time of its first word, so its
+    speech_start is 0 and the spring placer's onset correction lines the DUB's
+    speech up with that word.
+    """
+    out, n_split = [], 0
+    for item in sorted(en_items, key=lambda e: e["position"]):
+        words = item.get("words") or []
+        if not _en_needs_split(item):
+            out.append(dict(item))
+            continue
+        if not words:
+            print(f"  [SPLIT] EN clip at {item['position']:.2f}s is "
+                  f"{item['duration']:.1f}s long but has no word timings "
+                  f"— left as one clip (Dynamic Split it, or use ElevenLabs "
+                  f"transcription).")
+            report_problem("WARN", "LONG_EN_NOT_SPLIT",
+                           f"English clip at {item['position']:.1f}s is "
+                           f"{item['duration']:.0f}s long and could not be "
+                           f"cut into sentences. Dynamic Split the English "
+                           f"track, or transcribe with ElevenLabs.")
+            out.append(dict(item))
+            continue
+
+        pieces = split_words_into_pieces(words)
+        if len(pieces) < 2:
+            out.append(dict(item))
+            continue
+
+        n_split += 1
+        print(f"  [SPLIT] EN clip at {item['position']:.2f}s "
+              f"({item['duration']:.1f}s, {len(words)} words) "
+              f"→ {len(pieces)} sentence pieces")
+        clip_end = item["position"] + item["duration"]
+        for k, p in enumerate(pieces, 1):
+            start = item["position"] + p[0]["start"]
+            end   = min(clip_end, item["position"] + p[-1]["end"])
+            text  = " ".join(w["text"] for w in p)
+            piece = dict(item)
+            piece.pop("words", None)
+            piece.update({
+                "position":     round(start, 6),
+                "duration":     round(max(0.05, end - start), 6),
+                "transcript":   text,
+                "speech_start": 0.0,
+                "split_from":   item["id"],
+            })
+            out.append(piece)
+            # No "[N] \"" shape here — the Lua poller counts those as clips.
+            print(f"      piece {k:>3}  {start:8.2f}s – {end:8.2f}s  "
+                  f"\"{text[:60]}\"")
+
+    for new_id, e in enumerate(out, 1):
+        e["id"] = new_id
+    if n_split:
+        print(f"  [SPLIT] EN clips for matching: {len(en_items)} → {len(out)}")
+    return out
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1905,7 +2086,7 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
         return paths
 
     # ── Helper: transcribe one item (thread-safe for API calls) ─
-    def _transcribe_one(item_id, audio_path, language):
+    def _transcribe_one(item_id, audio_path, language, need_words=False):
         return item_id, transcribe(
             audio_path, task="transcribe", language=language,
             cache=cache,
@@ -1913,6 +2094,7 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
             elevenlabs_key=elevenlabs_key,
             openai_key=openai_key,
             gemini_key=gemini_key,
+            need_words=need_words,
         )
 
     # ── Steps 1+2: Transcribe EN and DUB clips in one pool ───
@@ -1952,7 +2134,8 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
         # to finish first and STEP 1 closes as early as possible.
         futures = {}
         for iid, path in en_paths.items():
-            futures[pool.submit(_transcribe_one, iid, path, "en")] = "en"
+            futures[pool.submit(_transcribe_one, iid, path, "en",
+                                _en_needs_split(en_by_id[iid]))] = "en"
         for iid, path in dub_paths.items():
             futures[pool.submit(_transcribe_one, iid, path, dub_language)] = "dub"
 
@@ -1962,6 +2145,8 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
             item = (en_by_id if side == "en" else dub_by_id)[iid]
             item["transcript"]   = result["text"]
             item["speech_start"] = result["speech_start"]
+            if side == "en" and result.get("words"):
+                item["words"] = result["words"]
             line = f'  [{iid:3d}] "{result["text"][:70]}"'
             if side == "en":
                 print(line)
@@ -2046,6 +2231,11 @@ def match_gemini(en_items, dub_items, dub_language, gemini_key, cache=None,
             report_problem("WARN", "REPEATED_TRANSCRIPTS",
                            f"{_n} of {_tot} {_label} clips share one "
                            f"transcript; matching accuracy will be poor.")
+
+    # ── Long English clips → sentence pieces (v0.15.7) ───────
+    # Runs AFTER the gates above (they judge the real clips) and before
+    # matching, so Gemini and the spring placer only ever see the pieces.
+    en_items = split_long_en_items(en_items)
 
     # Resolve dubbing script (optional — boosts Gemini's grouping accuracy)
     script_text = _load_script_text(script_text, script_path)
@@ -2340,7 +2530,8 @@ class TranscriptCache:
 
 def transcribe(filepath, task="transcribe", language=None,
                cache=None, asr_provider="elevenlabs",
-               elevenlabs_key=None, openai_key=None, gemini_key=None):
+               elevenlabs_key=None, openai_key=None, gemini_key=None,
+               need_words=False):
     """
     Transcribe an audio file. Returns:
         {"text": str, "speech_start": float, "speech_end": float}
@@ -2387,6 +2578,14 @@ def transcribe(filepath, task="transcribe", language=None,
 
     if cache:
         cached = cache.get(filepath, task, lang, effective_model)
+        # need_words: a long EN clip is about to be cut into sentences from
+        # its word timings. Transcripts cached before v0.15.7 have none, so
+        # that one clip is transcribed again instead of silently not split.
+        if cached is not None and need_words and can_eleven \
+                and not cached.get("words"):
+            print(f"    [CACHE] {Path(filepath).name}: cached copy has no word "
+                  f"timings — transcribing again")
+            cached = None
         if cached is not None:
             print(f"    [CACHE HIT] {Path(filepath).name} ({lang}/{effective_model})")
             return cached
