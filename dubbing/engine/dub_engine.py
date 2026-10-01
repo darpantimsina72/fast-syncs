@@ -199,6 +199,8 @@ REQUIRED_FUNCTIONS = [
     "_load_audio_any",               # audio/video -> mono float32 + sr
     "_detect_regions_from_audio",    # waveform speech-region detection
     "_build_subtitle_srt",           # Stage-1 English SRT (for translation)
+    "regions_collapsed",             # v0.15.9 did the loudness gate collapse?
+    "regions_from_words",            # v0.15.9 music-proof regions from word times
     "_parse_srt_to_analysis_format", # LLM input format
     "_run_gemini_pipeline",          # Step1 -> Step2 -> Step3 chain
     "_run_emotion_enrichment",       # Step4 emotion tags (strict=True from here)
@@ -919,13 +921,46 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
     regions = pl._detect_regions_from_audio(
         y_data, sr, pl.DEFAULT_THR_DB, pl.DEFAULT_HYS_DB,
         pl.DEFAULT_MIN_MS)
-    if not regions:
-        raise RuntimeError("No speech regions detected in the English audio "
-                           "(is the file silent?).")
     try:
         ctx["en_audio_dur"] = float(len(y_data)) / float(sr) if sr else 0.0
     except Exception:
         ctx["en_audio_dur"] = 0.0
+
+    # v0.15.9: background music defeats the loudness gate. The gate opens on
+    # anything above a fixed level and a music bed never drops below it, so it
+    # never closes and the whole talk comes back as ONE region — or none.
+    # Nothing downstream treats that as an error: it becomes a single English
+    # cue, every dub piece but one is left unmatched, and the rest are chained
+    # onto the Un sync track at the far end. "It threw the whole dub away" is
+    # what this looks like from REAPER.
+    #
+    # The word timings the transcriber already returned cannot be fooled by
+    # music — they come from recognised speech, not loudness — so they take
+    # over when the gate has plainly collapsed, and only if they actually find
+    # more lines than it did.
+    _collapsed = getattr(pl, "regions_collapsed", None)
+    _from_words = getattr(pl, "regions_from_words", None)
+    if callable(_collapsed) and callable(_from_words) \
+            and _collapsed(regions, ctx["en_audio_dur"]):
+        _why = ("no region at all" if not regions
+                else f"one region covering the whole "
+                     f"{ctx['en_audio_dur']:.0f}s of audio")
+        _word_regions = _from_words(words)
+        if len(_word_regions) > len(regions):
+            _say("S1b", f"WARNING: loudness-based detection found {_why} — "
+                        "background music is the usual cause. Rebuilding the "
+                        f"lines from word timings instead: "
+                        f"{len(_word_regions)} region(s).")
+            regions = _word_regions
+        else:
+            _say("S1b", f"WARNING: speech detection found {_why}, and the word "
+                        "timings do not split it any further. If this audio has "
+                        "background music the whole talk will be treated as one "
+                        "line and most dub pieces will land on Un sync.")
+
+    if not regions:
+        raise RuntimeError("No speech regions detected in the English audio "
+                           "(is the file silent?).")
     ctx["regions"] = regions
 
     final_srt = pl._build_subtitle_srt(regions, words)
@@ -1355,6 +1390,39 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     sync_ts_path = _out(pl, ctx, "work", "_sync_timestamps.txt")
     _write_text(sync_ts_path, pl._format_timestamps_as_text(ts_list))
     manifest["timestamps_txt"] = sync_ts_path
+
+    # v0.15.9: the per-chunk text, which legacy never wrote.
+    #
+    # Match mode writes this sidecar and the importer puts block N onto the
+    # chunk at timestamps index N — which is what "Redo one line" reads back
+    # and shows you. Legacy wrote the audio, the timings and the SRT but not
+    # this, so every imported chunk fell through to a guess from subtitle cues
+    # and frequently ended up carrying the WHOLE script. A redo on one line
+    # then re-spoke the entire talk (42,589 characters on 2026-09-27).
+    #
+    # Indexed, not appended: the list is positional, and _build_timestamps
+    # drops any subtitle with no original, so a gap in the indexes would shift
+    # every later block onto the wrong chunk.
+    _texts_by_index = {}
+    for _e in ts_list:
+        _sub = orig_te_subs.get(_e["index"])
+        _t = " ".join(((getattr(_sub, "text", "") or "")).split())
+        if _t:
+            _texts_by_index[_e["index"]] = _t
+    if _texts_by_index:
+        _n = max(_texts_by_index)
+        _blocks = [_texts_by_index.get(i) or EMPTY_PARAGRAPH_PLACEHOLDER
+                   for i in range(1, _n + 1)]
+        texts_path = _out(pl, ctx, "work", "_sync_texts.txt")
+        _write_text(texts_path, "\n\n".join(_blocks) + "\n")
+        manifest["sync_texts"] = texts_path
+        _say("S3d", f"Per-chunk text saved ({len(_texts_by_index)} line(s)) — "
+                    "'Redo one line' will show that line, not the whole "
+                    "script.")
+    else:
+        _say("S3d", "WARNING: no per-chunk text could be built — 'Redo one "
+                    "line' will fall back to matching subtitle cues.")
+
     _say("S3d", "Synced SRT + timestamps saved.")
 
     # ── [S3e] Render the synced audio ───────────────────────────────────────

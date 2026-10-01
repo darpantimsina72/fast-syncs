@@ -4828,6 +4828,73 @@ end
 -- then the persisted sidecar (survives both regen runs overwriting
 -- engine_done.json AND run_dub.py's wholesale status-dir clean), then the
 -- pre-relocation sidecar location, then the legacy shared status root.
+-- v0.15.9: is this item only PART of the take it was cut from?
+--
+-- Splitting an item in REAPER copies the whole take, text and all, onto every
+-- piece. So a redo on one piece speaks the ENTIRE original chunk, not the part
+-- you can see — and below the 2800-character guard that happens silently, with
+-- the new audio several times longer than the slot it has to fill.
+--
+-- Two signs, either is enough: the take starts partway into its source, or the
+-- item is visibly shorter than the source it points at. A quarter-second of
+-- slack keeps ordinary rounding from reading as a split.
+function V5.item_is_split(item)
+  if not item then return false end
+  local take = reaper.GetActiveTake(item)
+  if not take or reaper.TakeIsMIDI(take) then return false end
+  local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
+  if offs > 0.01 then return true end
+  local src = reaper.GetMediaItemTake_Source(take)
+  if not src then return false end
+  -- GetMediaSourceLength returns (length, isQN). A QN length is in beats, not
+  -- seconds, so it cannot be compared against an item length — the repo reads
+  -- it this way everywhere.
+  local src_len, is_qn = reaper.GetMediaSourceLength(src)
+  if is_qn then return false end
+  local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+  local rate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1
+  if rate <= 0 then rate = 1 end
+  return src_len and src_len > 0 and (len * rate) < (src_len - 0.25)
+end
+
+
+-- v0.15.9: where a redo writes, worked out from the item you selected.
+--
+-- prefill_regen_target() below probes four places a finished run leaves its
+-- manifest. All four are inside the status folder, which a later run wipes and
+-- a fresh REAPER on an old project never had — and then the redo pane says
+-- "Output folder unknown" and asks for a file nobody can reasonably find.
+--
+-- The selected chunk's own audio is the answer, and it is always there: it
+-- sits inside the run's folder. Walk up from it until the layout marker
+-- appears and that directory IS the run's root. A pre-layout run has no marker,
+-- so the audio's own folder is the root, which is where those runs put
+-- everything anyway.
+function V5.out_dir_from_item(item)
+  if not item then return nil end
+  local take = reaper.GetActiveTake(item)
+  if not take or reaper.TakeIsMIDI(take) then return nil end
+  local src = reaper.GetMediaItemTake_Source(take)
+  if not src then return nil end
+  -- The second argument is required; without it REAPER returns nothing.
+  local path = reaper.GetMediaSourceFileName(src, "")
+  if not path or path == "" then return nil end
+
+  local dir = path:match("^(.*)[/\\][^/\\]*$")
+  if not dir or dir == "" then return nil end
+  local first = dir
+  -- Eight levels is far more than any layout nests; the bound is only there so
+  -- a path that never matches cannot loop.
+  for _ = 1, 8 do
+    if V5.is_tidy(dir) then return dir end
+    local up = dir:match("^(.*)[/\\][^/\\]+$")
+    if not up or up == "" or up == dir then break end
+    dir = up
+  end
+  return first
+end
+
+
 function V5.prefill_regen_target()
   if _regen_out_dir ~= "" then return end
   -- Same guard as preflight: only re-point the status paths while idle on
@@ -4835,6 +4902,16 @@ function V5.prefill_regen_target()
   if _ui_phase == "setup" then V5.set_status_paths() end
   if V5.regen_prefill_done == STATUS_DIR then return end
   V5.regen_prefill_done = STATUS_DIR
+  -- The selected chunk knows where it came from, so try it before the probes:
+  -- it is right whenever a chunk is selected, which is exactly when the redo
+  -- pane is being used.
+  if reaper.CountSelectedMediaItems(0) > 0 then
+    local from_item = V5.out_dir_from_item(reaper.GetSelectedMediaItem(0, 0))
+    if from_item then
+      V5.set_regen_target(from_item, nil)
+      return
+    end
+  end
   local probes = { DONE_JSON,
                    V5.regen_target_path(),
                    STATUS_DIR .. SEP .. "regen_target.json",
@@ -5171,6 +5248,19 @@ local function ui_regen_section(ctx, default_open)
       ctx, '##regentext', _regen_text or '', -1, 90)
     if pushed then _pop_font(ctx) end
     if rv then _regen_text = txt end
+
+    -- Splitting copies the whole take's text onto every piece, so the box
+    -- above holds the ENTIRE original chunk rather than this slice of it.
+    -- Nothing can tell which words belong to which slice, so say so and let
+    -- the reader trim the box before spending credits.
+    if V5.item_is_split(item) then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+      reaper.ImGui_TextWrapped(ctx,
+        'This item is a piece of a longer chunk. The text above is the ' ..
+        'WHOLE chunk, not just this piece — redoing it as-is speaks all of ' ..
+        'it. Delete the parts you do not want before pressing Regenerate.')
+      reaper.ImGui_PopStyleColor(ctx)
+    end
 
     local can = _regen_out_dir ~= "" and (_regen_text or ""):match("%S") ~= nil
     _ui_begin_disabled(ctx, not can)
