@@ -39,8 +39,7 @@
 --   - Windows support: OS-aware setup hints (setup_windows.bat).
 --   - "From track": pick the English audio straight from a project
 --     track — one clean item uses its source file, anything else is
---     rendered to <project>/DubSource/ first (v0.15.7: saved project →
---     FastSyncs/01_Source/).
+--     rendered to <project>/DubSource/ first.
 --
 -- v0.3 additions (standalone app):
 --   - ⚙ Settings section (setup phase): LLM provider/model/keys and
@@ -380,10 +379,12 @@ end
 local function open_url(url) open_path(url) end
 
 -- ---------------------------------------------------------------------------
--- v0.15.7 output layout. New runs put one video's files into ONE tidy folder
--- "<folder of the saved .RPP>/FastSyncs/" (unsaved project: next to the
--- audio), sorted into subfolders. A folder WITHOUT the marker file is a
--- pre-0.15.7 flat folder and keeps its flat paths, so old runs still resume.
+-- Output layout. A run keeps all of one video's files in ONE flat folder
+-- next to the audio, "<audio dir>/<audio name>/" — as up to 0.15.6, restored
+-- in 0.15.10. 0.15.7–0.15.9 wrote "tidy" folders instead
+-- ("<project folder>/FastSyncs/" sorted into subfolders, marked by the marker
+-- file); those are still read, and a run whose earlier half lives in one
+-- finishes there, but nothing new creates one.
 -- KEEP IN SYNC with LAYOUT_SUBDIRS / _choose_output_dir in
 -- dubbing/engine/pipeline/config.py (the engine decides where a run's files
 -- go; the panel must agree for the files it writes itself).
@@ -436,16 +437,6 @@ function V5.project_dir()
   return d
 end
 
--- "<project folder>/FastSyncs" (created with its marker when make), or nil
--- for an unsaved project.
-function V5.tidy_root(make)
-  local pd = V5.project_dir()
-  if not pd then return nil end
-  local root = pd .. SEP .. V5.LAYOUT_DIRNAME
-  if make then V5.make_tidy_root(root) end
-  return root
-end
-
 function V5.audio_base(path)
   return (basename(path or ""):gsub("%.[^.]+$", ""))
 end
@@ -457,23 +448,20 @@ function V5.out_dir_for(audio)
   local src  = dirname(audio or "")
   local base = V5.audio_base(audio)
   if basename(src) == base and not V5.is_tidy(src) then return src, false end
+  -- A 0.15.7–0.15.9 tidy folder that already holds this audio's work.
+  local roots = {}
   local pd = V5.project_dir()
-  local root
-  if pd then
-    root = pd .. SEP .. V5.LAYOUT_DIRNAME
-  elseif V5.is_tidy(src) then
-    root = src
-  elseif V5.is_tidy(dirname(src)) then
-    root = dirname(src)
-  else
-    root = src .. SEP .. V5.LAYOUT_DIRNAME
+  if pd then roots[#roots + 1] = pd .. SEP .. V5.LAYOUT_DIRNAME end
+  if V5.is_tidy(src) then roots[#roots + 1] = src end
+  if V5.is_tidy(dirname(src)) then roots[#roots + 1] = dirname(src) end
+  roots[#roots + 1] = src .. SEP .. V5.LAYOUT_DIRNAME
+  for _, root in ipairs(roots) do
+    if V5.is_tidy(root)
+       and file_exists(root .. SEP .. "02_Script" .. SEP .. base .. ".srt") then
+      return root, true
+    end
   end
-  local legacy = src .. SEP .. base
-  if not V5.is_tidy(legacy) and file_exists(legacy .. SEP .. base .. ".srt")
-     and not file_exists(root .. SEP .. "02_Script" .. SEP .. base .. ".srt") then
-    return legacy, false
-  end
-  return root, true
+  return src .. SEP .. base, false
 end
 
 -- The out_dir copy of a run's engine_done.json: per audio in a tidy folder
@@ -2633,8 +2621,9 @@ local function build_engine_cmd(py, opts)
   if opts.audio and opts.audio ~= '' then
     parts[#parts + 1] = '--audio'
     parts[#parts + 1] = q(opts.audio)
-    -- v0.15.7: saved project -> the run's files go to <its folder>/FastSyncs/.
-    -- Only the audio runs (full/translate/dub) write run outputs.
+    -- New runs write next to the audio; the project folder only tells the
+    -- engine where a 0.15.7–0.15.9 FastSyncs/ folder may hold this audio's
+    -- earlier work. Only the audio runs (full/translate/dub) write outputs.
     local pd = V5.project_dir()
     if pd then
       parts[#parts + 1] = '--project-dir'
@@ -3222,9 +3211,9 @@ function V5.reattach_running()
 end
 
 -- v0.4: write the pasted translation where the engine's own outputs live.
--- v0.15.7: V5.out_dir_for mirrors pipeline/config._choose_output_dir — the
--- tidy FastSyncs/02_Script/, or the audio's pre-0.15.7 flat folder when that
--- already holds its work. The engine picks the same folder back up from
+-- V5.out_dir_for mirrors pipeline/config._choose_output_dir — the audio's
+-- flat folder <audio dir>/<name>/, or a 0.15.7–0.15.9 tidy FastSyncs/02_Script/
+-- when that already holds its work. The engine picks the same folder back up from
 -- this file's location. Returns the file path, or nil + banner.
 local function write_provided_script(audio, text)
   local base = V5.audio_base(audio)
@@ -4174,8 +4163,7 @@ end
 -- pipeline, without manual browsing. A track with exactly ONE untrimmed,
 -- unstretched item plays its source file as-is — use that file directly
 -- (no render). Anything else (multiple items, trims, offsets, play-rate)
--- is rendered to FastSyncs/01_Source/ (saved project, v0.15.7) or
--- <project media path>/DubSource/ (unsaved) first.
+-- is rendered to <project media path>/DubSource/ first.
 -- Returns (path, nil, rendered_bool) or (nil, reason).
 local function audio_from_track(track)
   local n_items = reaper.CountTrackMediaItems(track)
@@ -4211,11 +4199,10 @@ local function audio_from_track(track)
   local _, tname = reaper.GetSetMediaTrackInfo_String(track, "P_NAME",
                                                       "", false)
   if not tname or tname == "" then tname = "track" end
-  -- v0.15.7: saved project -> FastSyncs/01_Source/; unsaved -> the project
-  -- media path's DubSource/, as before.
-  local root = V5.tidy_root(true)
-  local out_dir = root and V5.layout_path(root, "source")
-                  or (reaper.GetProjectPath("") .. SEP .. "DubSource")
+  -- The project media path's DubSource/ (0.15.10: back from 0.15.7's
+  -- FastSyncs/01_Source/). The run's own folder then sits next to the
+  -- render, like any other audio.
+  local out_dir = reaper.GetProjectPath("") .. SEP .. "DubSource"
   local name_base = _sanitize_filename(tname) .. os.date("_%Y%m%d_%H%M%S")
   local wav, why = render_track_stem(track, out_dir, name_base)
   if not wav then return nil, why end
@@ -4251,11 +4238,9 @@ local function start_voice_change()
   local py = preflight_engine()
   if not py then return false end
 
-  -- Rendered + converted audio go to FastSyncs/03_Voice/Redo/VoiceChange/
-  -- (v0.15.7) — <project media path>/VoiceChange/ for an unsaved project.
-  local vc_root = V5.tidy_root(true)
-  local out_dir = vc_root and V5.layout_path(vc_root, "voicechange")
-                  or (reaper.GetProjectPath("") .. SEP .. "VoiceChange")
+  -- Rendered + converted audio go to <project media path>/VoiceChange/
+  -- (0.15.10: back from 0.15.7's FastSyncs/03_Voice/Redo/VoiceChange/).
+  local out_dir = reaper.GetProjectPath("") .. SEP .. "VoiceChange"
   local name_base = _sanitize_filename(tname) .. os.date("_%Y%m%d_%H%M%S")
 
   local in_wav, why = render_track_stem(track, out_dir, name_base)
@@ -4903,18 +4888,25 @@ function V5.prefill_regen_target()
   -- Same guard as preflight: only re-point the status paths while idle on
   -- setup — a run in flight keeps the paths it launched with.
   if _ui_phase == "setup" then V5.set_status_paths() end
-  if V5.regen_prefill_done == STATUS_DIR then return end
-  V5.regen_prefill_done = STATUS_DIR
   -- The selected chunk knows where it came from, so try it before the probes:
   -- it is right whenever a chunk is selected, which is exactly when the redo
-  -- pane is being used.
+  -- pane is being used. 0.15.10: checked on EVERY frame with no target, not
+  -- once — in 0.15.9 the pane usually opened before a chunk was selected,
+  -- the one check found nothing, and it never looked again ("need an output
+  -- folder" for good). Cheap: a path walk, and it stops once a target is set.
   if reaper.CountSelectedMediaItems(0) > 0 then
     local from_item = V5.out_dir_from_item(reaper.GetSelectedMediaItem(0, 0))
     if from_item then
-      V5.set_regen_target(from_item, nil)
+      -- A flat run folder holds its manifest copy: take the run's language
+      -- from it, so the redo speaks the dub's language even when Settings
+      -- has since moved on.
+      local m = load_manifest_json(from_item .. SEP .. "engine_done.json")
+      V5.set_regen_target(from_item, m and m.language or nil)
       return
     end
   end
+  if V5.regen_prefill_done == STATUS_DIR then return end
+  V5.regen_prefill_done = STATUS_DIR
   local probes = { DONE_JSON,
                    V5.regen_target_path(),
                    STATUS_DIR .. SEP .. "regen_target.json",
@@ -6099,9 +6091,8 @@ function V5.start_tts()
       "⚙ Settings → Voices.")
     return false
   end
-  -- Audio lands next to the project, like the track renders do: v0.15.7
-  -- FastSyncs/03_Voice/Redo/TTS/ for a saved project, the media folder's
-  -- TTS/ otherwise.
+  -- Audio lands in the project media folder's TTS/, like the track renders
+  -- do (0.15.10: back from 0.15.7's FastSyncs/03_Voice/Redo/TTS/).
   local proj = reaper.GetProjectPath("")
   if (proj or "") == "" then
     ui_set_banner("error",
@@ -6109,9 +6100,7 @@ function V5.start_tts()
       "its media folder.")
     return false
   end
-  local tts_root = V5.tidy_root(true)
-  local dir = tts_root and V5.layout_path(tts_root, "tts")
-              or (proj .. SEP .. "TTS")
+  local dir = proj .. SEP .. "TTS"
   reaper.RecursiveCreateDirectory(dir, 0)
 
   -- Indic text never travels on argv: it goes through this UTF-8 file.

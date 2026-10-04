@@ -189,7 +189,7 @@ PROMPT_STAGES = ["Step1_Translation_Prompt", "Step2_Review_Prompt",
 # (and by --selfcheck). Defined across pipeline/config|stt|srt_tools|llm|
 # tts|sync — see ENGINE_NOTES.md for the module map.
 REQUIRED_FUNCTIONS = [
-    "_prepare_output_dir",           # output folder (v0.15.7 tidy layout / legacy)
+    "_prepare_output_dir",           # output folder (flat next to the audio; reads 0.15.7 tidy)
     "layout_path",                   # v0.15.7 file kind -> subfolder (or flat)
     "is_tidy",                       # v0.15.7 marker check
     "manifest_copy_path",            # v0.15.7 per-audio out_dir manifest copy
@@ -839,7 +839,7 @@ def _project_dir(args):
 
 
 def _prepare_out_dir(pl, audio_path, manifest, args=None, script_path=None):
-    """Create/reuse the output folder (v0.15.7 tidy layout or a legacy one).
+    """Create/reuse the output folder (flat next to the audio, or a 0.15.7–0.15.9 tidy one being continued).
 
     Done BEFORE any paid API work (cheap mkdir): an unwritable location
     (mounted DMG, read-only share) must fail fast, not after the S1a
@@ -856,17 +856,18 @@ def _prepare_out_dir(pl, audio_path, manifest, args=None, script_path=None):
     bname = os.path.splitext(os.path.basename(audio_path))[0]
     manifest["out_dir"] = out_dir
     if pl.is_tidy(out_dir):
-        # v0.15.7: no audio copy — the importer loads the original file.
+        # A 0.15.7–0.15.9 tidy folder being continued: it holds no audio
+        # copy — the importer loads the original file.
         manifest["en_audio"] = audio_path
-        _note(f"Output folder: {out_dir}")
+        _note(f"Output folder (0.15.7–0.15.9 layout, kept so this audio's "
+              f"earlier work is reused): {out_dir}")
     else:
-        # Legacy flat folder (pre-0.15.7 run being continued): it holds the
-        # copy those versions made; fall back to the original otherwise.
+        # The flat folder next to the audio: it holds the copy
+        # _prepare_output_dir made; fall back to the original otherwise.
         copied_audio = os.path.join(out_dir, os.path.basename(audio_path))
         manifest["en_audio"] = (copied_audio if os.path.exists(copied_audio)
                                 else audio_path)
-        _note(f"Output folder (older flat layout, kept so this audio's "
-              f"earlier work is reused): {out_dir}")
+        _note(f"Output folder: {out_dir}")
     return out_dir, bname
 
 

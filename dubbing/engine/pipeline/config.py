@@ -616,10 +616,21 @@ def load_tts_settings() -> Dict[str, str]:
     return settings
 
 
-# ─── Output folder layout (v0.15.7) ─────────────────────────────────────────
-# Up to v0.15.6 every run dumped ~30 files FLAT into "<audio dir>/<base>/"
-# (plus a copy of the English audio). From v0.15.7 a NEW run writes one
-# video's files into ONE tidy folder, sorted by what they are for:
+# ─── Output folder layout ───────────────────────────────────────────────────
+# A run keeps ALL of one video's files in ONE flat folder next to the audio:
+#
+#   <audio dir>/<base>/   copy of the English audio, SRT, analysis,
+#                         translation + review files, TTS wav and its pieces,
+#                         synced wav + SRT, sync log, engine log,
+#                         engine_done.json, regen/ (chunk redo)
+#
+# That is how every version up to 0.15.6 worked, and 0.15.10 went back to it:
+# the people using the tool find a video's work where they put the video.
+#
+# 0.15.7 – 0.15.9 instead wrote NEW runs into a "tidy" folder sorted into
+# subfolders (below). Those folders still exist on people's disks, so the
+# tidy layout is still READ and a run whose earlier half lives in one (a
+# review paused on 0.15.9) finishes there. New runs never create one.
 #
 #   <project dir or audio dir>/FastSyncs/
 #     .fastsyncs-layout   marker, content "2" — "this folder uses the tidy layout"
@@ -632,14 +643,13 @@ def load_tts_settings() -> Dict[str, str]:
 #     Logs/               <base>_sync_log.txt + the panel's archived run logs
 #     _work/              sync intermediates + <base>_engine_done.json
 #
-# File NAMES never changed — only their folder — so every name-based reuse
-# and resume keeps working. Readers and writers both go through
-# layout_path(): a folder WITH the marker maps a file to its subfolder, a
-# folder WITHOUT it (a pre-0.15.7 flat folder) maps it to out_dir/filename
-# exactly as before. That is what keeps an old run resumable.
+# File NAMES are the same in both layouts — only the folder differs — so
+# every name-based reuse and resume works in either. Readers and writers both
+# go through layout_path(): a folder WITH the marker maps a file to its
+# subfolder, a folder WITHOUT it maps it to out_dir/filename.
 #
-# KEEP IN SYNC with V5.LAYOUT_SUB in dubbing/reaper/Dub_Pipeline_Panel.lua,
-# Import_Dub_Results.lua and feedback_kit.lua (Logs).
+# KEEP IN SYNC with V5.LAYOUT_SUB / V5.out_dir_for in
+# dubbing/reaper/Dub_Pipeline_Panel.lua and Import_Dub_Results.lua.
 LAYOUT_DIRNAME = "FastSyncs"
 LAYOUT_MARKER = ".fastsyncs-layout"
 LAYOUT_VERSION = "2"
@@ -753,23 +763,46 @@ def _tidy_root_of_subfolder(folder: str) -> Optional[str]:
     return parent if is_tidy(parent) else None
 
 
+def _tidy_root_with_work(audio_path: str, project_dir: Optional[str]):
+    """The 0.15.7–0.15.9 tidy folder that already holds this audio's work
+    (its English SRT in 02_Script/), or None. Looked for where those versions
+    put it: the project folder's FastSyncs/, the tidy root the audio itself
+    sits in (a 01_Source render, or FastSyncs/ itself), and the audio
+    folder's FastSyncs/."""
+    src_dir = os.path.dirname(os.path.abspath(audio_path))
+    base = audio_base(audio_path)
+    roots = []
+    if project_dir and os.path.isdir(project_dir):
+        roots.append(os.path.join(os.path.abspath(project_dir), LAYOUT_DIRNAME))
+    if is_tidy(src_dir):
+        roots.append(src_dir)
+    if _tidy_root_of_subfolder(src_dir):
+        roots.append(_tidy_root_of_subfolder(src_dir))
+    roots.append(os.path.join(src_dir, LAYOUT_DIRNAME))
+    for root in roots:
+        if is_tidy(root) and os.path.isfile(
+                os.path.join(root, LAYOUT_SUBDIRS["script"], base + ".srt")):
+            return root
+    return None
+
+
 def _choose_output_dir(audio_path: str, project_dir: Optional[str] = None,
                        script_path: Optional[str] = None):
     """Decide the output folder WITHOUT creating anything.
 
     Returns (out_dir, tidy_bool). Rules, first match wins:
       1. script_path (the --script of a dub resume, or a --provided-script)
-         sits in a tidy 02_Script/ -> that tidy root; sits in a legacy flat
-         folder that holds this audio's work -> that legacy folder. The run
-         continues where the earlier half of the work lives.
-      2. The audio sits inside its OWN legacy folder (<x>/<base>/<base>.wav,
-         the copy pre-0.15.7 runs made) -> that folder, as before.
-      3. A legacy sibling <audio dir>/<base>/ already holds this audio's work
-         and the tidy root does not -> keep using the legacy folder, so a
-         run started on 0.15.6 (and its paid TTS reuse files) carries on.
-      4. Otherwise the tidy root: <project_dir>/FastSyncs/ when a project
-         dir is given; else the tidy root the audio already sits in (a
-         01_Source render, or FastSyncs/ itself); else <audio dir>/FastSyncs/.
+         sits in a tidy 02_Script/ -> that tidy root; sits in a flat folder
+         that holds this audio's work -> that flat folder. The run continues
+         where the earlier half of the work lives.
+      2. The audio sits inside its OWN flat folder (<x>/<base>/<base>.wav,
+         the copy a run makes) -> that folder.
+      3. A 0.15.7–0.15.9 tidy folder already holds this audio's work -> keep
+         using it, so a run started there (and its paid TTS reuse files)
+         carries on.
+      4. Otherwise the flat folder <audio dir>/<base>/ — all of the video's
+         files in one place next to the audio, as up to 0.15.6.
+    *project_dir* only matters for finding rule 3's tidy folder.
     """
     audio_path = os.path.abspath(audio_path)
     src_dir = os.path.dirname(audio_path)
@@ -788,39 +821,45 @@ def _choose_output_dir(audio_path: str, project_dir: Optional[str] = None,
     if os.path.basename(src_dir) == base and not is_tidy(src_dir):
         return src_dir, False
 
-    if project_dir and os.path.isdir(project_dir):
-        root = os.path.join(os.path.abspath(project_dir), LAYOUT_DIRNAME)
-    elif is_tidy(src_dir):
-        root = src_dir
-    elif _tidy_root_of_subfolder(src_dir):
-        root = _tidy_root_of_subfolder(src_dir)
-    else:
-        root = os.path.join(src_dir, LAYOUT_DIRNAME)
+    tidy = _tidy_root_with_work(audio_path, project_dir)
+    if tidy:
+        return tidy, True
 
-    legacy = os.path.join(src_dir, base)
-    if (_legacy_folder_holds(legacy, base) and not os.path.isfile(
-            os.path.join(root, LAYOUT_SUBDIRS["script"], base + ".srt"))):
-        return legacy, False
-    return root, True
+    return os.path.join(src_dir, base), False
 
 
 def _prepare_output_dir(audio_path: str, project_dir: Optional[str] = None,
                         script_path: Optional[str] = None) -> str:
     """Pick (and create) the output folder for *audio_path*. See
-    _choose_output_dir for the rules. The English audio is NOT copied any
-    more (v0.15.7) — the manifest's en_audio points at the original.
+    _choose_output_dir for the rules.
 
-    If the tidy root cannot be created (read-only location), falls back to
-    the audio's own folder, as the pre-0.15.7 helper did; the engine's
-    writability check then reports it before any paid work.
+    A flat folder gets a copy of the English audio, as up to 0.15.6, so the
+    folder holds everything about the video. The copy is a hard link when
+    the disk allows it (no extra space used), a real copy otherwise.
+
+    If the folder cannot be created (read-only location), falls back to the
+    audio's own folder; the engine's writability check then reports it
+    before any paid work.
     """
     out_dir, tidy = _choose_output_dir(audio_path, project_dir, script_path)
-    if not tidy:
+    if tidy:
         return out_dir
     try:
-        make_tidy_root(out_dir)
+        os.makedirs(out_dir, exist_ok=True)
     except Exception:
         return os.path.dirname(os.path.abspath(audio_path))
+    src = os.path.abspath(audio_path)
+    dst = os.path.join(out_dir, os.path.basename(audio_path))
+    if os.path.abspath(dst) != src and not os.path.exists(dst):
+        try:
+            os.link(src, dst)
+        except Exception:
+            try:
+                shutil.copy2(src, dst)
+            except Exception as e:
+                # Not fatal: the manifest then points at the original audio.
+                print(f"[config] Could not copy the English audio into "
+                      f"{out_dir}: {e}")
     return out_dir
 
 

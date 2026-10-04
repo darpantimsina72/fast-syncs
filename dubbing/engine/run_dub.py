@@ -67,6 +67,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 
 ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -150,6 +151,43 @@ try:
                 LANGUAGES.append(_n)
 except Exception:
     pass
+
+
+def _keep_log_with_outputs(status_dir: str, log_path: str) -> None:
+    """Append this run's engine log to the video's output folder, next to
+    its SRT, script and speech, so one folder holds everything about the
+    video (as up to 0.15.6, restored in 0.15.10).
+
+    The output folder comes from the manifest the engine just wrote. Runs
+    without one (voice list, redo of one chunk, voice change) are skipped.
+    Appends, so a translate run and the dub that follows it both stay in
+    the file. Best effort: never raises — the done marker must still be
+    written after this.
+    """
+    try:
+        with open(os.path.join(status_dir, "engine_done.json"),
+                  encoding="utf-8") as f:
+            man = json.load(f)
+        out_dir = str(man.get("out_dir") or "")
+        audio = str(man.get("audio") or "")
+        if not out_dir or not audio or not os.path.isdir(out_dir):
+            return
+        base = os.path.splitext(os.path.basename(audio))[0]
+        dest_dir = out_dir
+        # A 0.15.7–0.15.9 tidy folder keeps logs in Logs/ (KEEP IN SYNC with
+        # LAYOUT_MARKER / LAYOUT_SUBDIRS in pipeline/config.py).
+        if os.path.isfile(os.path.join(out_dir, ".fastsyncs-layout")):
+            dest_dir = os.path.join(out_dir, "Logs")
+            os.makedirs(dest_dir, exist_ok=True)
+        with open(log_path, encoding="utf-8", errors="replace") as src:
+            body = src.read()
+        with open(os.path.join(dest_dir, base + "_engine_log.txt"), "a",
+                  encoding="utf-8") as dst:
+            dst.write("\n===== " + time.strftime("%Y-%m-%d %H:%M:%S")
+                      + " · " + str(man.get("status") or "?") + " =====\n")
+            dst.write(body)
+    except Exception:
+        pass
 
 
 def main() -> int:
@@ -468,6 +506,7 @@ def main() -> int:
             os.remove(pid_path)
         except OSError:
             pass
+        _keep_log_with_outputs(status_dir, log_path)
         # The done marker is written LAST — it is the poller's only signal
         # that log + manifest are complete.
         try:
