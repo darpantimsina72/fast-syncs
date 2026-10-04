@@ -358,6 +358,8 @@ after it — the same as up to 0.15.6:
   <Lang>_(<base>)_synced.wav, <base>_sync_synced.srt               the result
   <base>_sync_log.txt, <base>_engine_log.txt                       the logs
   engine_done.json, _sync_*.txt / .srt                             the robot's notes
+  <base>_FinalScript_after_redo.txt  the whole script as it stands after the
+                           latest Redo (rewritten after every Redo, one chunk per line)
   regen/                   chunk redo text + wav (Tools > Redo)
 ```
 

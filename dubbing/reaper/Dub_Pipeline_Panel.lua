@@ -3773,6 +3773,56 @@ local function start_regen(item, text, voice_id)
   })
 end
 
+-- 0.15.10: after every redo, (re)write the whole script as it now stands —
+-- every chunk on the redone chunk's track, in timeline order, one chunk per
+-- line — to "<name>_FinalScript_after_redo.txt" in the run folder, next to
+-- the engine's own <name>_FinalScript.txt. A redo changes the words only on
+-- the timeline (and in one small regen/chunk_N.txt), so without this there is
+-- no single file with the script that was actually spoken.
+-- Rebuilt from the timeline each time, so it is always complete and current.
+-- Returns the file path, or nil. Never raises — the swap already happened.
+function V5.save_final_script(item)
+  local ok, path = pcall(function()
+    local dir = _regen_out_dir or ""
+    if dir == "" or not item or not reaper.ValidatePtr(item, "MediaItem*") then
+      return nil
+    end
+    local track = reaper.GetMediaItem_Track(item)
+    if not track then return nil end
+    local list = {}
+    for i = 0, reaper.CountTrackMediaItems(track) - 1 do
+      local it = reaper.GetTrackMediaItem(track, i)
+      list[#list + 1] = { it = it,
+                          pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION") }
+    end
+    table.sort(list, function(a, b) return a.pos < b.pos end)
+    local lines, last = {}, nil
+    for _, e in ipairs(list) do
+      local txt = (V5.get_item_text(e.it) or ""):match("^%s*(.-)%s*$")
+      -- A split item keeps the same text on every piece: write it once.
+      if txt ~= "" and txt ~= last then lines[#lines + 1] = txt end
+      if txt ~= "" then last = txt end
+    end
+    if #lines == 0 then return nil end
+    local base
+    if V5.is_tidy(dir) then
+      local _, tn = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
+      -- (inline: _sanitize_filename is declared further down the file)
+      base = ((tn and tn ~= "") and tn or "dub"):gsub("[^%w%-_]", "_")
+      path = V5.layout_path(dir, "script", base .. "_FinalScript_after_redo.txt")
+    else
+      base = basename(dir)
+      path = dir .. SEP .. base .. "_FinalScript_after_redo.txt"
+    end
+    local f = io.open(path, "wb")
+    if not f then return nil end
+    f:write(table.concat(lines, "\n"), "\n")
+    f:close()
+    return path
+  end)
+  return ok and path or nil
+end
+
 -- Swap the regenerated wav into the item recorded by start_regen.
 -- Returns true, or false + reason. One undo block.
 local function apply_regen_result(wav)
@@ -3822,6 +3872,7 @@ local function apply_regen_result(wav)
   reaper.Undo_EndBlock(removed > 0 and "Regenerate chunks as one voice"
                        or "Regenerate dub chunk", -1)
   reaper.UpdateArrange()
+  V5.final_script_path = V5.save_final_script(item)
   return true
 end
 
@@ -4519,7 +4570,10 @@ local function _finish_run(exit_code)
           st.done = st.done + 1
         else
           ui_set_banner("info", "Chunk regenerated and swapped in:\n"
-                                .. m.regen_wav)
+                                .. m.regen_wav
+                                .. (V5.final_script_path and
+                                    ("\nFinal script updated:\n"
+                                     .. V5.final_script_path) or ""))
         end
       elseif batch then
         st.failed = st.failed + 1
