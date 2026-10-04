@@ -641,8 +641,11 @@ local PROVIDER_TO_JSON = {
 local PROVIDER_FROM_JSON = {}
 for ui, js in pairs(PROVIDER_TO_JSON) do PROVIDER_FROM_JSON[js] = ui end
 
--- ElevenLabs model choices (contract v0.3).
-local EL_MODELS = { "eleven_v3", "eleven_multilingual_v2",
+-- ElevenLabs model choices (contract v0.3). KEEP IN SYNC with the engine's
+-- ELEVENLABS_TTS_MODELS. v4 (v0.15.9) is offered, not defaulted: it reads the
+-- same audio tags v3 does, but it is a different voice character, so a dub
+-- already approved on v3 will not match if it is re-rendered on v4.
+local EL_MODELS = { "eleven_v3", "eleven_v4", "eleven_multilingual_v2",
                     "eleven_turbo_v2_5", "eleven_flash_v2_5" }
 -- v0.15.8: Cartesia model choices (engine: config.CARTESIA_TTS_MODELS).
 V5.CA_MODELS = { "sonic-3.6", "sonic-3.5", "sonic-3", "sonic-latest" }
@@ -6208,7 +6211,8 @@ function V5.ui_tts_tab(ctx)
                     '  ·  speaks ' .. (LANGUAGE or '?') .. ' (from the Language setting).')
   else
     _grey_hint(ctx, 'Model ' .. (EL_MODEL or '?') ..
-                    '  ·  eleven_v3 detects the language from the text itself.')
+                    '  ·  eleven_v3 and eleven_v4 detect the language from the ' ..
+                    'text itself, and both read the pace and emotion tags.')
   end
 
   reaper.ImGui_Dummy(ctx, 0, 6)

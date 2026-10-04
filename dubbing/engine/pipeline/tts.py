@@ -524,6 +524,23 @@ def _locked_cb(status_cb):
     return _cb
 
 
+# Models that act on the inline audio tags Step 4 injects — [calm], [slow],
+# [pause], [fast], accent tags. Everything else reads them aloud as words, so
+# the tags are stripped before the request.
+#
+# v3 and v4 both honour them. Verified against the live API on 2026-10-02: the
+# same sentence sent to eleven_v4 with and without [fast] came back as the same
+# words (the tag was not spoken) and 2.62s instead of 3.14s (the tag was
+# obeyed). Prefixes, so eleven_v3_conversational and eleven_v4_turbo are
+# covered by the same rule.
+AUDIO_TAG_MODEL_PREFIXES = ("eleven_v3", "eleven_v4")
+
+
+def _model_takes_audio_tags(model_id: str) -> bool:
+    """True when this model acts on inline audio tags rather than speaking them."""
+    return (model_id or "").startswith(AUDIO_TAG_MODEL_PREFIXES)
+
+
 def _el_tts_payload(chunk: str, model_id: str, previous_text: str = None,
                     next_text: str = None) -> bytes:
     """JSON body of one ElevenLabs TTS request — byte-for-byte what both
@@ -791,10 +808,10 @@ def synthesize_tts_elevenlabs(text: str, output_path: str, api_key: str,
             "voice ID, not a display label.")
     model_id = (model_id or ELEVENLABS_TTS_MODEL).strip() or ELEVENLABS_TTS_MODEL
 
-    # Inline audio tags ([calm], [pause], [fast]…) are an eleven_v3 feature.
-    # Older models (multilingual v2, turbo/flash v2.5) would read them aloud,
-    # so strip them from the script for anything that isn't v3.
-    if not model_id.startswith("eleven_v3"):
+    # Inline audio tags ([calm], [pause], [fast]…) are a v3/v4 feature. Older
+    # models (multilingual v2, turbo/flash v2.5) would read them aloud, so
+    # strip them from the script for anything that does not understand them.
+    if not _model_takes_audio_tags(model_id):
         stripped = _strip_emotion_tags(text)
         if stripped.strip():
             text = stripped
@@ -961,7 +978,7 @@ def synthesize_sections_elevenlabs(section_texts, output_path: str,
             "voice ID, not a display label.")
     model_id = (model_id or ELEVENLABS_TTS_MODEL).strip() or ELEVENLABS_TTS_MODEL
 
-    if not model_id.startswith("eleven_v3"):
+    if not _model_takes_audio_tags(model_id):
         stripped = [_strip_emotion_tags(t) for t in sections]
         sections = [s.strip() if s.strip() else o
                     for s, o in zip(stripped, sections)]
@@ -1278,7 +1295,7 @@ def synthesize_sentences_elevenlabs(sentences, output_path: str,
             "voice ID, not a display label.")
     model_id = (model_id or ELEVENLABS_TTS_MODEL).strip() or ELEVENLABS_TTS_MODEL
 
-    if not model_id.startswith("eleven_v3"):
+    if not _model_takes_audio_tags(model_id):
         stripped = [_strip_emotion_tags(t) for t in sentences]
         sentences = [s.strip() if s.strip() else o
                      for s, o in zip(stripped, sentences)]

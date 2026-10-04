@@ -484,10 +484,17 @@ ELEVENLABS_TTS_VOICE_ID = ""
 # triggers HTTP 400 unsupported_language errors on multilingual models.
 ELEVENLABS_TTS_MODEL    = "eleven_v3"
 # Selectable ElevenLabs TTS models — all multilingual / Indic-capable.
-# Only eleven_v3 understands inline audio tags ([calm], [pause], …); for the
-# other models synthesize_tts_elevenlabs strips the tags before sending.
+# Only v3 and v4 understand inline audio tags ([calm], [pause], …); for the
+# other models synthesize_tts_elevenlabs strips the tags before sending (see
+# _model_takes_audio_tags in tts.py).
+#
+# v4 is offered, not defaulted. It is newer, faster and takes 10,000 characters
+# a request against v3's 5,000, but it is a different voice character: the same
+# script re-rendered on it will not match a dub already approved on v3. Whoever
+# wants it picks it; nobody is moved onto it by an update.
 ELEVENLABS_TTS_MODELS   = {
     "eleven_v3":              "v3 — expressive (audio tags)",
+    "eleven_v4":              "v4 — newest, expressive (audio tags)",
     "eleven_multilingual_v2": "Multilingual v2 — stable",
     "eleven_turbo_v2_5":      "Turbo v2.5 — fast",
     "eleven_flash_v2_5":      "Flash v2.5 — fastest",
