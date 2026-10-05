@@ -195,7 +195,20 @@ from those files only — they are never placed on a command line.
    full live log is on the **Logs** tab.
 5. **Review** — the panel shows a side-by-side editor: English transcript
    read-only on the left, translation editable on the right (rendered with
-   a system font matching the language's script). Buttons:
+   a system font matching the language's script).
+   **Listen while you read** (0.15.10) — with the run's English audio on the
+   timeline, a playback row sits above the script:
+   - **⏮ Play from start**, **▶ Play here** (the selected paragraph), or the
+     small **▶** on any row. Playback runs on to the end — it does not stop
+     at paragraphs.
+   - **⏸ Pause / ▶ Resume** from the same spot; **⏪ 5s ⏪ 3s ⏩ 3s ⏩ 5s**
+     (playing, paused or stopped); **■ Stop**.
+   - **◉ Following play** (on by default) moves the highlight down the rows
+     as the English plays; it waits while you type in a box.
+   - **⇱ Re-link audio** after moving or importing the English item.
+   Paragraph times come from the run's English subtitles; without them the
+   row is hidden.
+   Buttons:
    - **📋 Copy script / 📋 Copy English** — copy the whole translation (or
      the transcript) to the clipboard in one click.
    - **📥 Paste script** — replace the whole translation with the

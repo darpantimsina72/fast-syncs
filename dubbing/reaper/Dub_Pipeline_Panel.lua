@@ -3411,6 +3411,8 @@ local function enter_review_phase(m)
                                  base .. "_translation_edited.txt"),
     dirty       = false,
   }
+  -- 0.15.10: paragraph times + where the English sits, for playback.
+  V5.review_init(_review)
   -- Remember (and persist) the run's out_dir for the regen section.
   V5.set_regen_target(m.out_dir, m.language)
   -- v0.7: reaching review is a resumable milestone — record it.
@@ -6376,6 +6378,265 @@ local function _para_box_height(en, tr)
   return lines * 20 + 14
 end
 
+-- ─── 0.15.10: review playback — listen to the English while proofreading ──
+-- Ported from the abandoned 0.16.2 line (review_times / review_relink /
+-- review_seek / review_follow_poll), minus its region and chip helpers, plus
+-- pause/resume, 3 s / 5 s jumps and "Play from start". Plays the ENGLISH
+-- source on the timeline — nothing is synthesized at review.
+--
+-- Playback is continuous: it starts at the selected paragraph and runs on to
+-- the end; Follow (on by default) walks the selection down the rows as it
+-- plays, and is suspended while a text box has focus so typing never moves
+-- the selection. Transport and cursor moves are not timeline edits: no undo.
+-- All state on _review (R) and functions on V5 — 200-locals limit.
+
+-- Paragraph times from the run's English SRT. Each English review paragraph
+-- is the text of a group of WHOLE SRT cues joined with spaces (that is how the
+-- engine's _pair_review_rows builds them), so walk the cues as one character
+-- stream and cut it where the paragraphs cut it. Both sides are compared as
+-- alphanumerics only (the punctuation pass rewrites punctuation and casing).
+-- Returns slots (one per paragraph) + the English duration, or nil when there
+-- is no usable SRT — the transport then hides itself.
+function V5.review_norm(s)
+  return (tostring(s or ""):lower():gsub("[^%w]", ""))
+end
+
+function V5.review_times(en_paras, srt_path)
+  if not (srt_path and srt_path ~= "" and file_exists(srt_path)) then
+    return nil
+  end
+  local cues = parse_srt_file(srt_path)
+  if #cues == 0 then return nil end
+  local len, total = {}, 0
+  for k, c in ipairs(cues) do
+    len[k] = #V5.review_norm(c.text)
+    total  = total + len[k]
+  end
+  if total == 0 then return nil end
+  local plen, ptotal = {}, 0
+  for i, para in ipairs(en_paras) do
+    -- The engine's "—" placeholder row has no English of its own.
+    plen[i] = (para:match("^%s*—%s*$") and 0) or #V5.review_norm(para)
+    ptotal  = ptotal + plen[i]
+  end
+  if ptotal == 0 then return nil end
+  local scale = total / ptotal
+  -- Cues are handed out whole, greedily: the next cue joins this paragraph
+  -- while more than half of it is still wanted, and every paragraph still to
+  -- come keeps at least one cue, so slots stay ordered and never overlap.
+  local after, c = {}, 0
+  for i = #en_paras, 1, -1 do
+    after[i] = c
+    if plen[i] > 0 then c = c + 1 end
+  end
+  local slots, k = {}, 1
+  for i = 1, #en_paras do
+    if plen[i] == 0 or k > #cues then
+      local at = cues[math.min(k, #cues)].start
+      slots[i] = { start_s = at, stop_s = at, timed = false }
+    else
+      local last, need, got = k, plen[i] * scale, len[k]
+      local kmax = (i == #en_paras) and #cues or math.max(k, #cues - after[i])
+      while last < kmax and got + len[last + 1] * 0.5 <= need do
+        last = last + 1
+        got  = got + len[last]
+      end
+      if i == #en_paras then last = #cues end
+      slots[i] = { start_s = cues[k].start, stop_s = cues[last].stop, timed = true }
+      k = last + 1
+    end
+  end
+  return slots, cues[#cues].stop or 0
+end
+
+-- Where this run's English audio sits on THIS timeline. The SRT is timed from
+-- the file's own zero, so an item dragged to 0:30 would play every paragraph
+-- half a minute early. Matched by file NAME (a track render under another
+-- name simply does not match: offset 0, which is right for a render).
+function V5.review_relink(R)
+  R.time_off, R.linked, R.item_pos, R.item_len = 0, nil, nil, nil
+  local want = basename((R.manifest and R.manifest.audio) or ""):lower()
+  local n = (want ~= "" and reaper.CountMediaItems) and reaper.CountMediaItems(0) or 0
+  for i = 0, n - 1 do
+    local it   = reaper.GetMediaItem(0, i)
+    local take = it and reaper.GetActiveTake(it)
+    if take and not reaper.TakeIsMIDI(take) then
+      local src = reaper.GetMediaItemTake_Source(take)
+      -- Unwrap section/reversed wrappers to reach the file source.
+      while src and reaper.GetMediaSourceParent do
+        local parent = reaper.GetMediaSourceParent(src)
+        if parent then src = parent else break end
+      end
+      -- The second argument is required; without it REAPER returns nothing.
+      local fn = src and reaper.GetMediaSourceFileName(src, "") or ""
+      if fn ~= "" and basename(fn):lower() == want then
+        local pos  = reaper.GetMediaItemInfo_Value(it, "D_POSITION") or 0
+        local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
+        R.time_off, R.linked = pos - offs, basename(fn)
+        R.item_pos, R.item_len = pos, reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or 0
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- Set up the playback state when review opens.
+function V5.review_init(R)
+  R.slots, R.total_s = V5.review_times(R.en_paras or {}, R.manifest and R.manifest.en_srt)
+  R.sel, R.follow, R.scroll_to = 1, true, nil
+  -- Audio taken with "From track" is a render of the project from 0:00 into
+  -- DubSource/ (or 0.15.7–0.15.9's 01_Source/): no item plays it, and offset
+  -- 0 is exactly right for it — so it is not "missing".
+  local au = (R.manifest and R.manifest.audio) or ""
+  R.is_render = au:match("[/\\]DubSource[/\\]") ~= nil
+                or au:match("[/\\]01_Source[/\\]") ~= nil
+  V5.review_relink(R)
+end
+
+-- "play" | "pause" | "stop"
+function V5.review_state()
+  local st = reaper.GetPlayState and reaper.GetPlayState() or 0
+  if type(st) ~= "number" then return "stop" end
+  if (st & 2) == 2 then return "pause" end
+  if (st & 1) == 1 then return "play" end
+  return "stop"
+end
+
+-- Timeline range the English occupies: the linked item, else 0 .. duration.
+function V5.review_bounds(R)
+  if R.item_pos then return R.item_pos, R.item_pos + (R.item_len or 0) end
+  return R.time_off or 0, (R.time_off or 0) + (R.total_s or 0)
+end
+
+-- Put the edit cursor (and a rolling or paused transport) at timeline time t,
+-- clamped to the English item. moveview: the paragraph may be off-screen;
+-- seekplay: a rolling transport jumps instead of ignoring us.
+function V5.review_goto(R, t, play)
+  if not reaper.SetEditCurPos then return false end
+  local lo, hi = V5.review_bounds(R)
+  if hi > lo then t = math.max(lo, math.min(hi, t)) else t = math.max(0, t) end
+  reaper.SetEditCurPos(t, true, true)
+  if play and V5.review_state() ~= "play" and reaper.CSurf_OnPlay then
+    reaper.CSurf_OnPlay()
+  end
+  if reaper.UpdateArrange then reaper.UpdateArrange() end
+  return true
+end
+
+function V5.review_play_row(R, i)
+  local s = R.slots and R.slots[i]
+  if not (s and s.timed) then
+    ui_set_banner("warn", "That paragraph has no English timing to play from.")
+    return false
+  end
+  R.sel = i
+  if not R.linked and not R.is_render then
+    ui_set_banner("warn", "This run's English audio is not on the timeline — " ..
+                  "import it to listen (playing from 0:00 of the project).")
+  end
+  return V5.review_goto(R, (R.time_off or 0) + s.start_s, true)
+end
+
+-- Jump n seconds (negative = back) from where playback or the cursor is.
+-- Playing: playback jumps. Paused: the pause point moves. Stopped: the edit
+-- cursor moves.
+function V5.review_jump(R, n)
+  local st = V5.review_state()
+  local base
+  if st ~= "stop" and reaper.GetPlayPosition then
+    base = reaper.GetPlayPosition()
+  else
+    base = reaper.GetCursorPosition and reaper.GetCursorPosition() or 0
+  end
+  return V5.review_goto(R, (tonumber(base) or 0) + n, false)
+end
+
+-- Once per frame: while playing with Follow on, select the paragraph under
+-- the play cursor — except while a text box has focus (typing must never
+-- move the selection).
+function V5.review_follow_poll(ctx, R)
+  R.play_s = nil
+  if not (R.slots and V5.review_state() == "play" and reaper.GetPlayPosition) then
+    return
+  end
+  local t = reaper.GetPlayPosition() - (R.time_off or 0)
+  R.play_s = t
+  if not R.follow then return end
+  if reaper.ImGui_IsAnyItemActive and reaper.ImGui_IsAnyItemActive(ctx) then
+    return
+  end
+  local pick = nil
+  for i, s in ipairs(R.slots) do
+    if s.timed and t >= s.start_s then pick = i end
+    if s.timed and t < s.start_s then break end
+  end
+  if pick and pick ~= R.sel then R.sel, R.scroll_to = pick, pick end
+end
+
+-- m:ss, Latin digits — legible whatever the target script is.
+function V5.review_at(t)
+  t = math.max(0, tonumber(t) or 0)
+  return string.format("%d:%02d", math.floor(t / 60), math.floor(t % 60))
+end
+
+-- The transport row. Hidden when the run has no usable English SRT.
+function V5.review_transport(ctx, R)
+  if not R.slots then
+    _grey_hint(ctx, 'Playback is off for this run: its English subtitle file ' ..
+                    'is missing, so paragraphs have no times.')
+    return
+  end
+  local st = V5.review_state()
+  if reaper.ImGui_Button(ctx, '⏮ Play from start##rv', 0, 26) then
+    local first = nil
+    for i, s in ipairs(R.slots) do if s.timed then first = i break end end
+    if first then V5.review_play_row(R, first) R.scroll_to = first end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, '▶ Play here##rv', 0, 26) then
+    V5.review_play_row(R, R.sel or 1)
+  end
+  reaper.ImGui_SameLine(ctx)
+  local plabel = (st == "pause") and '▶ Resume##rvp' or '⏸ Pause##rvp'
+  if reaper.ImGui_Button(ctx, plabel, 0, 26) then
+    if st ~= "stop" and reaper.CSurf_OnPause then reaper.CSurf_OnPause() end
+  end
+  for _, j in ipairs({ { -5, '⏪ 5s' }, { -3, '⏪ 3s' }, { 3, '⏩ 3s' }, { 5, '⏩ 5s' } }) do
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, j[2] .. '##rvj' .. j[1], 0, 26) then
+      V5.review_jump(R, j[1])
+    end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, '■ Stop##rv', 0, 26) then
+    if reaper.CSurf_OnStop then reaper.CSurf_OnStop() end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, (R.follow and '◉ Following play' or '○ Follow play')
+                              .. '##rvf', 0, 26) then
+    R.follow = not R.follow
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, '⇱ Re-link audio##rv', 0, 26) then
+    if V5.review_relink(R) then
+      ui_set_banner("info", string.format('Linked to "%s" at %s on the timeline.',
+                    R.linked or "?", V5.review_at(R.item_pos or 0)))
+    else
+      ui_set_banner("warn", string.format(
+        'No item on the timeline plays "%s" — import this run\'s English ' ..
+        'audio to listen. Playing from 0:00 of the project until then.',
+        basename((R.manifest and R.manifest.audio) or "(no audio)")))
+    end
+  end
+  local note = (R.linked
+    and string.format('aligned to %s at %s', R.linked, V5.review_at(R.item_pos or 0)))
+    or (R.is_render and 'English taken from a track — timed from the project start')
+    or 'English audio not found on the timeline — timed from 0:00'
+  if R.play_s then note = note .. '  ·  playing ' .. V5.review_at(R.play_s) end
+  _grey_hint(ctx, note)
+end
+
 local function ui_phase_review(ctx)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
   reaper.ImGui_Text(ctx, 'Paused for review — check the translation, then continue to dubbing')
@@ -6443,6 +6704,10 @@ local function ui_phase_review(ctx)
     'anywhere → 📥 Paste script, or Open in editor → save → ⟲ Reload file.')
   reaper.ImGui_Dummy(ctx, 0, 2)
 
+  V5.review_follow_poll(ctx, _review)
+  V5.review_transport(ctx, _review)
+  reaper.ImGui_Dummy(ctx, 0, 2)
+
   -- Side-by-side panes: EN transcript read-only left, translation editable
   -- right. -52 leaves room for the button row below.
   V5.script_font_warning(ctx)
@@ -6464,9 +6729,38 @@ local function ui_phase_review(ctx)
       for i = 1, rows do
         reaper.ImGui_TableNextRow(ctx)
         reaper.ImGui_TableSetColumnIndex(ctx, 0)
+        -- 0.15.10: the selected paragraph is highlighted; Follow scrolls it
+        -- into view; ▶ plays the English from its start.
+        local slot = _review.slots and _review.slots[i]
+        if _review.sel == i and reaper.ImGui_TableSetBgColor
+           and reaper.ImGui_TableBgTarget_RowBg1 then
+          reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg1(),
+                                       0x2A4A6AFF)
+        end
+        if _review.scroll_to == i and reaper.ImGui_SetScrollHereY then
+          reaper.ImGui_SetScrollHereY(ctx, 0.3)
+          _review.scroll_to = nil
+        end
+        if _review.slots then
+          _ui_begin_disabled(ctx, not (slot and slot.timed))
+          if reaper.ImGui_SmallButton(ctx, '▶##rp' .. i) then
+            V5.review_play_row(_review, i)
+          end
+          _ui_end_disabled(ctx)
+          if slot and slot.timed then
+            reaper.ImGui_SameLine(ctx)
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+            reaper.ImGui_Text(ctx, V5.review_at(slot.start_s))
+            reaper.ImGui_PopStyleColor(ctx)
+          end
+        end
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xBBCCDDFF)
         reaper.ImGui_TextWrapped(ctx, _review.en_paras[i] or '')
         reaper.ImGui_PopStyleColor(ctx)
+        -- Clicking the English text selects the paragraph.
+        if reaper.ImGui_IsItemClicked and reaper.ImGui_IsItemClicked(ctx) then
+          _review.sel = i
+        end
         reaper.ImGui_TableSetColumnIndex(ctx, 1)
         -- ReaImGui grows string buffers automatically — passing the current
         -- string each frame is the whole buffer-management story.
