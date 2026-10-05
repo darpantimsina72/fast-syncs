@@ -1139,6 +1139,7 @@ end
 -- where the engine's _chunk_mode() reads it. V5 fields — 200-local limit.
 V5.chunk_mode = "clause"
 V5.sync_mode  = "match"
+V5.shorten_lines = "on"   -- 0.15.11: "on" | "off" (engine: _shorten_lines)
 
 function V5.load_chunk_mode()
   local content = read_all(ENGINE_SETTINGS_PATH)
@@ -1151,6 +1152,8 @@ function V5.load_chunk_mode()
   if s == "match" or s == "legacy" then
     V5.sync_mode = s
   end
+  local sl = json_field(content, "shorten_lines")
+  if sl == "on" or sl == "off" then V5.shorten_lines = sl end
 end
 
 function V5.save_chunk_mode()
@@ -1160,6 +1163,7 @@ function V5.save_chunk_mode()
   if not content or not content:find("{") then content = "{\n}\n" end
   content = _json_set_flat(content, "chunk_mode", V5.chunk_mode)
   content = _json_set_flat(content, "sync_mode", V5.sync_mode)
+  content = _json_set_flat(content, "shorten_lines", V5.shorten_lines)
   local f = io.open(ENGINE_SETTINGS_PATH, "w")
   if not f then return false, ENGINE_SETTINGS_PATH end
   f:write(content)
@@ -7715,6 +7719,29 @@ function V5.pane_advanced(ctx)
   })
   if sm ~= V5.sync_mode then
     V5.sync_mode = sm
+    local okc, badpath = V5.save_chunk_mode()
+    if not okc then
+      ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
+    end
+  end
+
+  -- 0.15.11: fit too-long script lines to their English, or never touch them.
+  reaper.ImGui_Dummy(ctx, 0, 4)
+  V5.label(ctx, 'Too-long lines')
+  local sl = V5.segmented(ctx, 'shortenlines', V5.shorten_lines, {
+    { 'on',  'Fit to English',
+      'Default. A line that is longer than its English (plus the pause after ' ..
+      'it) is trimmed just enough to fit — keeping every idea, changing as ' ..
+      'few words as possible. Lines that fit are never touched. A trim that ' ..
+      'comes out too short is thrown away and your line is kept. Every ' ..
+      'change is listed in <name>_shortened_lines.txt in the video folder.' },
+    { 'off', 'Keep my script',
+      'Never change a line. Long lines stay as written (their voice may run ' ..
+      'past the English or land on Un sync); they are still listed in ' ..
+      '<name>_shortened_lines.txt so you can fix them with Redo.' },
+  })
+  if sl ~= V5.shorten_lines then
+    V5.shorten_lines = sl
     local okc, badpath = V5.save_chunk_mode()
     if not okc then
       ui_set_banner("error", "Could not write:\n" .. tostring(badpath))
