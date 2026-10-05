@@ -4933,32 +4933,54 @@ function V5.out_dir_from_item(item)
     if not up or up == "" or up == dir then break end
     dir = up
   end
+  -- A chunk that was already redone plays <run folder>/regen/chunk_N_vK.wav:
+  -- its run folder is one up. Without this the next redo of it would write
+  -- into regen/regen/.
+  if basename(first) == "regen" then
+    local up = first:match("^(.*)[/\\][^/\\]+$")
+    if up and up ~= "" then return up end
+  end
   return first
 end
 
 
 function V5.prefill_regen_target()
-  if _regen_out_dir ~= "" then return end
   -- Same guard as preflight: only re-point the status paths while idle on
   -- setup — a run in flight keeps the paths it launched with.
   if _ui_phase == "setup" then V5.set_status_paths() end
-  -- The selected chunk knows where it came from, so try it before the probes:
-  -- it is right whenever a chunk is selected, which is exactly when the redo
-  -- pane is being used. 0.15.10: checked on EVERY frame with no target, not
-  -- once — in 0.15.9 the pane usually opened before a chunk was selected,
-  -- the one check found nothing, and it never looked again ("need an output
-  -- folder" for good). Cheap: a path walk, and it stops once a target is set.
+  -- The selected chunk knows where it came from: its audio sits in its run's
+  -- folder. That is right whenever a chunk is selected — which is exactly
+  -- when the redo pane is used — so it wins over everything else.
+  -- 0.15.10, two fixes:
+  --  * looked up on every selection, not once. 0.15.9 looked once, usually
+  --    before a chunk was selected, found nothing and never looked again
+  --    ("need an output folder" for good, even with the run folder right
+  --    there next to the chunk's audio);
+  --  * followed to the NEW chunk when another one is selected. Before, the
+  --    first folder found stuck for the whole REAPER session, so a chunk of
+  --    another video or project was redone into the first one's folder.
+  -- Only re-checked when the selected chunk's audio file changes, so the
+  -- path walk does not run every frame.
   if reaper.CountSelectedMediaItems(0) > 0 then
-    local from_item = V5.out_dir_from_item(reaper.GetSelectedMediaItem(0, 0))
-    if from_item then
-      -- A flat run folder holds its manifest copy: take the run's language
-      -- from it, so the redo speaks the dub's language even when Settings
-      -- has since moved on.
-      local m = load_manifest_json(from_item .. SEP .. "engine_done.json")
-      V5.set_regen_target(from_item, m and m.language or nil)
-      return
+    local it = reaper.GetSelectedMediaItem(0, 0)
+    local take = it and reaper.GetActiveTake(it)
+    local src = take and not reaper.TakeIsMIDI(take)
+                and reaper.GetMediaItemTake_Source(take)
+    local key = src and reaper.GetMediaSourceFileName(src, "") or ""
+    if key ~= "" and key ~= V5.regen_from_key then
+      V5.regen_from_key = key
+      local from_item = V5.out_dir_from_item(it)
+      if from_item and from_item ~= _regen_out_dir then
+        -- A flat run folder holds its manifest copy: take the run's
+        -- language from it, so the redo speaks the dub's language even when
+        -- Settings has since moved on.
+        local m = load_manifest_json(from_item .. SEP .. "engine_done.json")
+        _regen_lang = ""
+        V5.set_regen_target(from_item, m and m.language or nil)
+      end
     end
   end
+  if _regen_out_dir ~= "" then return end
   if V5.regen_prefill_done == STATUS_DIR then return end
   V5.regen_prefill_done = STATUS_DIR
   local probes = { DONE_JSON,
