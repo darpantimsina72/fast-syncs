@@ -619,7 +619,7 @@ def load_tts_settings() -> Dict[str, str]:
 # ─── Output folder layout ───────────────────────────────────────────────────
 # A run keeps ALL of one video's files in ONE flat folder next to the audio:
 #
-#   <audio dir>/<base>/   copy of the English audio, SRT, analysis,
+#   <audio dir>/<base>/   SRT, analysis,
 #                         translation + review files, TTS wav and its pieces,
 #                         synced wav + SRT, sync log, engine log,
 #                         engine_done.json, regen/ (chunk redo)
@@ -833,9 +833,10 @@ def _prepare_output_dir(audio_path: str, project_dir: Optional[str] = None,
     """Pick (and create) the output folder for *audio_path*. See
     _choose_output_dir for the rules.
 
-    A flat folder gets a copy of the English audio, as up to 0.15.6, so the
-    folder holds everything about the video. The copy is a hard link when
-    the disk allows it (no extra space used), a real copy otherwise.
+    The English audio is NOT copied in (0.15.6 did): it already sits right
+    next to the folder, and people dub several regions of one video, so a
+    copy per run only filled the disk. The manifest's en_audio points at the
+    original.
 
     If the folder cannot be created (read-only location), falls back to the
     audio's own folder; the engine's writability check then reports it
@@ -848,18 +849,6 @@ def _prepare_output_dir(audio_path: str, project_dir: Optional[str] = None,
         os.makedirs(out_dir, exist_ok=True)
     except Exception:
         return os.path.dirname(os.path.abspath(audio_path))
-    src = os.path.abspath(audio_path)
-    dst = os.path.join(out_dir, os.path.basename(audio_path))
-    if os.path.abspath(dst) != src and not os.path.exists(dst):
-        try:
-            os.link(src, dst)
-        except Exception:
-            try:
-                shutil.copy2(src, dst)
-            except Exception as e:
-                # Not fatal: the manifest then points at the original audio.
-                print(f"[config] Could not copy the English audio into "
-                      f"{out_dir}: {e}")
     return out_dir
 
 

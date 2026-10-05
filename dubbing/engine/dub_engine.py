@@ -862,8 +862,8 @@ def _prepare_out_dir(pl, audio_path, manifest, args=None, script_path=None):
         _note(f"Output folder (0.15.7–0.15.9 layout, kept so this audio's "
               f"earlier work is reused): {out_dir}")
     else:
-        # The flat folder next to the audio: it holds the copy
-        # _prepare_output_dir made; fall back to the original otherwise.
+        # The flat folder next to the audio. 0.15.6 runs left a copy of the
+        # audio in it — use that for those; new runs load the original.
         copied_audio = os.path.join(out_dir, os.path.basename(audio_path))
         manifest["en_audio"] = (copied_audio if os.path.exists(copied_audio)
                                 else audio_path)

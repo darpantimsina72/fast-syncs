@@ -11,7 +11,7 @@ What is checked:
     pre-0.15.7 folder (no marker) — the rule that keeps old runs resumable.
   * TTS side files (chunk mp3s, _sec_/_str_ reuse sidecars, _chunks.txt) go
     to 03_Voice/pieces/ in a tidy folder, next to the wav anywhere else.
-  * _prepare_output_dir: a fresh audio gets <audio dir>/<base>/ with a copy
+  * _prepare_output_dir: a fresh audio gets <audio dir>/<base>/ with no copy
     of the English audio and no FastSyncs/ anywhere; a flat folder that
     holds this audio's work (or its review script) is kept; a tidy folder
     that holds it is continued.
@@ -176,12 +176,11 @@ def test_prepare_output_dir(tmp):
     out = config._prepare_output_dir(audio, proj)
     check("fresh audio + saved project -> <audio dir>/<base>/ (flat)",
           out == os.path.join(media, "talk") and not config.is_tidy(out))
-    check("English audio copied into it",
-          open(os.path.join(out, "talk.wav"), "rb").read() == b"RIFF")
+    check("English audio NOT copied into it", not os.listdir(out))
     check("no FastSyncs/ created anywhere",
           not os.path.exists(os.path.join(proj, "FastSyncs"))
           and not os.path.exists(os.path.join(media, "FastSyncs")))
-    check("re-run on the copy -> same folder, not nested",
+    check("audio placed inside its own folder -> that folder, not nested",
           config._prepare_output_dir(os.path.join(out, "talk.wav"), proj) == out
           and not os.path.exists(os.path.join(out, "talk")))
 
@@ -515,7 +514,7 @@ def test_end_to_end(tmp):
         rc = _run_engine(["--audio", audio, "--steps", "full"] + common)
         check("full run exits 0", rc == 0)
         tree = _tree(flat)
-        want = ["talk.wav", "talk.srt", "talk_analyzed.txt",
+        want = ["talk.srt", "talk_analyzed.txt",
                 "talk_TranslationStep.txt", "talk_ReviewStep.txt",
                 "talk_FinalScript.txt",
                 f"{disp}_(talk)_tts.wav", f"{disp}_(talk)_tts_chunks.txt",
@@ -539,8 +538,8 @@ def test_end_to_end(tmp):
               and not os.path.exists(os.path.join(media, "FastSyncs")))
         man = json.load(open(os.path.join(flat, "engine_done.json")))
         check("manifest out_dir = the flat folder", man["out_dir"] == flat)
-        check("manifest en_audio = the copy in the folder",
-              man["en_audio"] == os.path.join(flat, "talk.wav"))
+        check("English audio not copied", "talk.wav" not in tree)
+        check("manifest en_audio = the original audio", man["en_audio"] == audio)
         check("manifest points at the synced wav in the folder",
               man["synced_wav"] == os.path.join(flat, f"{disp}_(talk)_synced.wav"))
         check("status-dir manifest still written", os.path.isfile(

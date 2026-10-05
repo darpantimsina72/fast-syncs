@@ -347,11 +347,11 @@ fast-syncs/
 ### Where one video's dub files land (0.15.10)
 
 Every file of one video sits in ONE flat folder next to the audio, named
-after it — the same as up to 0.15.6:
+after it — the same as up to 0.15.6, except the English audio is no longer
+copied in (it is already right beside the folder):
 
 ```
 <audio folder>/<audio name>/
-  <audio name>.wav         copy of the English audio (a hard link when the disk allows)
   <base>.srt, _analyzed.txt, _TranslationStep.txt, _ReviewStep.txt,
   _FinalScript.txt, _review_en.txt, _review_translation.txt, ...   the words
   <Lang>_(<base>)_tts.wav + its _tts_*.mp3 pieces and reuse sidecars   the speech
