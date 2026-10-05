@@ -137,8 +137,7 @@ from those files only — they are never placed on a command line.
    - **From track → Use track** — take it straight from a project track,
      no file browsing. A track holding one clean item uses that item's
      source file directly; anything else (chunks, trims, offsets) is
-     rendered to `FastSyncs/01_Source/` next to the saved project
-     (`<project path>/DubSource/` for an unsaved one) and that wav is used.
+     rendered to `<project path>/DubSource/` and that wav is used.
 3. **Already have the translation?** Use the **Paste Translation** tab:
    pick the audio + language there and paste the translated script (one
    blank line between paragraphs — **📥 Paste from clipboard** works too).
@@ -196,7 +195,20 @@ from those files only — they are never placed on a command line.
    full live log is on the **Logs** tab.
 5. **Review** — the panel shows a side-by-side editor: English transcript
    read-only on the left, translation editable on the right (rendered with
-   a system font matching the language's script). Buttons:
+   a system font matching the language's script).
+   **Listen while you read** (0.15.10) — with the run's English audio on the
+   timeline, a playback row sits above the script:
+   - **⏮ Play from start**, **▶ Play here** (the selected paragraph), or the
+     small **▶** on any row. Playback runs on to the end — it does not stop
+     at paragraphs.
+   - **⏸ Pause / ▶ Resume** from the same spot; **⏪ 5s ⏪ 3s ⏩ 3s ⏩ 5s**
+     (playing, paused or stopped); **■ Stop**.
+   - **◉ Following play** (on by default) moves the highlight down the rows
+     as the English plays; it waits while you type in a box.
+   - **⇱ Re-link audio** after moving or importing the English item.
+   Paragraph times come from the run's English subtitles; without them the
+   row is hidden.
+   Buttons:
    - **📋 Copy script / 📋 Copy English** — copy the whole translation (or
      the transcript) to the clipboard in one click.
    - **📥 Paste script** — replace the whole translation with the
@@ -242,9 +254,12 @@ from those files only — they are never placed on a command line.
    tab, select a chunk item on a "Dub Chunks" track, edit the item's text,
    click **⟳ Regenerate**. The engine synthesizes just that text and the
    panel swaps the item's take source to the new wav — non-destructively,
-   new files only ever land in `FastSyncs/03_Voice/Redo/regen/` (older
-   flat run folders: `<out_dir>/regen/`) with auto-incrementing
+   new files only ever land in the run folder's `regen/` (0.15.7–0.15.9
+   tidy folders: `FastSyncs/03_Voice/Redo/regen/`) with auto-incrementing
    version suffixes.
+   After every redo the whole script as it now stands — every chunk on that
+   track, in order — is rewritten to `<name>_FinalScript_after_redo.txt` in
+   the run folder.
    Below the button, **Regenerate in another voice (optional)** re-does the
    same chunk in a different ElevenLabs voice — same bookmarks + search as
    the other tabs, or paste a voice id. **⟳ Fetch voices** next to the search
@@ -265,8 +280,7 @@ from those files only — they are never placed on a command line.
    voice changer (speech-to-speech — timing and pacing are kept, so a synced
    dub stays synced), and imported as a new track directly below the
    original. The original track is muted but never modified. Files land in
-   `FastSyncs/03_Voice/Redo/VoiceChange/` (unsaved project:
-   `<project path>/VoiceChange/`).
+   `<project path>/VoiceChange/`.
 9. **Just speak some text** — go to the **Text to Speech** tab, paste (or
    type) any text, pick a voice, click **🔊 Generate + import**. The audio
    is synthesized and dropped straight onto a `TTS` track at the edit

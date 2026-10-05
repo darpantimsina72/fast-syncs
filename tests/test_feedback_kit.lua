@@ -1,8 +1,8 @@
 -- Offline checks for feedback_kit.lua with a fake `reaper` table.
 --
 -- Checks the parts that don't need a real REAPER window:
---   * archive_log puts the log next to the project, in FastSyncs/Logs/
---     (and marks FastSyncs/ as the tidy layout),
+--   * archive_log puts the log next to the project, in FastSyncs_Logs/
+--     (and plants no FastSyncs/ folder),
 --     with a readable header, and keeps only the newest 50;
 --   * an unsaved project falls back to <app>/logs/unsaved/;
 --   * the report JSON the star card writes is valid JSON (Python parses it),
@@ -57,9 +57,9 @@ local p = FB.archive_log({ app_root = app_root, pipeline = "AutoSync",
   status = "failed", log_path = live, started = os.time() - 75,
   version = "0.15.5", project = "P1", extra = "panel said: boom" })
 check("archived", p ~= nil)
-check("inside project folder", p and p:find(proj_dir .. "/FastSyncs/Logs/", 1, true) == 1)
+check("inside project folder", p and p:find(proj_dir .. "/FastSyncs_Logs/", 1, true) == 1)
 local mk = io.open(proj_dir .. "/FastSyncs/.fastsyncs-layout", "rb")
-check("tidy layout marker written", mk ~= nil and mk:read("*a"):match("^2") ~= nil)
+check("no FastSyncs/ folder planted", mk == nil)
 if mk then mk:close() end
 check("name has pipeline + status", p and p:match("_AutoSync_failed%.txt$") ~= nil)
 local body = p and io.open(p):read("*a") or ""
@@ -69,13 +69,13 @@ check("log copied", body:find("STEP 1\nboom", 1, true) ~= nil)
 check("panel text appended", body:find("panel said: boom", 1, true) ~= nil)
 
 -- pruning to 50
-local dir = proj_dir .. "/FastSyncs/Logs"
+local dir = proj_dir .. "/FastSyncs_Logs"
 for k = 1, 55 do
   local g = io.open(string.format("%s/2020-01-01_00-00-%02d_Old_ok.txt", dir, k % 60), "w")
   g:write("x"); g:close()
 end
--- the engine's <base>_sync_log.txt shares Logs/ (v0.15.7) and must survive
--- pruning even when <base> starts with a date
+-- a file that is not one of our archives must survive pruning even when its
+-- name starts with a date
 local keep = dir .. "/2026-09-26_talk_sync_log.txt"
 local kf = io.open(keep, "w"); kf:write("engine log"); kf:close()
 FB.archive_log({ app_root = app_root, pipeline = "AutoSync", status = "ok",

@@ -39,8 +39,7 @@
 --   - Windows support: OS-aware setup hints (setup_windows.bat).
 --   - "From track": pick the English audio straight from a project
 --     track — one clean item uses its source file, anything else is
---     rendered to <project>/DubSource/ first (v0.15.7: saved project →
---     FastSyncs/01_Source/).
+--     rendered to <project>/DubSource/ first.
 --
 -- v0.3 additions (standalone app):
 --   - ⚙ Settings section (setup phase): LLM provider/model/keys and
@@ -380,10 +379,12 @@ end
 local function open_url(url) open_path(url) end
 
 -- ---------------------------------------------------------------------------
--- v0.15.7 output layout. New runs put one video's files into ONE tidy folder
--- "<folder of the saved .RPP>/FastSyncs/" (unsaved project: next to the
--- audio), sorted into subfolders. A folder WITHOUT the marker file is a
--- pre-0.15.7 flat folder and keeps its flat paths, so old runs still resume.
+-- Output layout. A run keeps all of one video's files in ONE flat folder
+-- next to the audio, "<audio dir>/<audio name>/" — as up to 0.15.6, restored
+-- in 0.15.10. 0.15.7–0.15.9 wrote "tidy" folders instead
+-- ("<project folder>/FastSyncs/" sorted into subfolders, marked by the marker
+-- file); those are still read, and a run whose earlier half lives in one
+-- finishes there, but nothing new creates one.
 -- KEEP IN SYNC with LAYOUT_SUBDIRS / _choose_output_dir in
 -- dubbing/engine/pipeline/config.py (the engine decides where a run's files
 -- go; the panel must agree for the files it writes itself).
@@ -436,16 +437,6 @@ function V5.project_dir()
   return d
 end
 
--- "<project folder>/FastSyncs" (created with its marker when make), or nil
--- for an unsaved project.
-function V5.tidy_root(make)
-  local pd = V5.project_dir()
-  if not pd then return nil end
-  local root = pd .. SEP .. V5.LAYOUT_DIRNAME
-  if make then V5.make_tidy_root(root) end
-  return root
-end
-
 function V5.audio_base(path)
   return (basename(path or ""):gsub("%.[^.]+$", ""))
 end
@@ -457,23 +448,20 @@ function V5.out_dir_for(audio)
   local src  = dirname(audio or "")
   local base = V5.audio_base(audio)
   if basename(src) == base and not V5.is_tidy(src) then return src, false end
+  -- A 0.15.7–0.15.9 tidy folder that already holds this audio's work.
+  local roots = {}
   local pd = V5.project_dir()
-  local root
-  if pd then
-    root = pd .. SEP .. V5.LAYOUT_DIRNAME
-  elseif V5.is_tidy(src) then
-    root = src
-  elseif V5.is_tidy(dirname(src)) then
-    root = dirname(src)
-  else
-    root = src .. SEP .. V5.LAYOUT_DIRNAME
+  if pd then roots[#roots + 1] = pd .. SEP .. V5.LAYOUT_DIRNAME end
+  if V5.is_tidy(src) then roots[#roots + 1] = src end
+  if V5.is_tidy(dirname(src)) then roots[#roots + 1] = dirname(src) end
+  roots[#roots + 1] = src .. SEP .. V5.LAYOUT_DIRNAME
+  for _, root in ipairs(roots) do
+    if V5.is_tidy(root)
+       and file_exists(root .. SEP .. "02_Script" .. SEP .. base .. ".srt") then
+      return root, true
+    end
   end
-  local legacy = src .. SEP .. base
-  if not V5.is_tidy(legacy) and file_exists(legacy .. SEP .. base .. ".srt")
-     and not file_exists(root .. SEP .. "02_Script" .. SEP .. base .. ".srt") then
-    return legacy, false
-  end
-  return root, true
+  return src .. SEP .. base, false
 end
 
 -- The out_dir copy of a run's engine_done.json: per audio in a tidy folder
@@ -2633,8 +2621,9 @@ local function build_engine_cmd(py, opts)
   if opts.audio and opts.audio ~= '' then
     parts[#parts + 1] = '--audio'
     parts[#parts + 1] = q(opts.audio)
-    -- v0.15.7: saved project -> the run's files go to <its folder>/FastSyncs/.
-    -- Only the audio runs (full/translate/dub) write run outputs.
+    -- New runs write next to the audio; the project folder only tells the
+    -- engine where a 0.15.7–0.15.9 FastSyncs/ folder may hold this audio's
+    -- earlier work. Only the audio runs (full/translate/dub) write outputs.
     local pd = V5.project_dir()
     if pd then
       parts[#parts + 1] = '--project-dir'
@@ -3222,9 +3211,9 @@ function V5.reattach_running()
 end
 
 -- v0.4: write the pasted translation where the engine's own outputs live.
--- v0.15.7: V5.out_dir_for mirrors pipeline/config._choose_output_dir — the
--- tidy FastSyncs/02_Script/, or the audio's pre-0.15.7 flat folder when that
--- already holds its work. The engine picks the same folder back up from
+-- V5.out_dir_for mirrors pipeline/config._choose_output_dir — the audio's
+-- flat folder <audio dir>/<name>/, or a 0.15.7–0.15.9 tidy FastSyncs/02_Script/
+-- when that already holds its work. The engine picks the same folder back up from
 -- this file's location. Returns the file path, or nil + banner.
 local function write_provided_script(audio, text)
   local base = V5.audio_base(audio)
@@ -3422,6 +3411,8 @@ local function enter_review_phase(m)
                                  base .. "_translation_edited.txt"),
     dirty       = false,
   }
+  -- 0.15.10: paragraph times + where the English sits, for playback.
+  V5.review_init(_review)
   -- Remember (and persist) the run's out_dir for the regen section.
   V5.set_regen_target(m.out_dir, m.language)
   -- v0.7: reaching review is a resumable milestone — record it.
@@ -3784,6 +3775,56 @@ local function start_regen(item, text, voice_id)
   })
 end
 
+-- 0.15.10: after every redo, (re)write the whole script as it now stands —
+-- every chunk on the redone chunk's track, in timeline order, one chunk per
+-- line — to "<name>_FinalScript_after_redo.txt" in the run folder, next to
+-- the engine's own <name>_FinalScript.txt. A redo changes the words only on
+-- the timeline (and in one small regen/chunk_N.txt), so without this there is
+-- no single file with the script that was actually spoken.
+-- Rebuilt from the timeline each time, so it is always complete and current.
+-- Returns the file path, or nil. Never raises — the swap already happened.
+function V5.save_final_script(item)
+  local ok, path = pcall(function()
+    local dir = _regen_out_dir or ""
+    if dir == "" or not item or not reaper.ValidatePtr(item, "MediaItem*") then
+      return nil
+    end
+    local track = reaper.GetMediaItem_Track(item)
+    if not track then return nil end
+    local list = {}
+    for i = 0, reaper.CountTrackMediaItems(track) - 1 do
+      local it = reaper.GetTrackMediaItem(track, i)
+      list[#list + 1] = { it = it,
+                          pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION") }
+    end
+    table.sort(list, function(a, b) return a.pos < b.pos end)
+    local lines, last = {}, nil
+    for _, e in ipairs(list) do
+      local txt = (V5.get_item_text(e.it) or ""):match("^%s*(.-)%s*$")
+      -- A split item keeps the same text on every piece: write it once.
+      if txt ~= "" and txt ~= last then lines[#lines + 1] = txt end
+      if txt ~= "" then last = txt end
+    end
+    if #lines == 0 then return nil end
+    local base
+    if V5.is_tidy(dir) then
+      local _, tn = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
+      -- (inline: _sanitize_filename is declared further down the file)
+      base = ((tn and tn ~= "") and tn or "dub"):gsub("[^%w%-_]", "_")
+      path = V5.layout_path(dir, "script", base .. "_FinalScript_after_redo.txt")
+    else
+      base = basename(dir)
+      path = dir .. SEP .. base .. "_FinalScript_after_redo.txt"
+    end
+    local f = io.open(path, "wb")
+    if not f then return nil end
+    f:write(table.concat(lines, "\n"), "\n")
+    f:close()
+    return path
+  end)
+  return ok and path or nil
+end
+
 -- Swap the regenerated wav into the item recorded by start_regen.
 -- Returns true, or false + reason. One undo block.
 local function apply_regen_result(wav)
@@ -3833,6 +3874,7 @@ local function apply_regen_result(wav)
   reaper.Undo_EndBlock(removed > 0 and "Regenerate chunks as one voice"
                        or "Regenerate dub chunk", -1)
   reaper.UpdateArrange()
+  V5.final_script_path = V5.save_final_script(item)
   return true
 end
 
@@ -4174,8 +4216,7 @@ end
 -- pipeline, without manual browsing. A track with exactly ONE untrimmed,
 -- unstretched item plays its source file as-is — use that file directly
 -- (no render). Anything else (multiple items, trims, offsets, play-rate)
--- is rendered to FastSyncs/01_Source/ (saved project, v0.15.7) or
--- <project media path>/DubSource/ (unsaved) first.
+-- is rendered to <project media path>/DubSource/ first.
 -- Returns (path, nil, rendered_bool) or (nil, reason).
 local function audio_from_track(track)
   local n_items = reaper.CountTrackMediaItems(track)
@@ -4211,11 +4252,10 @@ local function audio_from_track(track)
   local _, tname = reaper.GetSetMediaTrackInfo_String(track, "P_NAME",
                                                       "", false)
   if not tname or tname == "" then tname = "track" end
-  -- v0.15.7: saved project -> FastSyncs/01_Source/; unsaved -> the project
-  -- media path's DubSource/, as before.
-  local root = V5.tidy_root(true)
-  local out_dir = root and V5.layout_path(root, "source")
-                  or (reaper.GetProjectPath("") .. SEP .. "DubSource")
+  -- The project media path's DubSource/ (0.15.10: back from 0.15.7's
+  -- FastSyncs/01_Source/). The run's own folder then sits next to the
+  -- render, like any other audio.
+  local out_dir = reaper.GetProjectPath("") .. SEP .. "DubSource"
   local name_base = _sanitize_filename(tname) .. os.date("_%Y%m%d_%H%M%S")
   local wav, why = render_track_stem(track, out_dir, name_base)
   if not wav then return nil, why end
@@ -4251,11 +4291,9 @@ local function start_voice_change()
   local py = preflight_engine()
   if not py then return false end
 
-  -- Rendered + converted audio go to FastSyncs/03_Voice/Redo/VoiceChange/
-  -- (v0.15.7) — <project media path>/VoiceChange/ for an unsaved project.
-  local vc_root = V5.tidy_root(true)
-  local out_dir = vc_root and V5.layout_path(vc_root, "voicechange")
-                  or (reaper.GetProjectPath("") .. SEP .. "VoiceChange")
+  -- Rendered + converted audio go to <project media path>/VoiceChange/
+  -- (0.15.10: back from 0.15.7's FastSyncs/03_Voice/Redo/VoiceChange/).
+  local out_dir = reaper.GetProjectPath("") .. SEP .. "VoiceChange"
   local name_base = _sanitize_filename(tname) .. os.date("_%Y%m%d_%H%M%S")
 
   local in_wav, why = render_track_stem(track, out_dir, name_base)
@@ -4534,7 +4572,10 @@ local function _finish_run(exit_code)
           st.done = st.done + 1
         else
           ui_set_banner("info", "Chunk regenerated and swapped in:\n"
-                                .. m.regen_wav)
+                                .. m.regen_wav
+                                .. (V5.final_script_path and
+                                    ("\nFinal script updated:\n"
+                                     .. V5.final_script_path) or ""))
         end
       elseif batch then
         st.failed = st.failed + 1
@@ -4894,27 +4935,56 @@ function V5.out_dir_from_item(item)
     if not up or up == "" or up == dir then break end
     dir = up
   end
+  -- A chunk that was already redone plays <run folder>/regen/chunk_N_vK.wav:
+  -- its run folder is one up. Without this the next redo of it would write
+  -- into regen/regen/.
+  if basename(first) == "regen" then
+    local up = first:match("^(.*)[/\\][^/\\]+$")
+    if up and up ~= "" then return up end
+  end
   return first
 end
 
 
 function V5.prefill_regen_target()
-  if _regen_out_dir ~= "" then return end
   -- Same guard as preflight: only re-point the status paths while idle on
   -- setup — a run in flight keeps the paths it launched with.
   if _ui_phase == "setup" then V5.set_status_paths() end
-  if V5.regen_prefill_done == STATUS_DIR then return end
-  V5.regen_prefill_done = STATUS_DIR
-  -- The selected chunk knows where it came from, so try it before the probes:
-  -- it is right whenever a chunk is selected, which is exactly when the redo
-  -- pane is being used.
+  -- The selected chunk knows where it came from: its audio sits in its run's
+  -- folder. That is right whenever a chunk is selected — which is exactly
+  -- when the redo pane is used — so it wins over everything else.
+  -- 0.15.10, two fixes:
+  --  * looked up on every selection, not once. 0.15.9 looked once, usually
+  --    before a chunk was selected, found nothing and never looked again
+  --    ("need an output folder" for good, even with the run folder right
+  --    there next to the chunk's audio);
+  --  * followed to the NEW chunk when another one is selected. Before, the
+  --    first folder found stuck for the whole REAPER session, so a chunk of
+  --    another video or project was redone into the first one's folder.
+  -- Only re-checked when the selected chunk's audio file changes, so the
+  -- path walk does not run every frame.
   if reaper.CountSelectedMediaItems(0) > 0 then
-    local from_item = V5.out_dir_from_item(reaper.GetSelectedMediaItem(0, 0))
-    if from_item then
-      V5.set_regen_target(from_item, nil)
-      return
+    local it = reaper.GetSelectedMediaItem(0, 0)
+    local take = it and reaper.GetActiveTake(it)
+    local src = take and not reaper.TakeIsMIDI(take)
+                and reaper.GetMediaItemTake_Source(take)
+    local key = src and reaper.GetMediaSourceFileName(src, "") or ""
+    if key ~= "" and key ~= V5.regen_from_key then
+      V5.regen_from_key = key
+      local from_item = V5.out_dir_from_item(it)
+      if from_item and from_item ~= _regen_out_dir then
+        -- A flat run folder holds its manifest copy: take the run's
+        -- language from it, so the redo speaks the dub's language even when
+        -- Settings has since moved on.
+        local m = load_manifest_json(from_item .. SEP .. "engine_done.json")
+        _regen_lang = ""
+        V5.set_regen_target(from_item, m and m.language or nil)
+      end
     end
   end
+  if _regen_out_dir ~= "" then return end
+  if V5.regen_prefill_done == STATUS_DIR then return end
+  V5.regen_prefill_done = STATUS_DIR
   local probes = { DONE_JSON,
                    V5.regen_target_path(),
                    STATUS_DIR .. SEP .. "regen_target.json",
@@ -6099,9 +6169,8 @@ function V5.start_tts()
       "⚙ Settings → Voices.")
     return false
   end
-  -- Audio lands next to the project, like the track renders do: v0.15.7
-  -- FastSyncs/03_Voice/Redo/TTS/ for a saved project, the media folder's
-  -- TTS/ otherwise.
+  -- Audio lands in the project media folder's TTS/, like the track renders
+  -- do (0.15.10: back from 0.15.7's FastSyncs/03_Voice/Redo/TTS/).
   local proj = reaper.GetProjectPath("")
   if (proj or "") == "" then
     ui_set_banner("error",
@@ -6109,9 +6178,7 @@ function V5.start_tts()
       "its media folder.")
     return false
   end
-  local tts_root = V5.tidy_root(true)
-  local dir = tts_root and V5.layout_path(tts_root, "tts")
-              or (proj .. SEP .. "TTS")
+  local dir = proj .. SEP .. "TTS"
   reaper.RecursiveCreateDirectory(dir, 0)
 
   -- Indic text never travels on argv: it goes through this UTF-8 file.
@@ -6311,6 +6378,265 @@ local function _para_box_height(en, tr)
   return lines * 20 + 14
 end
 
+-- ─── 0.15.10: review playback — listen to the English while proofreading ──
+-- Ported from the abandoned 0.16.2 line (review_times / review_relink /
+-- review_seek / review_follow_poll), minus its region and chip helpers, plus
+-- pause/resume, 3 s / 5 s jumps and "Play from start". Plays the ENGLISH
+-- source on the timeline — nothing is synthesized at review.
+--
+-- Playback is continuous: it starts at the selected paragraph and runs on to
+-- the end; Follow (on by default) walks the selection down the rows as it
+-- plays, and is suspended while a text box has focus so typing never moves
+-- the selection. Transport and cursor moves are not timeline edits: no undo.
+-- All state on _review (R) and functions on V5 — 200-locals limit.
+
+-- Paragraph times from the run's English SRT. Each English review paragraph
+-- is the text of a group of WHOLE SRT cues joined with spaces (that is how the
+-- engine's _pair_review_rows builds them), so walk the cues as one character
+-- stream and cut it where the paragraphs cut it. Both sides are compared as
+-- alphanumerics only (the punctuation pass rewrites punctuation and casing).
+-- Returns slots (one per paragraph) + the English duration, or nil when there
+-- is no usable SRT — the transport then hides itself.
+function V5.review_norm(s)
+  return (tostring(s or ""):lower():gsub("[^%w]", ""))
+end
+
+function V5.review_times(en_paras, srt_path)
+  if not (srt_path and srt_path ~= "" and file_exists(srt_path)) then
+    return nil
+  end
+  local cues = parse_srt_file(srt_path)
+  if #cues == 0 then return nil end
+  local len, total = {}, 0
+  for k, c in ipairs(cues) do
+    len[k] = #V5.review_norm(c.text)
+    total  = total + len[k]
+  end
+  if total == 0 then return nil end
+  local plen, ptotal = {}, 0
+  for i, para in ipairs(en_paras) do
+    -- The engine's "—" placeholder row has no English of its own.
+    plen[i] = (para:match("^%s*—%s*$") and 0) or #V5.review_norm(para)
+    ptotal  = ptotal + plen[i]
+  end
+  if ptotal == 0 then return nil end
+  local scale = total / ptotal
+  -- Cues are handed out whole, greedily: the next cue joins this paragraph
+  -- while more than half of it is still wanted, and every paragraph still to
+  -- come keeps at least one cue, so slots stay ordered and never overlap.
+  local after, c = {}, 0
+  for i = #en_paras, 1, -1 do
+    after[i] = c
+    if plen[i] > 0 then c = c + 1 end
+  end
+  local slots, k = {}, 1
+  for i = 1, #en_paras do
+    if plen[i] == 0 or k > #cues then
+      local at = cues[math.min(k, #cues)].start
+      slots[i] = { start_s = at, stop_s = at, timed = false }
+    else
+      local last, need, got = k, plen[i] * scale, len[k]
+      local kmax = (i == #en_paras) and #cues or math.max(k, #cues - after[i])
+      while last < kmax and got + len[last + 1] * 0.5 <= need do
+        last = last + 1
+        got  = got + len[last]
+      end
+      if i == #en_paras then last = #cues end
+      slots[i] = { start_s = cues[k].start, stop_s = cues[last].stop, timed = true }
+      k = last + 1
+    end
+  end
+  return slots, cues[#cues].stop or 0
+end
+
+-- Where this run's English audio sits on THIS timeline. The SRT is timed from
+-- the file's own zero, so an item dragged to 0:30 would play every paragraph
+-- half a minute early. Matched by file NAME (a track render under another
+-- name simply does not match: offset 0, which is right for a render).
+function V5.review_relink(R)
+  R.time_off, R.linked, R.item_pos, R.item_len = 0, nil, nil, nil
+  local want = basename((R.manifest and R.manifest.audio) or ""):lower()
+  local n = (want ~= "" and reaper.CountMediaItems) and reaper.CountMediaItems(0) or 0
+  for i = 0, n - 1 do
+    local it   = reaper.GetMediaItem(0, i)
+    local take = it and reaper.GetActiveTake(it)
+    if take and not reaper.TakeIsMIDI(take) then
+      local src = reaper.GetMediaItemTake_Source(take)
+      -- Unwrap section/reversed wrappers to reach the file source.
+      while src and reaper.GetMediaSourceParent do
+        local parent = reaper.GetMediaSourceParent(src)
+        if parent then src = parent else break end
+      end
+      -- The second argument is required; without it REAPER returns nothing.
+      local fn = src and reaper.GetMediaSourceFileName(src, "") or ""
+      if fn ~= "" and basename(fn):lower() == want then
+        local pos  = reaper.GetMediaItemInfo_Value(it, "D_POSITION") or 0
+        local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
+        R.time_off, R.linked = pos - offs, basename(fn)
+        R.item_pos, R.item_len = pos, reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or 0
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- Set up the playback state when review opens.
+function V5.review_init(R)
+  R.slots, R.total_s = V5.review_times(R.en_paras or {}, R.manifest and R.manifest.en_srt)
+  R.sel, R.follow, R.scroll_to = 1, true, nil
+  -- Audio taken with "From track" is a render of the project from 0:00 into
+  -- DubSource/ (or 0.15.7–0.15.9's 01_Source/): no item plays it, and offset
+  -- 0 is exactly right for it — so it is not "missing".
+  local au = (R.manifest and R.manifest.audio) or ""
+  R.is_render = au:match("[/\\]DubSource[/\\]") ~= nil
+                or au:match("[/\\]01_Source[/\\]") ~= nil
+  V5.review_relink(R)
+end
+
+-- "play" | "pause" | "stop"
+function V5.review_state()
+  local st = reaper.GetPlayState and reaper.GetPlayState() or 0
+  if type(st) ~= "number" then return "stop" end
+  if (st & 2) == 2 then return "pause" end
+  if (st & 1) == 1 then return "play" end
+  return "stop"
+end
+
+-- Timeline range the English occupies: the linked item, else 0 .. duration.
+function V5.review_bounds(R)
+  if R.item_pos then return R.item_pos, R.item_pos + (R.item_len or 0) end
+  return R.time_off or 0, (R.time_off or 0) + (R.total_s or 0)
+end
+
+-- Put the edit cursor (and a rolling or paused transport) at timeline time t,
+-- clamped to the English item. moveview: the paragraph may be off-screen;
+-- seekplay: a rolling transport jumps instead of ignoring us.
+function V5.review_goto(R, t, play)
+  if not reaper.SetEditCurPos then return false end
+  local lo, hi = V5.review_bounds(R)
+  if hi > lo then t = math.max(lo, math.min(hi, t)) else t = math.max(0, t) end
+  reaper.SetEditCurPos(t, true, true)
+  if play and V5.review_state() ~= "play" and reaper.CSurf_OnPlay then
+    reaper.CSurf_OnPlay()
+  end
+  if reaper.UpdateArrange then reaper.UpdateArrange() end
+  return true
+end
+
+function V5.review_play_row(R, i)
+  local s = R.slots and R.slots[i]
+  if not (s and s.timed) then
+    ui_set_banner("warn", "That paragraph has no English timing to play from.")
+    return false
+  end
+  R.sel = i
+  if not R.linked and not R.is_render then
+    ui_set_banner("warn", "This run's English audio is not on the timeline — " ..
+                  "import it to listen (playing from 0:00 of the project).")
+  end
+  return V5.review_goto(R, (R.time_off or 0) + s.start_s, true)
+end
+
+-- Jump n seconds (negative = back) from where playback or the cursor is.
+-- Playing: playback jumps. Paused: the pause point moves. Stopped: the edit
+-- cursor moves.
+function V5.review_jump(R, n)
+  local st = V5.review_state()
+  local base
+  if st ~= "stop" and reaper.GetPlayPosition then
+    base = reaper.GetPlayPosition()
+  else
+    base = reaper.GetCursorPosition and reaper.GetCursorPosition() or 0
+  end
+  return V5.review_goto(R, (tonumber(base) or 0) + n, false)
+end
+
+-- Once per frame: while playing with Follow on, select the paragraph under
+-- the play cursor — except while a text box has focus (typing must never
+-- move the selection).
+function V5.review_follow_poll(ctx, R)
+  R.play_s = nil
+  if not (R.slots and V5.review_state() == "play" and reaper.GetPlayPosition) then
+    return
+  end
+  local t = reaper.GetPlayPosition() - (R.time_off or 0)
+  R.play_s = t
+  if not R.follow then return end
+  if reaper.ImGui_IsAnyItemActive and reaper.ImGui_IsAnyItemActive(ctx) then
+    return
+  end
+  local pick = nil
+  for i, s in ipairs(R.slots) do
+    if s.timed and t >= s.start_s then pick = i end
+    if s.timed and t < s.start_s then break end
+  end
+  if pick and pick ~= R.sel then R.sel, R.scroll_to = pick, pick end
+end
+
+-- m:ss, Latin digits — legible whatever the target script is.
+function V5.review_at(t)
+  t = math.max(0, tonumber(t) or 0)
+  return string.format("%d:%02d", math.floor(t / 60), math.floor(t % 60))
+end
+
+-- The transport row. Hidden when the run has no usable English SRT.
+function V5.review_transport(ctx, R)
+  if not R.slots then
+    _grey_hint(ctx, 'Playback is off for this run: its English subtitle file ' ..
+                    'is missing, so paragraphs have no times.')
+    return
+  end
+  local st = V5.review_state()
+  if reaper.ImGui_Button(ctx, '⏮ Play from start##rv', 0, 26) then
+    local first = nil
+    for i, s in ipairs(R.slots) do if s.timed then first = i break end end
+    if first then V5.review_play_row(R, first) R.scroll_to = first end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, '▶ Play here##rv', 0, 26) then
+    V5.review_play_row(R, R.sel or 1)
+  end
+  reaper.ImGui_SameLine(ctx)
+  local plabel = (st == "pause") and '▶ Resume##rvp' or '⏸ Pause##rvp'
+  if reaper.ImGui_Button(ctx, plabel, 0, 26) then
+    if st ~= "stop" and reaper.CSurf_OnPause then reaper.CSurf_OnPause() end
+  end
+  for _, j in ipairs({ { -5, '⏪ 5s' }, { -3, '⏪ 3s' }, { 3, '⏩ 3s' }, { 5, '⏩ 5s' } }) do
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, j[2] .. '##rvj' .. j[1], 0, 26) then
+      V5.review_jump(R, j[1])
+    end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, '■ Stop##rv', 0, 26) then
+    if reaper.CSurf_OnStop then reaper.CSurf_OnStop() end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, (R.follow and '◉ Following play' or '○ Follow play')
+                              .. '##rvf', 0, 26) then
+    R.follow = not R.follow
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, '⇱ Re-link audio##rv', 0, 26) then
+    if V5.review_relink(R) then
+      ui_set_banner("info", string.format('Linked to "%s" at %s on the timeline.',
+                    R.linked or "?", V5.review_at(R.item_pos or 0)))
+    else
+      ui_set_banner("warn", string.format(
+        'No item on the timeline plays "%s" — import this run\'s English ' ..
+        'audio to listen. Playing from 0:00 of the project until then.',
+        basename((R.manifest and R.manifest.audio) or "(no audio)")))
+    end
+  end
+  local note = (R.linked
+    and string.format('aligned to %s at %s', R.linked, V5.review_at(R.item_pos or 0)))
+    or (R.is_render and 'English taken from a track — timed from the project start')
+    or 'English audio not found on the timeline — timed from 0:00'
+  if R.play_s then note = note .. '  ·  playing ' .. V5.review_at(R.play_s) end
+  _grey_hint(ctx, note)
+end
+
 local function ui_phase_review(ctx)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
   reaper.ImGui_Text(ctx, 'Paused for review — check the translation, then continue to dubbing')
@@ -6378,6 +6704,10 @@ local function ui_phase_review(ctx)
     'anywhere → 📥 Paste script, or Open in editor → save → ⟲ Reload file.')
   reaper.ImGui_Dummy(ctx, 0, 2)
 
+  V5.review_follow_poll(ctx, _review)
+  V5.review_transport(ctx, _review)
+  reaper.ImGui_Dummy(ctx, 0, 2)
+
   -- Side-by-side panes: EN transcript read-only left, translation editable
   -- right. -52 leaves room for the button row below.
   V5.script_font_warning(ctx)
@@ -6399,9 +6729,38 @@ local function ui_phase_review(ctx)
       for i = 1, rows do
         reaper.ImGui_TableNextRow(ctx)
         reaper.ImGui_TableSetColumnIndex(ctx, 0)
+        -- 0.15.10: the selected paragraph is highlighted; Follow scrolls it
+        -- into view; ▶ plays the English from its start.
+        local slot = _review.slots and _review.slots[i]
+        if _review.sel == i and reaper.ImGui_TableSetBgColor
+           and reaper.ImGui_TableBgTarget_RowBg1 then
+          reaper.ImGui_TableSetBgColor(ctx, reaper.ImGui_TableBgTarget_RowBg1(),
+                                       0x2A4A6AFF)
+        end
+        if _review.scroll_to == i and reaper.ImGui_SetScrollHereY then
+          reaper.ImGui_SetScrollHereY(ctx, 0.3)
+          _review.scroll_to = nil
+        end
+        if _review.slots then
+          _ui_begin_disabled(ctx, not (slot and slot.timed))
+          if reaper.ImGui_SmallButton(ctx, '▶##rp' .. i) then
+            V5.review_play_row(_review, i)
+          end
+          _ui_end_disabled(ctx)
+          if slot and slot.timed then
+            reaper.ImGui_SameLine(ctx)
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+            reaper.ImGui_Text(ctx, V5.review_at(slot.start_s))
+            reaper.ImGui_PopStyleColor(ctx)
+          end
+        end
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xBBCCDDFF)
         reaper.ImGui_TextWrapped(ctx, _review.en_paras[i] or '')
         reaper.ImGui_PopStyleColor(ctx)
+        -- Clicking the English text selects the paragraph.
+        if reaper.ImGui_IsItemClicked and reaper.ImGui_IsItemClicked(ctx) then
+          _review.sel = i
+        end
         reaper.ImGui_TableSetColumnIndex(ctx, 1)
         -- ReaImGui grows string buffers automatically — passing the current
         -- string each frame is the whole buffer-management story.

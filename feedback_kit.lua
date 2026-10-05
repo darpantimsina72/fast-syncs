@@ -8,8 +8,8 @@
 -- Two jobs:
 --
 -- 1. archive_log(opts) — when a run ends, copy its log next to the REAPER
---    project it belongs to:  <project folder>/FastSyncs/Logs/
---    (v0.15.7 tidy output folder; before that it was FastSyncs_Logs/)
+--    project it belongs to:  <project folder>/FastSyncs_Logs/
+--    (0.15.7–0.15.9 used FastSyncs/Logs/ instead)
 --        2026-09-26_14-05-33_AutoSync_failed.txt
 --    One folder per video, newest 50 kept. The live log files are wiped at
 --    every launch (the poller needs a clean file), so without this copy the
@@ -108,26 +108,15 @@ local function project_info(proj)
   return dirname(fn), (fn:match("([^/\\]+)$") or fn)
 end
 
--- v0.15.7: the archive lives in the tidy output folder's Logs/. Creating
--- that folder also writes its marker file, so the dubbing engine and panel
--- recognise it (KEEP IN SYNC with LAYOUT_MARKER in
--- dubbing/engine/pipeline/config.py).
-local LAYOUT_DIRNAME = "FastSyncs"
-local LAYOUT_MARKER  = ".fastsyncs-layout"
-
-local function ensure_tidy_root(root)
-  reaper.RecursiveCreateDirectory(root, 0)
-  local mk = root .. SEP .. LAYOUT_MARKER
-  local f = io.open(mk, "rb")
-  if f then f:close() return end
-  f = io.open(mk, "wb")
-  if f then f:write("2\n") f:close() end
-end
+-- The archive lives in "<project folder>/FastSyncs_Logs/", as up to 0.15.6
+-- (0.15.10: back from 0.15.7's FastSyncs/Logs/, which also planted a
+-- FastSyncs/ folder in every project just to hold logs). The dubbing engine
+-- additionally appends its own log to the video's output folder.
+local LOG_DIRNAME = "FastSyncs_Logs"
 
 -- Newest-last list of archived logs in `dir`, pruned to KEEP_LOGS.
--- Only names shaped like ours (date_time_…) count: Logs/ also holds the
--- engine's <base>_sync_log.txt, which must never be pruned — even when
--- <base> itself starts with a date.
+-- Only names shaped like ours (date_time_…) count, so nothing else that
+-- ends up in the folder is ever pruned — even a name that starts with a date.
 local function prune(dir)
   if not reaper.EnumerateFiles then return end
   local names, i = {}, 0
@@ -155,9 +144,7 @@ function M.archive_log(opts)
     local pdir, pname = project_info(opts.project)
     local dir
     if pdir and pdir ~= "" then
-      local root = pdir .. SEP .. LAYOUT_DIRNAME
-      ensure_tidy_root(root)
-      dir = root .. SEP .. "Logs"
+      dir = pdir .. SEP .. LOG_DIRNAME
     else
       dir = opts.app_root .. SEP .. "logs" .. SEP .. "unsaved"
     end

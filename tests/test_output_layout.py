@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""v0.15.7 tidy output layout: where every run file lands, old folders still
-resume, and a fake end-to-end run that checks the real engine puts its files
-in the right subfolders.
+"""Output layout: a new run keeps every file of one video in ONE flat folder
+next to the audio (<audio dir>/<base>/, as up to 0.15.6 — restored in
+0.15.10); the 0.15.7–0.15.9 tidy FastSyncs/ layout is still read and a run
+whose earlier half lives in one finishes there. A fake end-to-end run checks
+the real engine puts its files where they belong.
 
 What is checked:
   * layout_path maps every file kind to its subfolder in a tidy folder (one
@@ -9,14 +11,15 @@ What is checked:
     pre-0.15.7 folder (no marker) — the rule that keeps old runs resumable.
   * TTS side files (chunk mp3s, _sec_/_str_ reuse sidecars, _chunks.txt) go
     to 03_Voice/pieces/ in a tidy folder, next to the wav anywhere else.
-  * _prepare_output_dir: a fresh audio gets the tidy root (project folder or
-    audio folder), marker written, English audio NOT copied; a legacy folder
-    that already holds this audio's work (or its review script) is kept.
+  * _prepare_output_dir: a fresh audio gets <audio dir>/<base>/ with no copy
+    of the English audio and no FastSyncs/ anywhere; a flat folder that
+    holds this audio's work (or its review script) is kept; a tidy folder
+    that holds it is continued.
   * two audios in one project never write the same file.
   * the panel / importer / feedback kit Lua copies of the folder names agree
     with the Python table.
   * end-to-end (needs ffmpeg): a full run, a translate -> dub staged run and
-    a dub that continues a pre-0.15.7 review, with every paid call faked —
+    a dub that continues a 0.15.9 tidy review, with every paid call faked —
     ElevenLabs answers from a local fake, Scribe and the LLM are stubbed.
     Zero network.
 
@@ -171,64 +174,72 @@ def test_prepare_output_dir(tmp):
     touch(audio, b"RIFF")
 
     out = config._prepare_output_dir(audio, proj)
-    check("fresh audio + saved project -> <project>/FastSyncs",
-          out == os.path.join(proj, "FastSyncs"))
-    check("marker written", config.is_tidy(out))
-    check("English audio NOT copied",
-          not any(f.endswith(".wav") for _, _, fs in os.walk(out) for f in fs))
-    check("no legacy sibling folder created",
-          not os.path.exists(os.path.join(media, "talk")))
+    check("fresh audio + saved project -> <audio dir>/<base>/ (flat)",
+          out == os.path.join(media, "talk") and not config.is_tidy(out))
+    check("English audio NOT copied into it", not os.listdir(out))
+    check("no FastSyncs/ created anywhere",
+          not os.path.exists(os.path.join(proj, "FastSyncs"))
+          and not os.path.exists(os.path.join(media, "FastSyncs")))
+    check("audio placed inside its own folder -> that folder, not nested",
+          config._prepare_output_dir(os.path.join(out, "talk.wav"), proj) == out
+          and not os.path.exists(os.path.join(out, "talk")))
 
     audio2 = os.path.join(tmp, "Loose", "clip.wav")
     touch(audio2, b"RIFF")
     out2 = config._prepare_output_dir(audio2)
-    check("no project dir -> <audio dir>/FastSyncs",
-          out2 == os.path.join(tmp, "Loose", "FastSyncs") and config.is_tidy(out2))
-    check("missing --project-dir folder falls back to the audio folder",
+    check("no project dir -> <audio dir>/<base>/",
+          out2 == os.path.join(tmp, "Loose", "clip"))
+    check("missing --project-dir folder -> same",
           config._prepare_output_dir(audio2, os.path.join(tmp, "gone"))
           == out2)
 
-    # DubSource render inside a tidy root, run without a project dir: no
-    # FastSyncs/01_Source/FastSyncs nesting.
-    src = config.layout_path(out, "source", "Dub_20260927.wav")
-    touch(src, b"RIFF")
-    check("01_Source render -> its own tidy root, not nested",
-          config._prepare_output_dir(src) == out)
-    check("01_Source render + project dir -> project root",
-          config._prepare_output_dir(src, proj) == out)
-
-    print("legacy (pre-0.15.7) folders keep being used")
+    print("flat (pre-0.15.7 / 0.15.10+) folders keep being used")
     old_audio = os.path.join(media, "old.wav")
     touch(old_audio, b"RIFF")
     old_dir = os.path.join(media, "old")
     touch(os.path.join(old_dir, "old.srt"), b"1")
     touch(os.path.join(old_dir, "old.wav"), b"RIFF")      # 0.15.6 copy
     touch(os.path.join(old_dir, "old_review_translation.txt"), b"t")
-    check("dub --script in a legacy folder -> that legacy folder",
+    check("dub --script in a flat folder -> that folder",
           config._prepare_output_dir(
               old_audio, proj, os.path.join(old_dir, "old_review_translation.txt"))
           == old_dir)
-    check("legacy folder already holds this audio's work -> kept",
+    check("flat folder already holds this audio's work -> kept",
           config._prepare_output_dir(old_audio, proj) == old_dir)
-    check("legacy folder never gets a marker", not config.is_tidy(old_dir))
-    check("audio inside its own legacy folder -> that folder",
+    check("flat folder never gets a marker", not config.is_tidy(old_dir))
+    check("audio inside its own flat folder -> that folder",
           config._prepare_output_dir(os.path.join(old_dir, "old.wav"), proj)
           == old_dir)
     edited = os.path.join(old_dir, "old_translation_edited.txt")
     touch(edited, b"t")
-    check("dub --script = edited file in legacy folder -> legacy",
+    check("dub --script = edited file in flat folder -> flat",
           config._prepare_output_dir(old_audio, None, edited) == old_dir)
 
-    print("tidy work is continued from the script's folder")
-    rv = config.layout_path(out, "script", "talk_review_translation.txt")
+    print("0.15.7–0.15.9 tidy work is continued")
+    tidy = config.make_tidy_root(os.path.join(proj, "FastSyncs"))
+    rv = config.layout_path(tidy, "script", "talk_review_translation.txt")
     touch(rv, b"t")
     other = os.path.join(tmp, "Elsewhere")
     os.makedirs(other)
     check("dub --script in 02_Script -> that tidy root (even if the project "
-          "moved)", config._prepare_output_dir(audio, other, rv) == out)
-    touch(config.layout_path(out, "script", "old.srt"), b"1")
-    check("tidy root already holds this audio's work -> tidy wins over legacy",
-          config._prepare_output_dir(old_audio, proj) == out)
+          "moved)", config._prepare_output_dir(audio, other, rv) == tidy)
+    held = os.path.join(media, "held.wav")
+    touch(held, b"RIFF")
+    touch(config.layout_path(tidy, "script", "held.srt"), b"1")
+    check("project FastSyncs/ holds this audio's work -> continued there",
+          config._prepare_output_dir(held, proj) == tidy)
+    check("... and no flat folder made for it",
+          not os.path.exists(os.path.join(media, "held")))
+    check("a tidy root WITHOUT this audio's work is ignored",
+          config._prepare_output_dir(audio2, proj) == out2)
+    touch(config.layout_path(tidy, "script", "old.srt"), b"1")
+    check("tidy root already holds this audio's work -> tidy wins over flat",
+          config._prepare_output_dir(old_audio, proj) == tidy)
+    src = config.layout_path(tidy, "source", "Dub_20260927.wav")
+    touch(src, b"RIFF")
+    touch(config.layout_path(tidy, "script", "Dub_20260927.srt"), b"1")
+    check("0.15.9 01_Source render with its work -> its tidy root, not nested",
+          config._prepare_output_dir(src) == tidy)
 
 
 def test_two_audios(tmp):
@@ -274,9 +285,8 @@ def test_lua_mirrors():
         for k in ("source", "voice", "final")) and '"_work"' in imp
         and config.LAYOUT_MARKER in imp)
     fk = open(os.path.join(REPO, "feedback_kit.lua"), encoding="utf-8").read()
-    check("feedback kit writes Logs/ + the marker",
-          '"Logs"' in fk and config.LAYOUT_MARKER in fk
-          and f'"{config.LAYOUT_DIRNAME}"' in fk)
+    check("feedback kit archives to FastSyncs_Logs/ and plants no marker",
+          '"FastSyncs_Logs"' in fk and config.LAYOUT_MARKER not in fk)
 
 
 def test_lua_out_dir_mirror(tmp):
@@ -306,10 +316,15 @@ def test_lua_out_dir_mirror(tmp):
     root = config.make_tidy_root(os.path.join(proj, "FastSyncs"))
     src = config.layout_path(root, "source", "Dub_1.wav")
     touch(src)
+    touch(config.layout_path(root, "script", "Dub_1.srt"))
+    held = os.path.join(media, "held.wav")
+    touch(held)
+    touch(config.layout_path(root, "script", "held.srt"))
     loose = os.path.join(tmp, "Loose", "clip.wav")
     touch(loose)
     cases = [(fresh, proj), (old, proj), (inside, proj), (src, None),
-             (src, proj), (loose, None), (fresh, None)]
+             (src, proj), (held, proj), (held, None), (loose, None),
+             (fresh, None)]
 
     lines = ['SEP = "/"', "V5 = {}",
              "local function file_exists(p) local f = io.open(p, 'rb') "
@@ -340,8 +355,8 @@ def test_lua_out_dir_mirror(tmp):
             ok = False
             print(f"     {os.path.basename(audio)} pd={bool(pd)}: lua {line} "
                   f"!= py {d}|{t}")
-    check("same folder for every case (fresh, legacy, own folder, 01_Source, "
-          "loose, unsaved)", ok)
+    check("same folder for every case (fresh, flat, own folder, 01_Source, "
+          "tidy with work, loose, unsaved)", ok)
     check("Lua regen path = 03_Voice/Redo/regen",
           bool(got) and got[-1] == config.layout_path(root, "regen", "x.wav"))
 
@@ -487,118 +502,109 @@ def test_end_to_end(tmp):
     de.STATUS_DIR = os.path.join(tmp, "status")
     try:
         proj = os.path.join(tmp, "My Project")
-        audio = os.path.join(proj, "Media", "talk.wav")
+        media = os.path.join(proj, "Media")
+        audio = os.path.join(media, "talk.wav")
         _english_wav(audio)
-        root = os.path.join(proj, "FastSyncs")
+        flat = os.path.join(media, "talk")
         disp = config._lang_display_name(LANG)
         common = ["--language", LANG, "--voice-id", VOICE,
                   "--sync-mode", "match", "--project-dir", proj]
 
-        # 1. full run
+        # 1. full run -> everything flat in <audio dir>/talk/
         rc = _run_engine(["--audio", audio, "--steps", "full"] + common)
         check("full run exits 0", rc == 0)
-        tree = _tree(root)
-        want = [".fastsyncs-layout",
-                "02_Script/talk.srt", "02_Script/talk_analyzed.txt",
-                "02_Script/talk_TranslationStep.txt",
-                "02_Script/talk_ReviewStep.txt",
-                "02_Script/talk_FinalScript.txt",
-                f"03_Voice/{disp}_(talk)_tts.wav",
-                f"03_Voice/pieces/{disp}_(talk)_tts_chunks.txt",
-                f"04_Final/{disp}_(talk)_synced.wav",
-                "04_Final/talk_sync_synced.srt",
-                "_work/talk_engine_done.json", "_work/talk_sync_en.srt",
-                "_work/talk_sync_texts.txt", "_work/talk_sync_timestamps.txt"]
+        tree = _tree(flat)
+        want = ["talk.srt", "talk_analyzed.txt",
+                "talk_TranslationStep.txt", "talk_ReviewStep.txt",
+                "talk_FinalScript.txt",
+                f"{disp}_(talk)_tts.wav", f"{disp}_(talk)_tts_chunks.txt",
+                f"{disp}_(talk)_synced.wav", "talk_sync_synced.srt",
+                "engine_done.json", "talk_sync_en.srt",
+                "talk_sync_texts.txt", "talk_sync_timestamps.txt"]
         missing = [w for w in want if w not in tree]
-        check("full run: every file in its subfolder", not missing)
+        check("full run: every file in the one folder next to the audio",
+              not missing)
         for w in missing:
             print("     missing:", w)
-        # match mode saves each paid request as _str_NNN or _sec_NNN (+ .json
-        # reuse sidecar), depending on the synthesis path it takes.
-        check("full run: paid TTS pieces + reuse sidecars in 03_Voice/pieces",
-              any(re.match(rf"03_Voice/pieces/{re.escape(disp)}_\(talk\)"
-                           r"_tts_(str|sec)_001\.mp3$", t) for t in tree)
-              and any(re.match(r"03_Voice/pieces/.*_tts_(str|sec)_001\.mp3"
-                               r"\.json$", t) for t in tree))
-        stray = [t for t in tree if "/" not in t and t != ".fastsyncs-layout"]
-        check("full run: nothing loose in the root", not stray)
-        check("full run: English audio not copied",
-              not any(t.endswith("talk.wav") for t in tree))
-        man = json.load(open(os.path.join(root, "_work",
-                                          "talk_engine_done.json")))
-        check("manifest out_dir = tidy root", man["out_dir"] == root)
-        check("manifest en_audio = the ORIGINAL audio",
-              man["en_audio"] == audio)
-        check("manifest points at 04_Final synced wav",
-              rel(root, man["synced_wav"]) == f"04_Final/{disp}_(talk)_synced.wav")
+        check("full run: paid TTS pieces + reuse sidecars in the same folder",
+              any(re.match(rf"{re.escape(disp)}_\(talk\)_tts_(str|sec)_001"
+                           r"\.mp3$", t) for t in tree)
+              and any(re.match(r".*_tts_(str|sec)_001\.mp3\.json$", t)
+                      for t in tree))
+        check("full run: no subfolders, no marker",
+              all("/" not in t for t in tree) and ".fastsyncs-layout" not in tree)
+        check("full run: no FastSyncs/ folder anywhere",
+              not os.path.exists(os.path.join(proj, "FastSyncs"))
+              and not os.path.exists(os.path.join(media, "FastSyncs")))
+        man = json.load(open(os.path.join(flat, "engine_done.json")))
+        check("manifest out_dir = the flat folder", man["out_dir"] == flat)
+        check("English audio not copied", "talk.wav" not in tree)
+        check("manifest en_audio = the original audio", man["en_audio"] == audio)
+        check("manifest points at the synced wav in the folder",
+              man["synced_wav"] == os.path.join(flat, f"{disp}_(talk)_synced.wav"))
         check("status-dir manifest still written", os.path.isfile(
             os.path.join(de.STATUS_DIR, "engine_done.json")))
         print("     tree:", ", ".join(tree))
 
         # 2. staged translate -> dub on a second audio in the same project
-        audio_b = os.path.join(proj, "Media", "interview.wav")
+        audio_b = os.path.join(media, "interview.wav")
         _english_wav(audio_b)
+        flat_b = os.path.join(media, "interview")
         rc = _run_engine(["--audio", audio_b, "--steps", "translate"] + common)
         check("translate exits 0", rc == 0)
-        rman = json.load(open(os.path.join(root, "_work",
-                                           "interview_engine_done.json")))
+        rman = json.load(open(os.path.join(flat_b, "engine_done.json")))
         check("review manifest status", rman["status"] == "review")
-        check("review files in 02_Script",
-              rel(root, rman["translation_text"])
-              == "02_Script/interview_review_translation.txt"
-              and rel(root, rman["en_text"]) == "02_Script/interview_review_en.txt")
-        edited = os.path.join(root, "02_Script",
-                              "interview_translation_edited.txt")
+        check("review files in the audio's folder",
+              rman["translation_text"] == os.path.join(
+                  flat_b, "interview_review_translation.txt")
+              and rman["en_text"] == os.path.join(flat_b, "interview_review_en.txt"))
+        edited = os.path.join(flat_b, "interview_translation_edited.txt")
         shutil.copy(rman["translation_text"], edited)
         rc = _run_engine(["--audio", audio_b, "--steps", "dub",
                           "--script", edited] + common)
         check("dub resume exits 0", rc == 0)
-        dman = json.load(open(os.path.join(root, "_work",
-                                           "interview_engine_done.json")))
-        check("dub manifest ok, same tidy root",
-              dman["status"] == "ok" and dman["out_dir"] == root)
-        check("dub wrote into 03_Voice / 04_Final", os.path.isfile(
-            os.path.join(root, "03_Voice", f"{disp}_(interview)_tts.wav"))
-            and os.path.isfile(os.path.join(root, "04_Final",
-                                            "interview_sync_synced.srt")))
+        dman = json.load(open(os.path.join(flat_b, "engine_done.json")))
+        check("dub manifest ok, same folder",
+              dman["status"] == "ok" and dman["out_dir"] == flat_b)
+        check("dub wrote its speech + SRT there", os.path.isfile(
+            os.path.join(flat_b, f"{disp}_(interview)_tts.wav"))
+            and os.path.isfile(os.path.join(flat_b, "interview_sync_synced.srt")))
         check("first audio's manifest untouched by the second",
-              json.load(open(os.path.join(root, "_work",
-                                          "talk_engine_done.json")))["audio"]
+              json.load(open(os.path.join(flat, "engine_done.json")))["audio"]
               == audio)
 
-        # 3. a review paused on 0.15.6 (flat folder) continued on 0.15.7
-        old_audio = os.path.join(proj, "Media", "old.wav")
+        # 3. a review paused on 0.15.9 (tidy FastSyncs/) continued on 0.15.10
+        root = config.make_tidy_root(os.path.join(proj, "FastSyncs"))
+        old_audio = os.path.join(media, "old.wav")
         _english_wav(old_audio)
-        old_dir = os.path.join(proj, "Media", "old")
-        os.makedirs(old_dir)
-        shutil.copy(old_audio, os.path.join(old_dir, "old.wav"))
         for suf, kind in ((".srt", "script"), ("_FinalScript.txt", "script"),
                           ("_review_translation.txt", "script"),
                           ("_sync_en.srt", "work")):
-            shutil.copy(config.layout_path(root, kind, "interview" + suf),
-                        os.path.join(old_dir, "old" + suf))
-        before = _tree(root)
+            shutil.copy(os.path.join(flat_b, "interview" + suf),
+                        config.layout_path(root, kind, "old" + suf))
         rc = _run_engine(["--audio", old_audio, "--steps", "dub", "--script",
-                          os.path.join(old_dir, "old_review_translation.txt")]
+                          config.layout_path(root, "script",
+                                             "old_review_translation.txt")]
                          + common)
-        check("legacy dub continuation exits 0", rc == 0)
-        lt = _tree(old_dir)
-        check("legacy: outputs stay flat in the old folder",
-              f"{disp}_(old)_tts.wav" in lt and f"{disp}_(old)_synced.wav" in lt
-              and "old_sync_synced.srt" in lt and "engine_done.json" in lt
-              and any(re.match(r".*_\(old\)_tts_(str|sec)_001\.mp3$", t)
-                      for t in lt))
-        check("legacy: no subfolders, no marker",
-              all("/" not in t for t in lt) and ".fastsyncs-layout" not in lt)
-        check("legacy: nothing of 'old' written into FastSyncs/",
-              _tree(root) == before)
-        lman = json.load(open(os.path.join(old_dir, "engine_done.json")))
-        check("legacy manifest en_audio = the 0.15.6 copy",
-              lman["en_audio"] == os.path.join(old_dir, "old.wav"))
+        check("tidy dub continuation exits 0", rc == 0)
+        lt = _tree(root)
+        check("tidy: outputs go to its subfolders",
+              f"03_Voice/{disp}_(old)_tts.wav" in lt
+              and f"04_Final/{disp}_(old)_synced.wav" in lt
+              and "04_Final/old_sync_synced.srt" in lt
+              and "_work/old_engine_done.json" in lt
+              and any(re.match(r"03_Voice/pieces/.*_\(old\)_tts_(str|sec)_001"
+                               r"\.mp3$", t) for t in lt))
+        check("tidy: no flat folder made for it",
+              not os.path.exists(os.path.join(media, "old")))
+        tman = json.load(open(os.path.join(root, "_work", "old_engine_done.json")))
+        check("tidy manifest en_audio = the original audio",
+              tman["en_audio"] == old_audio)
 
         # 4. legacy sync mode (whole-script TTS + mapping + sync log)
-        audio_c = os.path.join(proj, "Media", "lecture.wav")
+        audio_c = os.path.join(media, "lecture.wav")
         _english_wav(audio_c)
+        flat_c = os.path.join(media, "lecture")
         real_fake = de._import_pipeline
 
         def with_legacy_stubs():
@@ -617,25 +623,22 @@ def test_end_to_end(tmp):
                           "--project-dir", proj])
         de._import_pipeline = real_fake
         check("legacy-sync-mode run exits 0", rc == 0)
-        tree = _tree(root)
-        want = ["Logs/lecture_sync_log.txt", "_work/lecture_sync_te.srt",
-                "_work/lecture_sync_mapping.txt", "_work/lecture_sync_en.srt",
-                "_work/lecture_sync_timestamps.txt",
-                "03_Voice/pieces/lecture_tts_state.json",
-                f"03_Voice/pieces/{disp}_(lecture)_tts_chunk_01.mp3",
-                f"03_Voice/pieces/{disp}_(lecture)_tts_chunks.txt",
-                f"03_Voice/{disp}_(lecture)_tts.wav",
-                f"04_Final/{disp}_(lecture)_synced.wav",
-                "04_Final/lecture_sync_synced.srt",
-                "_work/lecture_engine_done.json"]
+        tree = _tree(flat_c)
+        want = ["lecture_sync_log.txt", "lecture_sync_te.srt",
+                "lecture_sync_mapping.txt", "lecture_sync_en.srt",
+                "lecture_sync_timestamps.txt", "lecture_tts_state.json",
+                f"{disp}_(lecture)_tts_chunk_01.mp3",
+                f"{disp}_(lecture)_tts_chunks.txt",
+                f"{disp}_(lecture)_tts.wav",
+                f"{disp}_(lecture)_synced.wav",
+                "lecture_sync_synced.srt", "engine_done.json"]
         missing = [w for w in want if w not in tree]
-        check("legacy sync mode: every file in its subfolder", not missing)
+        check("legacy sync mode: every file in the one folder", not missing)
         for w in missing:
             print("     missing:", w)
-        st = json.load(open(os.path.join(root, "03_Voice", "pieces",
-                                         "lecture_tts_state.json")))
-        check("TTS reuse sidecar points at the 03_Voice wav",
-              rel(root, st["tts_wav"]) == f"03_Voice/{disp}_(lecture)_tts.wav")
+        st = json.load(open(os.path.join(flat_c, "lecture_tts_state.json")))
+        check("TTS reuse sidecar points at the wav in the folder",
+              st["tts_wav"] == os.path.join(flat_c, f"{disp}_(lecture)_tts.wav"))
         calls = fake_el.calls
         de._import_pipeline = with_legacy_stubs
         rc = _run_engine(["--audio", audio_c, "--steps", "full",
@@ -643,7 +646,7 @@ def test_end_to_end(tmp):
                           "--sync-mode", "legacy", "--no-emotion",
                           "--project-dir", proj])
         de._import_pipeline = real_fake
-        check("re-run reuses the paid speech from the tidy folder (no new "
+        check("re-run reuses the paid speech from the folder (no new "
               "ElevenLabs call)", rc == 0 and fake_el.calls == calls)
         check("only the fake ElevenLabs was called", fake_el.calls > 0)
     finally:
@@ -652,11 +655,45 @@ def test_end_to_end(tmp):
         de.STATUS_DIR = real_status
 
 
+def test_engine_log_kept(tmp):
+    print("run_dub appends the engine log to the video's folder")
+    import run_dub  # noqa: E402 — the launcher, stdlib only
+    status = os.path.join(tmp, "status")
+    flat = os.path.join(tmp, "Media", "talk")
+    os.makedirs(status)
+    os.makedirs(flat)
+    log = os.path.join(status, "engine_log.txt")
+
+    def run(body, out_dir, audio="/m/talk.wav", st="ok"):
+        open(log, "w", encoding="utf-8").write(body)
+        json.dump({"status": st, "out_dir": out_dir, "audio": audio},
+                  open(os.path.join(status, "engine_done.json"), "w"))
+        run_dub._keep_log_with_outputs(status, log)
+
+    run("translate log\n", flat, st="review")
+    run("dub log\n", flat)
+    got = open(os.path.join(flat, "talk_engine_log.txt"), encoding="utf-8").read()
+    check("flat: <base>_engine_log.txt next to the outputs, both runs kept",
+          "translate log" in got and "dub log" in got
+          and got.index("translate log") < got.index("dub log"))
+    tidy = config.make_tidy_root(os.path.join(tmp, "P", "FastSyncs"))
+    run("tidy log\n", tidy)
+    check("tidy: goes to Logs/", os.path.isfile(
+        os.path.join(tidy, "Logs", "talk_engine_log.txt")))
+    os.remove(os.path.join(status, "engine_done.json"))
+    run_dub._keep_log_with_outputs(status, log)   # no manifest: must not raise
+    json.dump({"status": "ok", "regen_wav": "/x.wav"},
+              open(os.path.join(status, "engine_done.json"), "w"))
+    run_dub._keep_log_with_outputs(status, log)   # redo manifest: skipped
+    check("no manifest / redo manifest: nothing written, no crash",
+          sorted(os.listdir(flat)) == ["talk_engine_log.txt"])
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         for i, t in enumerate((test_layout_mapping, test_prepare_output_dir,
                                test_two_audios, test_lua_out_dir_mirror,
-                               test_end_to_end)):
+                               test_engine_log_kept, test_end_to_end)):
             d = os.path.join(tmp, str(i))
             os.makedirs(d)
             t(d)
