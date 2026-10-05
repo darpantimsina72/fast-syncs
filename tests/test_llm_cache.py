@@ -130,8 +130,10 @@ def test_cache():
 
 def test_parallel_shortening():
     print("parallel shortening keeps order and uses original context")
-    # 6 EN cues of 1 s each; 8 TR sentences; sections 1..4 overrun.
-    en = [(float(i), float(i) + 1.0, f"en {i}") for i in range(6)]
+    # 6 EN cues of 1 s each, back to back, plus a 7th so the last section
+    # also has a next cue (room = 1 s everywhere: no pause after any of
+    # them); 8 TR sentences; sections 1..4 and 6 overrun.
+    en = [(float(i), float(i) + 1.0, f"en {i}") for i in range(7)]
     tr = ["क" * 60 + f" {j}" for j in range(8)]
     sections = [{"en": [1], "tr": [1, 2]}, {"en": [2], "tr": [3]},
                 {"en": [3], "tr": [4]}, {"en": [4], "tr": [5, 6]},
@@ -150,33 +152,38 @@ def test_parallel_shortening():
             peak[0] = max(peak[0], active[0])
             seen.append(prompt)
         # earlier sections answer later
-        idx = int(prompt.split('Current translation to shorten: "')[1]
+        idx = int(prompt.split('Line to fit: "')[1]
                   .split('"')[0].split()[-1])
         time.sleep(0.02 * (8 - idx))
         with lock:
             active[0] -= 1
-        return f'"short-{idx}"'
+        # 9 characters: 98% of a 1 s room at Hindi's 9.2 chars/s, so the
+        # 0.15.11 fitter accepts it on the first try.
+        return f'"short-{idx}xx"'
 
     real_gen = agent_splitter._llm_generate
     agent_splitter._llm_generate = fake_generate
+    real_rates = agent_splitter.SPEECH_RATES_FILE
+    agent_splitter.SPEECH_RATES_FILE = os.path.join(tempfile.mkdtemp(), "none.json")
     try:
         secs, un_tr, un_en, out = agent_splitter.agentic_split_match(
             en, tr, "Hindi")
     finally:
         agent_splitter._llm_generate = real_gen
+        agent_splitter.SPEECH_RATES_FILE = real_rates
         match_mod.call_match_sections = real_match
     check("calls overlapped", peak[0] > 1)
     check("one call per overrunning section", len(seen) == 5)
     expect = list(tr)
-    expect[0], expect[1] = "short-1", ""
-    expect[2] = "short-2"
-    expect[3] = "short-3"
-    expect[4], expect[5] = "short-5", ""
-    expect[6] = "short-6"
+    expect[0], expect[1] = "short-1xx", ""
+    expect[2] = "short-2xx"
+    expect[3] = "short-3xx"
+    expect[4], expect[5] = "short-5xx", ""
+    expect[6] = "short-6xx"
     check("sentences in original order, extras emptied", out == expect)
     # Section 3 (TR 4): previous context is TR 2..3 as ORIGINALLY written,
     # not the shortened / emptied versions.
-    p = [x for x in seen if 'shorten: "' + tr[3] in x][0]
+    p = [x for x in seen if 'Line to fit: "' + tr[3] in x][0]
     check("neighbour context is the original text",
           f'Previous lines: "{tr[1]} | {tr[2]}"' in p)
 

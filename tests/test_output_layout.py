@@ -500,6 +500,11 @@ def test_end_to_end(tmp):
     de._import_pipeline = _fake_pipeline(real_import)
     tts._urlopen = fake_el
     de.STATUS_DIR = os.path.join(tmp, "status")
+    # The engine learns the voice's speaking rate after TTS — keep the fake
+    # run's numbers out of this install's real config/speech_rates.json.
+    from pipeline import agent_splitter
+    real_rates = agent_splitter.SPEECH_RATES_FILE
+    agent_splitter.SPEECH_RATES_FILE = os.path.join(tmp, "speech_rates.json")
     try:
         proj = os.path.join(tmp, "My Project")
         media = os.path.join(proj, "Media")
@@ -653,6 +658,7 @@ def test_end_to_end(tmp):
         de._import_pipeline = real_import
         tts._urlopen = real_urlopen
         de.STATUS_DIR = real_status
+        agent_splitter.SPEECH_RATES_FILE = real_rates
 
 
 def test_engine_log_kept(tmp):

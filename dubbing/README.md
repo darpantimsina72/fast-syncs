@@ -153,6 +153,21 @@ from those files only — they are never placed on a command line.
    Advanced → *Dub piece size* (**clause** by default, or *sentence*, or
    *thought* for the old one-block-per-idea behaviour).
 
+   **Lines longer than their English** (0.15.11). Before any speech is made,
+   each line is compared with its room: the English speaking time plus the
+   pause after it (up to 1.5 s). Lines that fit are never touched — a
+   near-perfect pasted script goes through word for word. A line that
+   overruns is trimmed by the AI to 90–100% of its room, keeping every idea
+   and changing as few words as possible; a too-short result gets one retry,
+   and if neither try is usable (nothing under 80% is ever used) your line
+   is kept as written. Every decision is listed in
+   `<name>_shortened_lines.txt` in the video folder, so a line can be put
+   back with Redo. Settings → Advanced → *Too-long lines* → **Keep my
+   script** turns trimming off. Line lengths are estimated from a speaking
+   rate that the tool measures after every dub, per language and voice
+   model (`dubbing/config/speech_rates.json`), so estimates get accurate
+   from the second dub in a language on.
+
    The panel has eight tabs: **Full Pipeline** (the LLM translates —
    pauses for your review), **Paste Translation** (your script),
    **Auto Sync** (the fast-syncs clip-matching pipeline, embedded right in

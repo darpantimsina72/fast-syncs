@@ -234,6 +234,8 @@ REQUIRED_FUNCTIONS = [
     "_srt_ts",                       # seconds -> SRT timestamp (synced SRT build)
     # v0.8 sentence-timed pieces
     "build_pieces",                  # sections -> one piece per sentence
+    "agentic_split_match",           # match + fit too-long lines to their English
+    "learn_speech_rate",             # 0.15.11 measured chars/s per language
     "place_pieces",                  # windowed placement + bounded borrowing
     "synthesize_sentences_elevenlabs",# /with-timestamps TTS -> spans per sentence
     "_split_script_into_units",      # v0.12 clause-level units
@@ -510,6 +512,49 @@ def _chunk_mode(args) -> str:
     except Exception:
         pass
     return "clause"
+
+
+def _shorten_lines() -> bool:
+    """0.15.11 switch: shorten lines that are too long for their English.
+    'shorten_lines' in engine_settings.json (Settings > Advanced in the
+    panel); default ON. OFF keeps every script line exactly as written."""
+    try:
+        with open(ENGINE_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        v = data.get("shorten_lines") if isinstance(data, dict) else None
+        if v is False or str(v).strip().lower() in ("off", "false", "0", "no"):
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def _write_fit_changes(pl, ctx, changes):
+    """<base>_shortened_lines.txt next to the script: every line that was too
+    long for its English, what was done with it, and the before/after text —
+    so a line can be put back with Redo. Removed when nothing was too long
+    (a stale list from an earlier run would mislead)."""
+    path = _out(pl, ctx, "script", "_shortened_lines.txt")
+    if not changes:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return
+    what = {"fitted": "shortened to fit",
+            "close": "shortened (close fit)",
+            "kept_too_long": "KEPT AS WRITTEN — still too long, check in Redo",
+            "off": "kept as written (shortening is off) — too long"}
+    out = ["Lines that were longer than the English they replace.",
+           "Room = the English speaking time + the pause after it.", ""]
+    for n, c in enumerate(changes, 1):
+        out += [f"{n}. {what.get(c['status'], c['status'])} — room "
+                f"{c['room']:.1f}s, was {c['share_before'] * 100:.0f}%, now "
+                f"{c['share_after'] * 100:.0f}%",
+                f"   English: {c['en']}",
+                f"   Before:  {c['before']}",
+                f"   After:   {c['after']}", ""]
+    _write_text(path, "\n".join(out))
 
 
 def _chunk_max_chars(args, pl) -> int:
@@ -1107,9 +1152,13 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     _say("S2d", f"Piece size: {grain}.")
     _say("S2d", f"Matching {len(sentences)} script sentence(s) to "
                 f"{len(en_entries)} English cue(s) with Gemini…")
+    fit_changes = []
     sections, unmatched_tr, unmatched_en, sentences = pl.agentic_split_match(
         en_entries, sentences, language, pl.GEMINI_DEFAULT_MODEL,
-        status_cb=lambda m: _say("S2d", m))
+        status_cb=lambda m: _say("S2d", m),
+        shorten=_shorten_lines(), voice_model=vb.model or "",
+        changes=fit_changes)
+    _write_fit_changes(pl, ctx, fit_changes)
 
     tts_path = pl.layout_path(
         out_dir, "voice", pl._tts_output_name(language, audio_path, "_tts"))
@@ -1149,6 +1198,11 @@ def _stage_dub_match(pl, args, api_key, manifest, ctx, voice_id):
     manifest["tts_wav"] = tts_path
     _say("S2d", f"TTS audio saved: {os.path.basename(tts_path)} "
                 f"({len(spans)} piece span(s)).")
+    # 0.15.11: learn how fast this voice really speaks, so the next run's
+    # "is this line too long?" uses a measured rate instead of a guess.
+    pl.learn_speech_rate(language, vb.model or "", texts,
+                         [(e - s) / 1000.0 for (s, e) in spans],
+                         status_cb=lambda m: _say("S2d", m))
 
     # ── [S3a..S3c] bookkeeping stages (the heavy work already happened) ────
     _say("S3a", "English sync SRT ready (it drove the matching).")
