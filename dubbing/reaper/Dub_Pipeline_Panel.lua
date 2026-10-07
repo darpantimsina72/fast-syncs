@@ -2486,6 +2486,8 @@ local function import_to_timeline(m)
 
     if #synced_entries > 0 then
       local tr = append_named_track(TRACK_CHUNKS .. suffix)
+      -- 0.15.12: this is the track the final script follows from now on.
+      V5.final_track_new = tr
       for i, e in ipairs(synced_entries) do
         local it = add_file_item(tr, tts_wav, e.synced_start, e.dur,
                                  e.orig_start,
@@ -2556,6 +2558,13 @@ local function import_to_timeline(m)
     lines[#lines + 1] = ""
     lines[#lines + 1] = "Skipped (" .. #skipped .. "):"
     for _, s in ipairs(skipped) do lines[#lines + 1] = "- " .. s end
+  end
+  -- 0.15.12: the final script exists from the moment the run is imported,
+  -- and V5.final_script_tick keeps it current from here on.
+  if V5.final_track_new then
+    local fp = V5.write_final_script(V5.final_track_new, m.out_dir)
+    V5.final_track_new = nil
+    if fp then lines[#lines + 1] = "Final script:       " .. fp end
   end
   return table.concat(lines, "\n")
 end
@@ -3787,14 +3796,24 @@ end
 -- no single file with the script that was actually spoken.
 -- Rebuilt from the timeline each time, so it is always complete and current.
 -- Returns the file path, or nil. Never raises — the swap already happened.
-function V5.save_final_script(item)
+function V5.save_final_script(item, dir)
   local ok, path = pcall(function()
-    local dir = _regen_out_dir or ""
-    if dir == "" or not item or not reaper.ValidatePtr(item, "MediaItem*") then
+    if not item or not reaper.ValidatePtr(item, "MediaItem*") then return nil end
+    return V5.write_final_script(reaper.GetMediaItem_Track(item),
+                                 dir or _regen_out_dir)
+  end)
+  return ok and path or nil
+end
+
+-- 0.15.12: the writer works from a TRACK, so the panel can keep the file
+-- current without a redo (V5.final_script_tick). Remembers the track and
+-- folder it last wrote for. Skips the disk write when nothing changed.
+function V5.write_final_script(track, dir)
+  local ok, path = pcall(function()
+    dir = dir or ""
+    if dir == "" or not track or not reaper.ValidatePtr(track, "MediaTrack*") then
       return nil
     end
-    local track = reaper.GetMediaItem_Track(item)
-    if not track then return nil end
     local list = {}
     for i = 0, reaper.CountTrackMediaItems(track) - 1 do
       local it = reaper.GetTrackMediaItem(track, i)
@@ -3810,23 +3829,48 @@ function V5.save_final_script(item)
       if txt ~= "" then last = txt end
     end
     if #lines == 0 then return nil end
-    local base
+    local base, p
     if V5.is_tidy(dir) then
       local _, tn = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
       -- (inline: _sanitize_filename is declared further down the file)
       base = ((tn and tn ~= "") and tn or "dub"):gsub("[^%w%-_]", "_")
-      path = V5.layout_path(dir, "script", base .. "_FinalScript_after_redo.txt")
+      p = V5.layout_path(dir, "script", base .. "_FinalScript_after_redo.txt")
     else
       base = basename(dir)
-      path = dir .. SEP .. base .. "_FinalScript_after_redo.txt"
+      p = dir .. SEP .. base .. "_FinalScript_after_redo.txt"
     end
-    local f = io.open(path, "wb")
+    V5.final_track, V5.final_dir = track, dir
+    local body = table.concat(lines, "\n") .. "\n"
+    local f = io.open(p, "rb")
+    local cur = f and f:read("*a")
+    if f then f:close() end
+    if cur == body then return p end
+    f = io.open(p, "wb")
     if not f then return nil end
-    f:write(table.concat(lines, "\n"), "\n")
+    f:write(body)
     f:close()
-    return path
+    return p
   end)
   return ok and path or nil
+end
+
+-- Once a second at most: when anything in the project changed (an edit, a
+-- deleted or moved chunk, a redo, an undo), rewrite the final script of the
+-- dub track it last wrote for. Nothing to do until a run was imported or a
+-- chunk was redone.
+function V5.final_script_tick()
+  if not (V5.final_track and V5.final_dir) then return end
+  local now = reaper.time_precise and reaper.time_precise() or os.clock()
+  if V5.final_tick_at and now - V5.final_tick_at < 1.0 then return end
+  V5.final_tick_at = now
+  local sc = reaper.GetProjectStateChangeCount and reaper.GetProjectStateChangeCount(0)
+  if sc and sc == V5.final_state then return end
+  V5.final_state = sc
+  if not reaper.ValidatePtr(V5.final_track, "MediaTrack*") then
+    V5.final_track = nil
+    return
+  end
+  V5.write_final_script(V5.final_track, V5.final_dir)
 end
 
 -- Swap the regenerated wav into the item recorded by start_regen.
@@ -4295,9 +4339,18 @@ local function start_voice_change()
   local py = preflight_engine()
   if not py then return false end
 
-  -- Rendered + converted audio go to <project media path>/VoiceChange/
-  -- (0.15.10: back from 0.15.7's FastSyncs/03_Voice/Redo/VoiceChange/).
-  local out_dir = reaper.GetProjectPath("") .. SEP .. "VoiceChange"
+  -- 0.15.12: rendered + converted audio go into the VIDEO's folder
+  -- (<run folder>/VoiceChange/) when the track holds chunks of a run, so a
+  -- video's re-voiced audio sits with the rest of its files; any other track
+  -- -> <project media path>/VoiceChange/ as before.
+  local vc_run = nil
+  for i = 0, reaper.CountTrackMediaItems(track) - 1 do
+    vc_run = V5.out_dir_from_item(reaper.GetTrackMediaItem(track, i))
+    if vc_run then break end
+  end
+  local out_dir = (vc_run and V5.run_folder_ok(vc_run))
+                  and (vc_run .. SEP .. "VoiceChange")
+                  or (reaper.GetProjectPath("") .. SEP .. "VoiceChange")
   local name_base = _sanitize_filename(tname) .. os.date("_%Y%m%d_%H%M%S")
 
   local in_wav, why = render_track_stem(track, out_dir, name_base)
@@ -4918,6 +4971,25 @@ end
 -- appears and that directory IS the run's root. A pre-layout run has no marker,
 -- so the audio's own folder is the root, which is where those runs put
 -- everything anyway.
+-- 0.15.12: true when *dir* is a dub run's own folder (it holds the run's
+-- manifest or its speech), not just wherever some audio happens to live.
+function V5.run_folder_ok(dir)
+  if (dir or "") == "" then return false end
+  if V5.is_tidy(dir) or file_exists(dir .. SEP .. "engine_done.json") then
+    return true
+  end
+  if reaper.EnumerateFiles then
+    local i = 0
+    while true do
+      local n = reaper.EnumerateFiles(dir, i)
+      if not n then break end
+      if n:match("_tts%.wav$") then return true end
+      i = i + 1
+    end
+  end
+  return false
+end
+
 function V5.out_dir_from_item(item)
   if not item then return nil end
   local take = reaper.GetActiveTake(item)
@@ -5267,9 +5339,34 @@ local function ui_regen_section(ctx, default_open)
     reaper.ImGui_TextWrapped(ctx, 'Regen output: ' .. _regen_out_dir
                                   .. SEP .. 'regen')
     reaper.ImGui_PopStyleColor(ctx)
+    -- 0.15.12: open the video folder from here.
+    if reaper.ImGui_SmallButton(ctx, '📂 Open folder##rgopen') then
+      open_path(_regen_out_dir)
+    end
+    reaper.ImGui_SameLine(ctx)
     -- Wrong target (another project's run)? Re-point without a restart.
     if reaper.ImGui_SmallButton(ctx, 'Change…') then
       V5.pick_regen_manifest()
+    end
+    -- 0.15.12: the finished dub (every redo included) as one file in the
+    -- video folder, plus the final script brought up to date.
+    reaper.ImGui_SameLine(ctx)
+    local sel_it = reaper.CountSelectedMediaItems(0) > 0
+                   and reaper.GetSelectedMediaItem(0, 0) or nil
+    if reaper.ImGui_SmallButton(ctx, '💾 Save final dub audio##rgfinal') then
+      local wav, why = V5.save_final_audio(
+        sel_it and reaper.GetMediaItem_Track(sel_it) or nil, _regen_out_dir)
+      if wav then
+        ui_set_banner("info", "Final dub audio saved:\n" .. wav)
+      else
+        ui_set_banner("error", "Could not save the final dub audio:\n" ..
+                      tostring(why))
+      end
+    end
+    if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+      reaper.ImGui_SetTooltip(ctx, 'Renders the dub track of the selected ' ..
+        'chunk — with every redo — to one wav in the video folder, and ' ..
+        'updates the final script there.')
     end
   end
 
@@ -7952,12 +8049,99 @@ function V5.ui_header(ctx)
   end
 
   local ww = reaper.ImGui_GetWindowWidth(ctx)
-  reaper.ImGui_SameLine(ctx, math.max(220, ww - 122))
+  -- 0.15.12: minimise = roll the panel up to its title bar (ImGui collapse).
+  -- Not a taskbar minimise: a ReaImGui window belongs to REAPER's main
+  -- window and would vanish with no button to bring it back. A run keeps
+  -- going while rolled up (it is polled outside the window). Not offered
+  -- while docked — a docked window cannot roll up.
+  local docked = reaper.ImGui_IsWindowDocked and reaper.ImGui_IsWindowDocked(ctx)
+  local can_min = reaper.ImGui_SetNextWindowCollapsed and not docked
+  reaper.ImGui_SameLine(ctx, math.max(220, ww - (can_min and 232 or 122)))
+  if can_min then
+    if reaper.ImGui_Button(ctx, '—  Minimize', 104, 22) then
+      V5.collapse_next = true
+    end
+    if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+      reaper.ImGui_SetTooltip(ctx, 'Roll the window up to its title bar. ' ..
+        'Bring it back with the ▶ arrow on the title bar, or double-click ' ..
+        'the title. A run keeps going meanwhile.')
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
   if reaper.ImGui_Button(ctx, '⚙  Settings', 104, 22) then
     -- Selects the Settings tab on the next frame (or opens the fallback
     -- window on a ReaImGui without tabs).
     V5.settings_open = true
   end
+  V5.ui_folder_row(ctx)
+end
+
+-- 0.15.12: the video's folder, shown and one click away on every tab — so
+-- nobody has to dig for it in Finder / Explorer. Which folder: the run under
+-- review / just finished, else the one Redo is writing to, else where the
+-- chosen English audio's run will go. Returns path, exists.
+function V5.video_folder()
+  local d
+  if _ui_phase == "review" and _review and _review.manifest then
+    d = _review.manifest.out_dir
+  elseif _ui_phase == "success" and _manifest then
+    d = _manifest.out_dir
+  end
+  if (d or "") == "" and (_regen_out_dir or "") ~= "" then d = _regen_out_dir end
+  if (d or "") == "" and (LAST_AUDIO or "") ~= "" then
+    d = V5.out_dir_for(LAST_AUDIO)
+  end
+  if (d or "") == "" then return nil, false end
+  -- A directory "exists" when something inside it can be listed or the
+  -- manifest is there; checked at most twice a second.
+  if V5.vf_path ~= d or not V5.vf_at or (os.clock() - V5.vf_at) > 0.5 then
+    V5.vf_path, V5.vf_at = d, os.clock()
+    V5.vf_exists = (reaper.EnumerateFiles and reaper.EnumerateFiles(d, 0) ~= nil)
+                   or (reaper.EnumerateSubdirectories
+                       and reaper.EnumerateSubdirectories(d, 0) ~= nil)
+                   or file_exists(d .. SEP .. "engine_done.json")
+  end
+  return d, V5.vf_exists
+end
+
+function V5.ui_folder_row(ctx)
+  local d, exists = V5.video_folder()
+  if not d then return end
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  reaper.ImGui_Text(ctx, '📁 Video folder:')
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_SameLine(ctx)
+  _ui_begin_disabled(ctx, not exists)
+  if reaper.ImGui_SmallButton(ctx, (exists and 'Open' or 'not made yet') .. '##vfopen') then
+    open_path(d)
+  end
+  _ui_end_disabled(ctx)
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
+  reaper.ImGui_TextWrapped(ctx, d)
+  reaper.ImGui_PopStyleColor(ctx)
+  if reaper.ImGui_IsItemClicked and reaper.ImGui_IsItemClicked(ctx) and exists then
+    open_path(d)
+  end
+end
+
+-- 0.15.12: render the dub track as it stands now (every redo and edit
+-- included) into the video folder: <name>_final_dub_<date_time>.wav. Also
+-- brings the final script up to date. *track* nil = the track the final
+-- script follows. Returns the wav path, or nil + reason.
+function V5.save_final_audio(track, dir)
+  track = track or V5.final_track
+  dir = dir or V5.final_dir or _regen_out_dir
+  if not track or not reaper.ValidatePtr(track, "MediaTrack*") then
+    return nil, "Select a dub chunk first (or import a run), so it is clear " ..
+                "which track is the dub."
+  end
+  if (dir or "") == "" then return nil, "The video folder is not known yet." end
+  V5.write_final_script(track, dir)
+  local name = (V5.is_tidy(dir) and "dub" or basename(dir)) ..
+               os.date("_final_dub_%Y%m%d_%H%M%S")
+  local out = V5.is_tidy(dir) and V5.layout_path(dir, "final") or dir
+  return render_track_stem(track, out, name)
 end
 
 -- The one place the current run configuration is summarised. Every tab used
@@ -8140,6 +8324,20 @@ local function ui_phase_success(ctx, on_close)
   if reaper.ImGui_Button(ctx, 'Open output folder', 160, 36) then
     if _manifest and (_manifest.out_dir or '') ~= '' then
       open_path(_manifest.out_dir)
+    end
+  end
+  -- 0.15.12: after import (and any redos), the finished dub as one file.
+  if _imported and V5.final_track then
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, '💾 Save final dub audio', 190, 36) then
+      local wav, why = V5.save_final_audio(V5.final_track,
+                                           _manifest and _manifest.out_dir)
+      if wav then
+        ui_set_banner("info", "Final dub audio saved:\n" .. wav)
+      else
+        ui_set_banner("error", "Could not save the final dub audio:\n" ..
+                      tostring(why))
+      end
     end
   end
 
@@ -8378,13 +8576,19 @@ local function main()
     end
     -- Wide enough for the side-by-side review table.
     reaper.ImGui_SetNextWindowSize(_ui_ctx, 760, 680, reaper.ImGui_Cond_FirstUseEver())
+    -- 0.15.12: the header's Minimize rolls the window up (applied before
+    -- Begin, where it has to be).
+    if V5.collapse_next and reaper.ImGui_SetNextWindowCollapsed then
+      reaper.ImGui_SetNextWindowCollapsed(_ui_ctx, true)
+    end
+    V5.collapse_next = nil
     -- v0.7: version in the title bar. The "###dub_pipeline" suffix pins the
     -- ImGui window ID, so future version bumps never reset the saved
     -- window position/size again (only this first rename does, once).
     local visible, open = reaper.ImGui_Begin(_ui_ctx,
       'Dub Pipeline' .. (V5.APP_VERSION ~= '' and ('  v' .. V5.APP_VERSION) or '')
       .. '###dub_pipeline',
-      true, reaper.ImGui_WindowFlags_NoCollapse())
+      true)   -- 0.15.12: collapsible (Minimize, title-bar arrow, double-click)
     -- Outside the `visible` guard on purpose: a fully off-screen window can
     -- report itself as not visible, which is the case we must still rescue.
     check_offscreen(_ui_ctx)
@@ -8404,6 +8608,8 @@ local function main()
     -- v0.5: the embedded Auto Sync run polls every frame too — it is
     -- independent of the dub run and of which tab is showing.
     if V5.SYNC then V5.SYNC.poll() end
+    -- 0.15.12: keep the final script in the video folder current.
+    V5.final_script_tick()
     if visible then
       -- Follow the language combo with a matching Indic font (v0.4).
       _ensure_lang_font(_ui_ctx)

@@ -1,6 +1,7 @@
 # Releases the Settings "Roll back" button may offer (one version per line).
 # Only versions OLDER than the installed one are shown. Add each new VERSION
 # here when releasing it (RELEASING.md). Never list the abandoned 0.16.x line.
+0.15.12
 0.15.11
 0.15.10
 0.15.9

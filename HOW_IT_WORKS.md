@@ -360,11 +360,18 @@ copied in (it is already right beside the folder):
   engine_done.json, _sync_*.txt / .srt                             the robot's notes
   <base>_FinalScript_after_redo.txt  the whole script as it stands after the
                            latest Redo (rewritten after every Redo, one chunk per line)
+  <name>_final_dub_<date>.wav   the finished dub, every redo included ("💾 Save final dub audio")
   regen/                   chunk redo text + wav (Tools > Redo)
+  VoiceChange/             Tools > Re-voice a track, for a track of this video's chunks
 ```
 
-- Tools > Voice change, Tools > Text to speech and "From track" renders go
-  to the project media folder's `VoiceChange/`, `TTS/` and `DubSource/`.
+- The window shows this folder at the top (📁 Video folder → Open).
+- The final script is rewritten whenever the dub track changes (a redo, an
+  edit, a deleted chunk), at most once a second.
+- Tools > Voice change of a track that holds this video's chunks goes to
+  `VoiceChange/` here; any other track, Tools > Text to speech and "From
+  track" renders go to the project media folder's `VoiceChange/`, `TTS/`
+  and `DubSource/`.
 - The panel's archived run logs go to `<project folder>/FastSyncs_Logs/`.
 - 0.15.7 – 0.15.9 wrote a "tidy" `FastSyncs/` folder with subfolders
   (`02_Script/`, `03_Voice/`, `04_Final/`, `_work/` …, marked by a
