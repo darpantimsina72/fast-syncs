@@ -59,6 +59,12 @@ env.reaper = {
   TakeIsMIDI = function() return false end,
   GetMediaItemTake_Source = function(t) return t end,
   GetMediaSourceFileName = function(s) return s.path end,
+  EnumerateFiles = function(d, i)
+    local p = io.popen("ls -1 '" .. d .. "' 2>/dev/null")
+    local n, k = nil, -1
+    for line in p:lines() do k = k + 1; if k == i then n = line end end
+    p:close(); return n
+  end,
 }
 env.V5.is_tidy = function(d) return exists(d .. "/.fastsyncs-layout") end
 env.V5.set_status_paths = function() end
@@ -68,7 +74,8 @@ env.V5.set_regen_target = function(d, lang)
   env._regen_out_dir = d
   if (lang or "") ~= "" then env._regen_lang = lang end
 end
-for _, sig in ipairs({ "function V5.out_dir_from_item", "function V5.prefill_regen_target" }) do
+for _, sig in ipairs({ "function V5.out_dir_from_item", "function V5.prefill_regen_target",
+                       "function V5.run_folder_ok" }) do
   assert(load(cut(sig), sig, "t", env))()
 end
 local V5 = env.V5
@@ -92,6 +99,14 @@ selected = { path = flatB .. "/Nepali_(interview)_tts.wav" }
 V5.prefill_regen_target()
 check("chunk of another video -> re-pointed", env._regen_out_dir == flatB)
 check("old video's language dropped", env._regen_lang == "")
+
+-- 0.15.12: re-voiced audio goes into a folder only if it is a real run folder
+put(flatB .. "/Nepali_(interview)_tts.wav", "x")
+check("run folder: has its manifest", V5.run_folder_ok(flatA))
+check("run folder: has its speech wav", V5.run_folder_ok(flatB))
+mk(tmp .. "/Recordings")
+check("a plain audio folder is not a run folder", not V5.run_folder_ok(tmp .. "/Recordings"))
+check("tidy root is a run folder", V5.run_folder_ok(tidy))
 
 os.execute("rm -rf '" .. tmp .. "'")
 print(fails == 0 and "\nGREEN: all checks passed" or ("\nRED: " .. fails .. " failed"))

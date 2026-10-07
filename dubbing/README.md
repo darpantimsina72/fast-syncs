@@ -272,9 +272,14 @@ from those files only — they are never placed on a command line.
    new files only ever land in the run folder's `regen/` (0.15.7–0.15.9
    tidy folders: `FastSyncs/03_Voice/Redo/regen/`) with auto-incrementing
    version suffixes.
-   After every redo the whole script as it now stands — every chunk on that
-   track, in order — is rewritten to `<name>_FinalScript_after_redo.txt` in
-   the run folder.
+   The whole script as it now stands — every chunk on that track, in order —
+   is kept in `<name>_FinalScript_after_redo.txt` in the run folder, and
+   rewritten whenever the track changes (redo, edit, deleted chunk).
+   **💾 Save final dub audio** renders that track, every redo included, to
+   `<name>_final_dub_<date>.wav` in the same folder. **📂 Open folder**
+   opens it; the folder is also shown at the top of the window
+   (📁 Video folder → Open). **— Minimize** (top right) rolls the window up
+   to its title bar; the ▶ arrow on the title bar brings it back.
    Below the button, **Regenerate in another voice (optional)** re-does the
    same chunk in a different ElevenLabs voice — same bookmarks + search as
    the other tabs, or paste a voice id. **⟳ Fetch voices** next to the search
