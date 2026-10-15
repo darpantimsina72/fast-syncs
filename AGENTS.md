@@ -98,6 +98,9 @@ fast-syncs/
 ├── run_sync.py              Launcher: settings JSON → SYNC_* env → worker; owns log/pid/done.
 ├── sync_matcher.py          Worker: transcribe → Gemini match → spring placement.
 ├── app_feedback.py          "Send Feedback" helper (stdlib only) → GitHub issue.
+├── feedback_kit.lua         Shared Lua: per-video run logs + the star/report card.
+├── error_explain.lua        Shared Lua: failed run's log → plain-English reason on screen.
+                             Rules mirror the team inbox's (feedback/apps_script.gs); keep in step.
 ├── Sync_Item.lua            ⚠ byte-identical duplicate of scripts_optional/Sync_Item.lua
 ├── scripts_optional/
 │   └── Sync_Item.lua        Optional manual one-clip aligner (the copy README points at).

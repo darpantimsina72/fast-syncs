@@ -282,6 +282,15 @@ V5.FB = (function()
   if ok and type(mod) == "table" then return mod end
   return nil
 end)()
+-- 0.15.13: the plain-English reason a failed run shows on screen, shared
+-- with Auto Sync (fast-syncs root/error_explain.lua). nil when missing: the
+-- failure screen then shows the raw log as before. V5.ui_notes = warnings
+-- on a FINISHED run ("Finished, but …").
+V5.EX = (function()
+  local ok, mod = pcall(dofile, V5.APP_ROOT .. SEP .. "error_explain.lua")
+  if ok and type(mod) == "table" then return mod end
+  return nil
+end)()
 
 local ENGINE_SETTINGS_PATH = ENGINE_DIR .. SEP .. "engine_settings.json"
 local PANEL_SETTINGS_PATH  = SCRIPT_DIR .. SEP .. "dub_panel_settings.json"
@@ -4434,8 +4443,19 @@ local function _handle_log_line(line)
   end
 end
 
+-- 0.15.13: reason for the failure screen. Defined here, below the
+-- _ui_failure and read_all locals it uses (above them it would see nil
+-- globals). Reads the WHOLE log (the cause is often far
+-- above the tail) plus the manifest's error text.
+function V5.explain_failure(detail, status)
+  if not (V5.EX and _ui_failure) then return end
+  local text = (read_all(LOG_PATH) or "") .. "\n" .. tostring(detail or "")
+  _ui_failure.reason = V5.EX.diagnose(text, status)
+end
+
 local function _finish_run(exit_code)
   local m, err = load_manifest_json(DONE_JSON)
+  V5.ui_notes = nil
   -- A cancelled run must never land on the success phase, even when the
   -- worker managed to finish with exit 0 before the kill took effect.
   local cancelled = _ui_cancelled or _cancel_pending
@@ -4675,6 +4695,7 @@ local function _finish_run(exit_code)
     if ok then return end
     _ui_failure = { error_tail = why or "(review manifest unusable)",
                     log_path = LOG_PATH }
+    V5.explain_failure(_ui_failure.error_tail, "failed")
     _manifest = m
     _ui_phase = "failure"
     return
@@ -4688,6 +4709,9 @@ local function _finish_run(exit_code)
     -- v0.7: finished dub runs land in the per-project history.
     if _run_mode == "full" or _run_mode == "dub" then
       V5.history_record("ok", m)
+      -- Finished — but a known warning (pieces too long, speech reused…)
+      -- explains a bad-sounding result, so say it on screen.
+      if V5.EX then V5.ui_notes = V5.EX.notes(read_all(LOG_PATH) or "") end
     end
     _ui_progress = 1.0
     _ui_phase    = "success"
@@ -4707,6 +4731,7 @@ local function _finish_run(exit_code)
     detail = "Cancelled by user.\n\n" .. detail
   end
   _ui_failure = { error_tail = detail, log_path = LOG_PATH }
+  V5.explain_failure(detail, cancelled and "cancelled" or "failed")
   _manifest   = m   -- partial results may still be importable
   _ui_phase   = "failure"
 end
@@ -4740,6 +4765,11 @@ function V5.after_run(exit_code)
   end
   local extra = (_ui_failure and status ~= "ok") and _ui_failure.error_tail
                 or nil
+  -- The plain-words reason goes into the saved log too, so a report carries it.
+  if extra and V5.EX and _ui_failure.reason then
+    local why = V5.EX.as_text(_ui_failure.reason)
+    if why ~= "" then extra = why .. "\n\n" .. extra end
+  end
   local saved = V5.FB.archive_log({
     app_root = V5.APP_ROOT, pipeline = tag, status = status,
     log_path = LOG_PATH, started = _poll_start_time,
@@ -4839,6 +4869,7 @@ local function poll_engine()
                    "  - engine/run_dub.py exists next to this script's folder",
       log_path = LOG_PATH,
     }
+    V5.explain_failure(_ui_failure.error_tail, "failed")
     _ui_phase = "failure"
     V5.after_run(1)
   end
@@ -8271,6 +8302,7 @@ local function ui_phase_success(ctx, on_close)
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_Dummy(ctx, 0, 6)
   _ui_render_banner(ctx)   -- regen runs report their outcome here
+  if V5.EX and V5.ui_notes then V5.EX.render_notes(ctx, V5.ui_notes) end
 
   if _manifest then
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xDDDDDDFF)
@@ -8384,16 +8416,26 @@ local function ui_phase_failure(ctx, on_close)
   reaper.ImGui_Dummy(ctx, 0, 6)
 
   if _ui_failure then
-    reaper.ImGui_Text(ctx, 'Error:')
-    if reaper.ImGui_BeginChild(ctx, '##errtail', -1, 240, _child_border_flag()) then
-      local pushed = _push_font(ctx, 16)
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAAAAFF)
-      reaper.ImGui_TextWrapped(ctx, _ui_failure.error_tail or '(no output)')
-      reaper.ImGui_PopStyleColor(ctx)
-      if pushed then _pop_font(ctx) end
-      reaper.ImGui_EndChild(ctx)
+    -- 0.15.13: the reason in plain words first; the raw log is folded away
+    -- underneath. No reason (module missing) → the log shows open, as before.
+    local reason = V5.EX and _ui_failure.reason
+    if reason then
+      V5.EX.render(ctx, reason)
+      reaper.ImGui_Dummy(ctx, 0, 8)
+    else
+      reaper.ImGui_Text(ctx, 'Error:')
     end
-    reaper.ImGui_Dummy(ctx, 0, 4)
+    if not reason or reaper.ImGui_CollapsingHeader(ctx, 'Technical details (log)') then
+      if reaper.ImGui_BeginChild(ctx, '##errtail', -1, 240, _child_border_flag()) then
+        local pushed = _push_font(ctx, 16)
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAAAAFF)
+        reaper.ImGui_TextWrapped(ctx, _ui_failure.error_tail or '(no output)')
+        reaper.ImGui_PopStyleColor(ctx)
+        if pushed then _pop_font(ctx) end
+        reaper.ImGui_EndChild(ctx)
+      end
+      reaper.ImGui_Dummy(ctx, 0, 4)
+    end
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xAAAAAAFF)
     reaper.ImGui_Text(ctx, 'Full log: ' .. (_ui_failure.log_path or ''))
     reaper.ImGui_PopStyleColor(ctx)

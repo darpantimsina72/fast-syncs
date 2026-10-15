@@ -1,6 +1,6 @@
 -- @description Fast Syncs — AI dubbing sync for REAPER
 -- @author darpantimsina72
--- @version 0.15.12
+-- @version 0.15.13
 -- @about
 --   Transcribes your Dialogue VO and Dub tracks, asks Gemini which dubbed clip
 --   means the same thing as which English clip, and moves each dubbed clip to
@@ -728,6 +728,16 @@ do
                                  .. "feedback_kit.lua")
   if ok and type(mod) == "table" then FB = mod end
 end
+-- 0.15.13: the plain-English reason a failed run shows on screen (shared
+-- with the dub panel). Missing/broken → nil, and the screen shows the raw
+-- log as before.
+local EX = nil
+do
+  local ok, mod = pcall(dofile, get_script_dir() .. package.config:sub(1, 1)
+                                 .. "error_explain.lua")
+  if ok and type(mod) == "table" then EX = mod end
+end
+local _ui_notes   = nil   -- warnings on a FINISHED run ("Finished, but …")
 local _fb_card    = nil   -- created lazily (find_python is defined below)
 local _fb_project = nil   -- REAPER project the running sync belongs to
 local _fb_version = nil
@@ -1700,6 +1710,7 @@ local function ui_phase_success(ctx, on_close)
     reaper.ImGui_Text(ctx, _ui_result)
     reaper.ImGui_PopStyleColor(ctx)
   end
+  if EX and _ui_notes then EX.render_notes(ctx, _ui_notes) end
 
   if #_ui_results_rows > 0 then
     reaper.ImGui_Dummy(ctx, 0, 8)
@@ -1742,7 +1753,7 @@ local function ui_phase_success(ctx, on_close)
   if reaper.ImGui_Button(ctx, 'Close', 120, 32) then on_close() end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, 'Run again', 120, 32) then
-    _ui_phase = 'setup'; _log_buffer = {}; _ui_result = nil
+    _ui_phase = 'setup'; _log_buffer = {}; _ui_result = nil; _ui_notes = nil
     _ui_step_idx = 0; _ui_progress = 0.0
     _ui_en_total = 0; _ui_dub_total = 0; _ui_en_done = 0; _ui_dub_done = 0
     _poll_step_phase = 0; _ui_cancelled = false; _ui_results_rows = {}
@@ -1758,19 +1769,26 @@ local function ui_phase_failure(ctx, on_close)
   reaper.ImGui_Dummy(ctx, 0, 8)
 
   if _ui_failure then
-    reaper.ImGui_Text(ctx, 'Error output (tail):')
-    if reaper.ImGui_BeginChild(ctx, '##errtail', -1, 240, _child_border_flag()) then
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAAAAFF)
-      reaper.ImGui_Text(ctx, _ui_failure.error_tail or '(no output)')
-      reaper.ImGui_PopStyleColor(ctx)
-      reaper.ImGui_EndChild(ctx)
+    -- 0.15.13: the reason in plain words first; the raw log is folded away
+    -- underneath for whoever needs it. No reason (module missing) → the
+    -- log shows open, exactly as before.
+    local reason = EX and _ui_failure.reason
+    if reason then
+      EX.render(ctx, reason)
+      reaper.ImGui_Dummy(ctx, 0, 8)
     end
-    reaper.ImGui_Dummy(ctx, 0, 6)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xAAAAAAFF)
-    reaper.ImGui_TextWrapped(ctx,
-      'Common fixes:\n  re-run setup.bat / setup.sh (rebuilds the venv)\n  for direct mode: setup.bat --direct')
-    reaper.ImGui_Text(ctx, 'Full log: ' .. (_ui_failure.log_path or ''))
-    reaper.ImGui_PopStyleColor(ctx)
+    if not reason or reaper.ImGui_CollapsingHeader(ctx, 'Technical details (log)') then
+      if reaper.ImGui_BeginChild(ctx, '##errtail', -1, 240, _child_border_flag()) then
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAAAAFF)
+        reaper.ImGui_Text(ctx, _ui_failure.error_tail or '(no output)')
+        reaper.ImGui_PopStyleColor(ctx)
+        reaper.ImGui_EndChild(ctx)
+      end
+      reaper.ImGui_Dummy(ctx, 0, 6)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xAAAAAAFF)
+      reaper.ImGui_Text(ctx, 'Full log: ' .. (_ui_failure.log_path or ''))
+      reaper.ImGui_PopStyleColor(ctx)
+    end
   end
 
   if _fb_card then _fb_card:render(ctx) end
@@ -1966,20 +1984,32 @@ local function poll_python_step()
 
       if (exit_code == 0) and file_exists(_poll_results_path) then
         on_python_done(true)
+        -- Finished — but a known warning (English one long clip, some
+        -- unmatched…) explains a bad-looking result, so say it on screen.
+        _ui_notes = EX and EX.notes(read_file(_poll_log_path) or "") or nil
         finish_run_feedback("ok", _ui_result)
       else
         local python_log = read_file(_poll_log_path) or "(no output)"
         local short_log = python_log
         if #short_log > 1200 then short_log = "...\n" .. short_log:sub(-1200) end
+        local status = _ui_cancelled and "cancelled" or "failed"
         if _ui_cancelled then
           _ui_failure = { error_tail = "Cancelled by user.\n\n" .. short_log,
                           log_path = _poll_log_path }
         else
           _ui_failure = { error_tail = short_log, log_path = _poll_log_path }
         end
+        -- The WHOLE log is read for the reason, not just the tail: the
+        -- cause is often far above the last lines.
+        if EX then _ui_failure.reason = EX.diagnose(python_log, status) end
         _ui_phase = "failure"
-        finish_run_feedback(_ui_cancelled and "cancelled" or "failed",
-                            _ui_failure.error_tail)
+        -- The reason goes into the saved log too, so a report carries it.
+        local extra = _ui_failure.error_tail
+        if EX then
+          local why = EX.as_text(_ui_failure.reason)
+          if why ~= "" then extra = why .. "\n\n" .. extra end
+        end
+        finish_run_feedback(status, extra)
       end
       return
     end
@@ -2000,6 +2030,7 @@ local function poll_python_step()
                    "  - the interpreter path is valid",
       log_path = _poll_log_path,
     }
+    if EX then _ui_failure.reason = EX.diagnose(_ui_failure.error_tail, "failed") end
     _ui_phase = "failure"
     finish_run_feedback("failed", _ui_failure.error_tail)
     return
