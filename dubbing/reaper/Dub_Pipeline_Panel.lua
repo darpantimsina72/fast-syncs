@@ -1479,7 +1479,8 @@ local _run_mode        = "full"    -- full | translate | dub | regen |
 -- Utility modes never own the phase state: they report back into the phase
 -- they were launched from and leave the last run's manifest untouched.
 local UTIL_MODES = { regen = true, test_llm = true, list_voices = true,
-                     voice_change = true, tts = true, preview = true }
+                     voice_change = true, tts = true, preview = true,
+                     add_tags = true }
 local _util_return_phase = "setup" -- phase to return to when test/fetch ends
 
 -- v0.3 Settings section state.
@@ -2024,6 +2025,8 @@ local MANIFEST_KEYS = {
   "vc_wav",
   -- v0.7: match sync mode (texts sidecar for the item text + chunk counts).
   "sync_texts", "synced_count", "unsynced_count",
+  -- 0.15.14: --add-tags manifest field (the tagged script file).
+  "tagged_text",
 }
 
 -- Parse the "voices" array of a --list-voices manifest:
@@ -2615,6 +2618,15 @@ local function build_engine_cmd(py, opts)
     parts[#parts + 1] = '--test-llm'
     return table.concat(parts, ' ')
   end
+  if opts.add_tags then
+    -- 0.15.14: one LLM call that voice-tags the pasted script file.
+    parts[#parts + 1] = '--add-tags'
+    parts[#parts + 1] = '--language'
+    parts[#parts + 1] = q(opts.language or LANGUAGE)
+    parts[#parts + 1] = '--text-file'
+    parts[#parts + 1] = q(opts.text_file)
+    return table.concat(parts, ' ')
+  end
   -- v0.15.8: who speaks (and whose voices get listed) — what Settings show.
   parts[#parts + 1] = '--tts-provider'
   parts[#parts + 1] = q((V5.tts_provider == "cartesia") and 'cartesia'
@@ -3188,6 +3200,7 @@ function V5.reattach_running()
   -- run_dub.py writes its own launch line first; the flags name the mode.
   local head = (read_all(LOG_PATH) or ""):match("^[^\r\n]*") or ""
   local mode = (head:find("--test-llm", 1, true) and "test_llm")
+               or (head:find("--add-tags", 1, true) and "add_tags")
                or (head:find("--list-voices", 1, true) and "list_voices")
                or head:match("%-%-steps%s+(%a+)")
   -- v0.15.7: a Tools > text-to-speech run (its text file is TTS_<stamp>.txt)
@@ -3201,7 +3214,8 @@ function V5.reattach_running()
     V5.tts_return_phase = "setup"
   end
   if mode ~= "full" and mode ~= "translate" and mode ~= "dub"
-     and mode ~= "test_llm" and mode ~= "list_voices" and mode ~= "tts" then
+     and mode ~= "test_llm" and mode ~= "list_voices" and mode ~= "tts"
+     and mode ~= "add_tags" then
     -- A voice-tool run (chunk regen, voice change, preview): applying its
     -- result needs details this reopened window no longer has. Offer to
     -- stop it instead of leaving it unreachable.
@@ -3389,6 +3403,7 @@ local function _review_replace_text(txt)
   _review.tr_paras  = split_paragraphs(txt)
   _review.tr_buffer = txt
   _review.dirty     = true
+  _review.has_tags  = txt:find("%[/?[%a ]+%]") ~= nil
 end
 
 -- Output base name, for <out_dir>/<base>_translation_edited.txt. The EN SRT
@@ -3433,6 +3448,9 @@ local function enter_review_phase(m)
                                  base .. "_translation_edited.txt"),
     dirty       = false,
   }
+  -- 0.15.14: did the engine put voice tags into this review? Checked once
+  -- here, not every frame (a long script is tens of thousands of bytes).
+  _review.has_tags = tr_raw:find("%[/?[%a ]+%]") ~= nil
   -- 0.15.10: paragraph times + where the English sits, for playback.
   V5.review_init(_review)
   -- Remember (and persist) the run's out_dir for the regen section.
@@ -3650,7 +3668,8 @@ local function save_review_text()
   return true
 end
 
--- Resume the pipeline: emotion + TTS + sync, reading the (possibly edited)
+-- Resume the pipeline: TTS + sync (+ the voice tags, unless they were already
+-- in the review — 0.15.14), reading the (possibly edited)
 -- translation from `script_path`. Same out_dir — derived from --audio.
 local function launch_dub_continue(script_path)
   ui_clear_banner()
@@ -4533,6 +4552,30 @@ local function _finish_run(exit_code)
     return
   end
 
+  -- 0.15.14 "Add voice tags" — the tagged script replaces the paste box.
+  if _run_mode == "add_tags" then
+    if cancelled then
+      ui_set_banner("warn", "Adding voice tags cancelled.")
+    elseif m and m.status == "ok" and exit_code == 0
+           and (m.tagged_text or "") ~= "" then
+      local t = read_all(m.tagged_text)
+      if t and t:match("%S") then
+        _provided_text = _strip_bom(t):gsub("\r\n", "\n")
+        ui_set_banner("info",
+          "Voice tags added to your script. Check them in the box — " ..
+          "change, delete or add tags as needed, then start the run.")
+      else
+        ui_set_banner("error", "The tagged script could not be read:\n" ..
+                               m.tagged_text)
+      end
+    else
+      ui_set_banner("error", "Adding voice tags failed:\n" ..
+                             _error_detail(600) .. "\n\nFull log: " .. LOG_PATH)
+    end
+    _ui_phase = _util_return_phase or "setup"
+    return
+  end
+
   -- v0.4 "Change track voice" — import the re-voiced wav as a new track.
   if _run_mode == "voice_change" then
     local back = _vc_return_phase or "setup"
@@ -4740,7 +4783,8 @@ end
 -- to its REAPER project (run_dub.py wipes the live log at the next launch —
 -- a Test connection click used to erase a failed dub's only log) and, for the
 -- two real pipelines, arm the star card on the success/failure screen.
-V5.QUIET_OK = { test_llm = true, list_voices = true, preview = true }
+V5.QUIET_OK = { test_llm = true, list_voices = true, preview = true,
+                add_tags = true }
 function V5.after_run(exit_code)
   if not V5.FB then return end
   local mode = _run_mode
@@ -4882,6 +4926,7 @@ end
 local function _stage_line()
   if _run_mode == "regen"        then return "Regenerating chunk audio (TTS)…" end
   if _run_mode == "test_llm"     then return "Testing LLM connection…" end
+  if _run_mode == "add_tags"     then return "Adding voice tags to your script…" end
   if _run_mode == "list_voices"  then return "Fetching " .. V5.tts_label() .. " voices…" end
   if _run_mode == "tts"          then return "Generating speech (" .. V5.tts_label() .. ")…" end
   if _run_mode == "preview"      then return "Generating a voice preview…" end
@@ -6784,6 +6829,20 @@ local function ui_phase_review(ctx)
   reaper.ImGui_TextWrapped(ctx, 'Edited file: ' .. _review.edited_path
     .. (_review.dirty and '   (unsaved changes)' or ''))
   reaper.ImGui_PopStyleColor(ctx)
+  -- 0.15.14: the engine now puts the voice tags into the review text (legacy
+  -- sync + ElevenLabs v3/v4). Say what they are, once, above the editor.
+  if _review.has_tags then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x66CCFFFF)
+    reaper.ImGui_TextWrapped(ctx,
+      'Voice tags are in the script: words in [square brackets] tell the ' ..
+      'ElevenLabs voice HOW to speak — they are not spoken. Change, delete ' ..
+      'or add tags as needed; they go to ElevenLabs exactly as you leave them.')
+    reaper.ImGui_PopStyleColor(ctx)
+    _grey_hint(ctx, 'Tags: [calm] [contemplative] [thoughtful] [soft] ' ..
+      '[warm] [gentle] [slow] [pause] [sighs] [smiling] [curious] ' ..
+      '[lighthearted] [emphatic] [serious] — put a tag just before the ' ..
+      'words it should colour.')
+  end
   reaper.ImGui_Dummy(ctx, 0, 2)
 
   -- v0.4 whole-script clipboard round-trip. ImGui cannot fully shape Indic
@@ -7406,6 +7465,14 @@ function V5.ui_source_inputs(ctx)
     if reaper.ImGui_SmallButton(ctx, 'Clear##prov') then
       _provided_text = ""
     end
+    -- 0.15.14: optional — voice-tag the pasted script, then edit the tags
+    -- right here before the run. Offered only where the tags are used.
+    if V5.tags_usable() then
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, 'Add voice tags##prov') then
+        V5.start_add_tags()
+      end
+    end
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
     reaper.ImGui_Text(ctx, string.format('%d paragraph(s), %d chars',
@@ -7413,7 +7480,66 @@ function V5.ui_source_inputs(ctx)
     reaper.ImGui_PopStyleColor(ctx)
     V5.hint(ctx, 'Separate paragraphs with one blank line — they are what ' ..
                  'the matcher pairs against the transcript.')
+    if V5.tags_usable() then
+      V5.hint(ctx, 'Optional: "Add voice tags" puts ElevenLabs directions ' ..
+                   'like [calm] [pause] [slow] into your script. Words in ' ..
+                   '[brackets] are not spoken. Edit, delete or add tags in ' ..
+                   'the box; they are used exactly as you leave them. ' ..
+                   'Pressing it again re-tags from scratch.')
+    else
+      _grey_hint(ctx, 'Voice tags are used only in legacy sync mode with an ' ..
+                      'ElevenLabs v3/v4 voice (⚙ Settings).')
+    end
   end
+end
+
+-- 0.15.14: are voice tags used by this setup? Mirrors the engine's
+-- _tags_before_review: legacy sync mode, ElevenLabs, a v3/v4 model.
+function V5.tags_usable()
+  return V5.sync_mode == "legacy" and V5.tts_provider ~= "cartesia"
+         and ((EL_MODEL or ""):match("^eleven_v[34]") ~= nil)
+end
+
+-- 0.15.14 "Add voice tags": write the paste box to the audio's run folder
+-- (Indic text never travels on argv) and run the engine's --add-tags.
+-- The result comes back into the paste box (see _finish_run).
+function V5.start_add_tags()
+  ui_clear_banner()
+  if not (_provided_text or ""):match("%S") then
+    ui_set_banner("warn", "Paste your script first, then add the tags.")
+    return false
+  end
+  local audio = LAST_AUDIO or ""
+  if audio == "" or not file_exists(audio) then
+    ui_set_banner("error", "Pick the English audio first — the script is " ..
+                           "saved next to its run files.")
+    return false
+  end
+  local out_dir, tidy = V5.out_dir_for(audio)
+  if tidy then V5.make_tidy_root(out_dir)
+  else reaper.RecursiveCreateDirectory(out_dir, 0) end
+  local path = V5.layout_path(out_dir, "script",
+                              V5.audio_base(audio) .. "_script_for_tags.txt")
+  local f = io.open(path, "wb")
+  if not f then
+    ui_set_banner("error", "Could not write:\n" .. path)
+    return false
+  end
+  local body = _provided_text:gsub("\r\n", "\n")
+  if body:sub(-1) ~= "\n" then body = body .. "\n" end
+  f:write(body)
+  f:close()
+  local py = preflight_engine()
+  if not py then return false end
+  local cmd = build_engine_cmd(py, {
+    add_tags = true, language = LANGUAGE, text_file = path,
+  })
+  _util_return_phase = _ui_phase
+  return launch_engine(cmd, "add_tags", {
+    "[panel] Python : " .. py,
+    "[panel] Mode   : add voice tags (--add-tags)",
+    "[panel] Script : " .. path,
+  })
 end
 
 -- ─── Setup phase ──────────────────────────────────────────
@@ -8186,7 +8312,8 @@ function V5.ui_status_bar(ctx)
     local what = ({ regen = "Redoing chunk audio", tts = "Generating speech",
                     preview = "Making a voice preview", test_llm =
                     "Testing the connection", list_voices = "Fetching voices",
-                    voice_change = "Changing the voice" })[_run_mode]
+                    voice_change = "Changing the voice",
+                    add_tags = "Adding voice tags" })[_run_mode]
                  or "Dub run"
     if V5.regen_queue and V5.regen_qstat then
       what = string.format("Redoing chunks (%d of %d)", math.max(1, V5.regen_qi or 1),

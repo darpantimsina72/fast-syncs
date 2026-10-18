@@ -56,6 +56,10 @@ Usage:
     # test the configured LLM provider (one tiny call)
     "<python>" run_dub.py --test-llm
 
+    # 0.15.14: voice-tag a pasted script -> "<abs>_tagged.txt" beside it
+    "<python>" run_dub.py --add-tags --language <Language> \
+        --text-file "<abs .txt>"
+
     # fetch the ElevenLabs voice catalogue for a language
     "<python>" run_dub.py --list-voices --language <Language>
 """
@@ -268,6 +272,9 @@ def main() -> int:
                     help="Make one tiny LLM call on the configured provider "
                          "and write a {status, provider, model, reply} "
                          "manifest")
+    ap.add_argument("--add-tags", dest="add_tags", action="store_true",
+                    help="0.15.14: add voice tags to --text-file (requires "
+                         "--language); writes <text-file>_tagged.txt")
     ap.add_argument("--list-voices", dest="list_voices", action="store_true",
                     help="Fetch the ElevenLabs voice catalogue for "
                          "--language and write a {status, voices} manifest")
@@ -286,7 +293,15 @@ def main() -> int:
 
     # Mirror dub_engine.py's mode validation here so a bad launch dies with
     # a clear argparse message instead of deep inside the detached child.
-    if args.test_llm:
+    if args.add_tags:
+        if (args.test_llm or args.list_voices or args.voice_change
+                or args.regen_chunk):
+            ap.error("--add-tags cannot be combined with other modes")
+        if not args.language:
+            ap.error("--add-tags requires --language")
+        if not args.text_file:
+            ap.error("--add-tags requires --text-file <utf-8 script>")
+    elif args.test_llm:
         if args.regen_chunk or args.list_voices or args.voice_change:
             ap.error("--test-llm cannot be combined with other modes")
     elif args.list_voices:
@@ -398,7 +413,9 @@ def main() -> int:
             log_file.write("[run_dub] note: --app-dir is deprecated (v0.3) "
                            "and ignored by the standalone engine.\n")
             cmd += ["--app-dir", args.app_dir]
-        if args.test_llm:
+        if args.add_tags:
+            cmd += ["--add-tags", "--text-file", args.text_file]
+        elif args.test_llm:
             cmd.append("--test-llm")
         elif args.list_voices:
             cmd.append("--list-voices")
