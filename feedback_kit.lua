@@ -288,7 +288,7 @@ function M.new_card(cfg)
     local txt = read_all(self.result_path)
     if txt and txt:find("}", 1, true) then
       if txt:find('"ok"%s*:%s*true') then
-        self.note = "✓ Sent to the team. Thank you!"
+        self.note = "Sent to the team. Thank you!"
       elseif txt:find('"where"%s*:%s*"saved"') then
         self.note = "No connection to the team inbox right now — report " ..
                     "saved and will be sent automatically next time."

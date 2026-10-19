@@ -1432,7 +1432,7 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
         rv, VERTEX_KEY_PATH = reaper.ImGui_InputText(ctx, 'Vertex JSON path', VERTEX_KEY_PATH or '')
         reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
         if has_vertex_file then
-          reaper.ImGui_TextWrapped(ctx, '✓ vertex_key.json found next to the script — nothing else needed here.')
+          reaper.ImGui_TextWrapped(ctx, 'vertex_key.json found next to the script — nothing else needed here.')
         else
           reaper.ImGui_TextWrapped(ctx, 'Path to your Google service-account JSON — or just drop a file named vertex_key.json next to this script and leave this blank.')
         end
@@ -1537,7 +1537,7 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
     -- v0.10: embedded, the credential half of this list is not editable here —
     -- say where it IS editable instead of listing fields the user cannot find.
     reaper.ImGui_TextWrapped(ctx, 'Missing: ' .. table.concat(missing, ', ')
-      .. (EMBED and '   (keys and model: ⚙ Settings)' or ''))
+      .. (EMBED and '   (keys and model: Settings)' or ''))
     reaper.ImGui_PopStyleColor(ctx)
   end
 
@@ -1700,7 +1700,7 @@ end
 -- ─── Success phase ────────────────────────────────────────
 local function ui_phase_success(ctx, on_close)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55DD55FF)
-  reaper.ImGui_Text(ctx, '✓  Successful')
+  reaper.ImGui_Text(ctx, 'Successful')
   reaper.ImGui_PopStyleColor(ctx)
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_Dummy(ctx, 0, 8)
@@ -1763,7 +1763,7 @@ end
 -- ─── Failure phase ────────────────────────────────────────
 local function ui_phase_failure(ctx, on_close)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF5555FF)
-  reaper.ImGui_Text(ctx, '✗  Failed')
+  reaper.ImGui_Text(ctx, 'Failed')
   reaper.ImGui_PopStyleColor(ctx)
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_Dummy(ctx, 0, 8)

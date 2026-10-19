@@ -1432,7 +1432,7 @@ local STAGE_LABELS = {
   S2d = "Match + TTS",
   S3a = "Sync SRT (EN)",
   S3b = "Chunk boundaries",
-  S3c = "EN ↔ script mapping",
+  S3c = "EN <-> script mapping",
   S3d = "Placement (springs)",
   S3e = "Render synced audio",
 }
@@ -1613,6 +1613,293 @@ local function _grey_hint(ctx, text)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
   reaper.ImGui_TextWrapped(ctx, text)
   reaper.ImGui_PopStyleColor(ctx)
+end
+
+-- ─── 0.15.14 script editor kit: two views, voice tags, wrapped boxes ────────
+-- One editor used by the review table, the "I have the script" box and Redo
+-- one line. The text it owns is always the TAGGED script ("canonical"):
+--   * "Script + tags" view edits it directly;
+--   * "Script" view shows the same text with every [tag] hidden. An edit
+--     there is merged back: each tag stays in front of the word it was in
+--     front of (words are lined up old -> new), so fixing the words never
+--     loses the tags and the tag view always shows the latest words.
+-- ReaImGui's edit box cannot word-wrap, so the box shows the text with soft
+-- line breaks (" \n" — a space kept before the break) at the box width, and
+-- they are taken out again before the text is stored. Real line breaks are
+-- kept (they never have a space in front: trailing spaces are trimmed).
+-- All on V5: the main chunk is at Lua's 200-locals limit.
+
+V5.TAG_PAT = "%[/?[%a ]+%]"
+-- The tag palette (same set the Step-4 prompts use). Click = copy.
+V5.TAG_LIST = {
+  { "[calm]", "steady, unhurried" }, { "[contemplative]", "reflective" },
+  { "[thoughtful]", "considered" },  { "[soft]", "quiet, gentle volume" },
+  { "[warm]", "friendly, kind" },    { "[gentle]", "tender" },
+  { "[slow]", "slower pace for a deep line" },
+  { "[pause]", "a short pause before what follows" },
+  { "[sighs]", "an exhale — use rarely" },
+  { "[smiling]", "light, a smile in the voice" },
+  { "[curious]", "questioning" },    { "[lighthearted]", "playful" },
+  { "[emphatic]", "strong emphasis — rarely" },
+  { "[serious]", "grave — rarely" },
+}
+
+function V5.has_tags(s) return (s or ""):find(V5.TAG_PAT) ~= nil end
+
+-- The script with its tags removed, tidily (no double spaces, a line that
+-- only held tags disappears). Mirrors the engine's _without_tags.
+function V5.tags_strip(s)
+  local out = {}
+  for line in ((s or "") .. "\n"):gmatch("(.-)\n") do
+    if not line:match("%S") then
+      out[#out + 1] = ""
+    else
+      local clean = line:gsub(V5.TAG_PAT, " "):gsub("%s+", " ")
+                        :gsub("^ ", ""):gsub(" $", "")
+      if clean ~= "" then out[#out + 1] = clean end
+    end
+  end
+  local r = table.concat(out, "\n"):gsub("\n\n\n+", "\n\n")
+  return (r:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- Tags of a tagged text, each with the index of the plain word it precedes
+-- (#words + 1 = at the end), plus that plain word list.
+function V5._tag_anchors(tagged)
+  local words, tags = {}, {}
+  local pos = 1
+  local s = tagged or ""
+  while pos <= #s do
+    local a, b = s:find(V5.TAG_PAT, pos)
+    local chunk = s:sub(pos, (a or (#s + 1)) - 1)
+    for w in chunk:gmatch("%S+") do words[#words + 1] = w end
+    if not a then break end
+    tags[#tags + 1] = { tag = s:sub(a, b), at = #words + 1 }
+    pos = b + 1
+  end
+  return words, tags
+end
+
+-- Re-attach the tags of *old_tagged* to *new_plain* (the words an editor
+-- just typed in the Script view). Words are lined up with a longest-common-
+-- subsequence pass; a tag whose word was deleted moves to the next surviving
+-- word. The new text keeps its own spacing and line breaks.
+function V5.tags_merge(old_tagged, new_plain)
+  local old_words, tags = V5._tag_anchors(old_tagged)
+  if #tags == 0 then return new_plain end
+  local new_words = {}
+  for w in (new_plain or ""):gmatch("%S+") do new_words[#new_words + 1] = w end
+  local n, m = #old_words, #new_words
+  -- LCS table, bottom-up. A paragraph is a few hundred words at most.
+  local L = {}
+  for i = n + 1, 1, -1 do
+    L[i] = {}
+    for j = m + 1, 1, -1 do
+      if i > n or j > m then L[i][j] = 0
+      elseif old_words[i] == new_words[j] then L[i][j] = L[i + 1][j + 1] + 1
+      else L[i][j] = math.max(L[i + 1][j], L[i][j + 1]) end
+    end
+  end
+  local map, i, j = {}, 1, 1
+  while i <= n and j <= m do
+    if old_words[i] == new_words[j] then map[i] = j; i = i + 1; j = j + 1
+    elseif L[i + 1][j] >= L[i][j + 1] then i = i + 1
+    else j = j + 1 end
+  end
+  -- Where each old word's tags land in the new text.
+  local before = {}           -- new word index -> { tags… }
+  for _, t in ipairs(tags) do
+    local k, dest = t.at, nil
+    while k <= n do
+      if map[k] then dest = map[k] break end
+      k = k + 1
+    end
+    -- No surviving word after it: keep it in front of the word that now
+    -- sits where the old one was, else at the very end.
+    dest = dest or math.min(t.at, m + 1)
+    before[dest] = before[dest] or {}
+    table.insert(before[dest], t.tag)
+  end
+  local out, wi = {}, 0
+  for sp, w in (new_plain or ""):gmatch("(%s*)(%S+)") do
+    wi = wi + 1
+    out[#out + 1] = sp
+    if before[wi] then out[#out + 1] = table.concat(before[wi], " ") .. " " end
+    out[#out + 1] = w
+  end
+  local tail = (new_plain or ""):match("(%s*)$") or ""
+  if before[wi + 1] then
+    out[#out + 1] = (wi > 0 and " " or "") .. table.concat(before[wi + 1], " ")
+  end
+  out[#out + 1] = tail
+  return table.concat(out)
+end
+
+-- Soft-wrap *s* to *width* pixels with the current font. Real line breaks
+-- stay; inserted ones are " \n".
+function V5.soft_wrap(ctx, s, width)
+  if not reaper.ImGui_CalcTextSize or width < 40 then return s end
+  local lines = {}
+  for raw in ((s or "") .. "\n"):gmatch("(.-)\n") do
+    local line = raw:gsub("%s+$", "")
+    local cur = ""
+    for sp, w in line:gmatch("(%s*)(%S+)") do
+      local try = (cur == "") and (sp .. w) or (cur .. sp .. w)
+      if cur ~= "" and reaper.ImGui_CalcTextSize(ctx, try) > width then
+        lines[#lines + 1] = cur .. " "   -- the space marks a soft break
+        cur = w
+      else
+        cur = try
+      end
+    end
+    lines[#lines + 1] = cur
+  end
+  return table.concat(lines, "\n")
+end
+
+function V5.soft_unwrap(s)
+  return ((s or ""):gsub(" \n", " "))
+end
+
+-- The editor. *id* keys its cache; *text* is the canonical (tagged) text;
+-- *view* is "tags" or "plain"; *min_lines* sizes an empty box. Returns
+-- changed, new_canonical. The box is as tall as its wrapped text, so it
+-- never scrolls sideways or inside itself.
+V5.ed_cache = {}
+function V5.script_box(ctx, id, text, view, min_lines)
+  text = text or ""
+  local avail = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 400
+  local width = avail - 22          -- frame padding + a scrollbar's room
+  local c = V5.ed_cache[id]
+  if not (c and c.src == text and c.view == view and c.w == width) then
+    if not (c and c.active) then
+      local shown = (view == "plain") and V5.tags_strip(text) or text
+      c = { src = text, view = view, w = width,
+            disp = V5.soft_wrap(ctx, shown, width) }
+      V5.ed_cache[id] = c
+    end
+  end
+  local n = 1
+  for _ in c.disp:gmatch("\n") do n = n + 1 end
+  n = math.max(n, min_lines or 2)
+  local lh = (reaper.ImGui_GetTextLineHeight and
+              reaper.ImGui_GetTextLineHeight(ctx)) or 18
+  local rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1,
+                                                  n * lh + 12)
+  c.active = reaper.ImGui_IsItemActive(ctx)
+  if rv then
+    c.disp = txt
+    local flat = V5.soft_unwrap(txt)
+    local new = (view == "plain") and V5.tags_merge(text, flat) or flat
+    c.src = new
+    return true, new
+  end
+  return false, text
+end
+
+-- The "Script | Script + tags" switch. *key* names whose view it sets.
+V5.views = {}
+function V5.view_switch(ctx, key)
+  -- 0.15.14: words-only view by default; tags one click away.
+  local v = V5.views[key] or "plain"
+  local function seg(label, val)
+    local on = (v == val)
+    if on then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x2A6699FF)
+    end
+    if reaper.ImGui_SmallButton(ctx, label .. '##vw' .. key) then
+      V5.views[key] = val
+    end
+    if on then reaper.ImGui_PopStyleColor(ctx) end
+  end
+  seg(' Script ', "plain")
+  reaper.ImGui_SameLine(ctx, 0, 2)
+  seg(' Script + tags ', "tags")
+  return V5.views[key] or "plain"
+end
+
+-- Clickable tag chips. A click copies the tag; Ctrl/Cmd+V puts it where the
+-- cursor is in the text box.
+function V5.tag_chips(ctx, key)
+  local avail = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 400
+  local x = 0
+  for i, t in ipairs(V5.TAG_LIST) do
+    local w = (reaper.ImGui_CalcTextSize and
+               reaper.ImGui_CalcTextSize(ctx, t[1]) or 60) + 12
+    if i > 1 then
+      if x + w < avail then reaper.ImGui_SameLine(ctx, 0, 4)
+      else x = 0 end
+    end
+    if reaper.ImGui_SmallButton(ctx, t[1] .. '##chip' .. key .. i) then
+      reaper.ImGui_SetClipboardText(ctx, t[1] .. " ")
+      ui_set_banner("info", t[1] .. " copied — click in the text where it " ..
+        "should go and paste (Ctrl+V / Cmd+V).")
+    end
+    if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+      reaper.ImGui_SetTooltip(ctx, t[2] .. ' — click to copy')
+    end
+    x = x + w + 4
+  end
+  -- 0.15.14: every tag the language's tag instructions (Step 4 prompt)
+  -- mention, in a pop-up — including the ones it says to avoid, marked.
+  reaper.ImGui_SameLine(ctx, 0, 8)
+  if reaper.ImGui_SmallButton(ctx, 'More...##chipmore' .. key) then
+    reaper.ImGui_OpenPopup(ctx, 'alltags##' .. key)
+  end
+  if reaper.ImGui_BeginPopup(ctx, 'alltags##' .. key) then
+    local lang = (_review and _review.manifest and
+                  (_review.manifest.language or "") ~= "" and
+                  _review.manifest.language) or LANGUAGE
+    local all = V5.prompt_tags(lang)
+    reaper.ImGui_Text(ctx, 'All tags in the ' .. tostring(lang) ..
+                           ' tag instructions — click to copy')
+    reaper.ImGui_Separator(ctx)
+    if #all == 0 then
+      _grey_hint(ctx, 'No tag instructions found for this language.')
+    end
+    for i, t in ipairs(all) do
+      if t.avoid then
+        reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+      end
+      if reaper.ImGui_Selectable(ctx, t.tag .. (t.avoid and
+           '   (instructions say: avoid)' or '') .. '##all' .. i) then
+        reaper.ImGui_SetClipboardText(ctx, t.tag .. " ")
+        ui_set_banner("info", t.tag .. " copied — click in the text where " ..
+          "it should go and paste (Ctrl+V / Cmd+V).")
+      end
+      if t.avoid then reaper.ImGui_PopStyleColor(ctx) end
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+end
+
+-- Tags named in prompts/Step4_Emotion_Prompt_<lang>.txt, in the order they
+-- first appear; a tag on a "forbidden / do not use" line is marked avoid.
+-- Read once per language.
+V5.prompt_tag_cache = {}
+function V5.prompt_tags(lang)
+  lang = lang or ""
+  if V5.prompt_tag_cache[lang] then return V5.prompt_tag_cache[lang] end
+  local list, seen = {}, {}
+  local path = V5.PROMPTS_DIR and
+               (V5.PROMPTS_DIR .. SEP .. "Step4_Emotion_Prompt_" .. lang .. ".txt")
+  local f = path and io.open(path, "rb")
+  if f then
+    for line in f:lines() do
+      local up = line:upper()
+      local avoid = up:find("FORBIDDEN", 1, true) or up:find("DO NOT USE", 1, true)
+      for tag in line:gmatch("%[[%a][%a /]*%]") do
+        local k = tag:lower()
+        if not seen[k] then
+          seen[k] = true
+          list[#list + 1] = { tag = k, avoid = avoid and true or false }
+        end
+      end
+    end
+    f:close()
+  end
+  V5.prompt_tag_cache[lang] = list
+  return list
 end
 
 -- ─── v0.13 form kit ─────────────────────────────────────────────────────────
@@ -2845,6 +3132,133 @@ function V5.ver_less(x, y)
   return false
 end
 
+-- 0.15.14: "a new version is out" — shown ONLY on the main page, blinking,
+-- with a short before/after list. No pop-up, no system notification.
+-- In the background (curl, never blocking a frame) the panel reads the
+-- production VERSION and WHATS_NEW.txt from GitHub, at most every 6 hours;
+-- the copies live in the status root (launches never wipe it).
+V5.UPD_BASE = "https://raw.githubusercontent.com/darpantimsina72/fast-syncs/production/"
+function V5.upd_file(name) return V5.STATUS_ROOT .. SEP .. "update_check_" .. name end
+
+function V5.update_check_start()
+  if V5.upd_started then return end
+  V5.upd_started = true
+  local stamp = tonumber(read_all(V5.upd_file("time.txt")) or "") or 0
+  if os.time() - stamp < 6 * 3600 and file_exists(V5.upd_file("VERSION")) then
+    return    -- fresh enough: just read what is there
+  end
+  reaper.RecursiveCreateDirectory(V5.STATUS_ROOT, 0)
+  local f = io.open(V5.upd_file("time.txt"), "wb")
+  if f then f:write(tostring(os.time())); f:close() end
+  for _, name in ipairs({ "VERSION", "WHATS_NEW.txt" }) do
+    if _is_windows() then
+      reaper.ExecProcess('curl.exe -fsSL -o ' .. V5.winquote(V5.upd_file(name))
+                         .. ' ' .. V5.winquote(V5.UPD_BASE .. name), -2)
+    else
+      os.execute('curl -fsSL -o ' .. shellquote(V5.upd_file(name)) .. ' '
+                 .. shellquote(V5.UPD_BASE .. name) .. ' >/dev/null 2>&1 &')
+    end
+  end
+end
+
+-- Newest published version and the before/after rows newer than ours.
+-- WHATS_NEW.txt lines:  <version> | <before> | <now>   ("#" = comment).
+function V5.update_info()
+  local now = reaper.time_precise()
+  if V5.upd_info and now - (V5.upd_at or 0) < 5 then return V5.upd_info end
+  V5.upd_at = now
+  local latest = (read_all(V5.upd_file("VERSION")) or ""):match("(%d+%.%d+%.%d+)")
+  local info = nil
+  if latest and V5.ver_less(V5.APP_VERSION, latest) then
+    info = { latest = latest, rows = {} }
+    for line in ((read_all(V5.upd_file("WHATS_NEW.txt")) or "") .. "\n"):gmatch("(.-)\n") do
+      local v, before, after = line:match("^%s*(%d+%.%d+%.%d+)%s*|%s*(.-)%s*|%s*(.-)%s*$")
+      if v and V5.ver_less(V5.APP_VERSION, v) then
+        info.rows[#info.rows + 1] = { v = v, before = before, after = after }
+      end
+    end
+  end
+  V5.upd_info = info
+  return info
+end
+
+function V5.ui_update_notice(ctx)
+  V5.update_check_start()
+  local info = V5.update_info()
+  if not info then return end
+  -- Blink: bright / dim every half second.
+  local on = math.floor(reaper.time_precise() * 2) % 2 == 0
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), on and 0xFFDD33FF or 0x886622FF)
+  reaper.ImGui_Text(ctx, '●  New version ' .. info.latest .. ' is out' ..
+                         '  (you have ' .. V5.APP_VERSION .. ')')
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_SameLine(ctx)
+  if V5.updater_path() and reaper.ImGui_SmallButton(ctx, 'Update now##updnow') then
+    V5.run_updater()
+  end
+  reaper.ImGui_SameLine(ctx)
+  if #info.rows > 0 and reaper.ImGui_SmallButton(ctx,
+       (V5.upd_show and 'Hide changes' or "What's new") .. '##updwhat') then
+    V5.upd_show = not V5.upd_show
+  end
+  if V5.upd_show and #info.rows > 0 and reaper.ImGui_BeginTable then
+    if reaper.ImGui_BeginTable(ctx, '##whatsnew', 3,
+         reaper.ImGui_TableFlags_Borders and reaper.ImGui_TableFlags_Borders() or 0) then
+      reaper.ImGui_TableSetupColumn(ctx, 'Version')
+      reaper.ImGui_TableSetupColumn(ctx, 'Before')
+      reaper.ImGui_TableSetupColumn(ctx, 'Now')
+      reaper.ImGui_TableHeadersRow(ctx)
+      for _, r in ipairs(info.rows) do
+        reaper.ImGui_TableNextRow(ctx)
+        reaper.ImGui_TableSetColumnIndex(ctx, 0); reaper.ImGui_Text(ctx, r.v)
+        reaper.ImGui_TableSetColumnIndex(ctx, 1); reaper.ImGui_TextWrapped(ctx, r.before)
+        reaper.ImGui_TableSetColumnIndex(ctx, 2); reaper.ImGui_TextWrapped(ctx, r.after)
+      end
+      reaper.ImGui_EndTable(ctx)
+    end
+  end
+end
+
+-- Settings > About: "What's new" for the version installed here, read from
+-- the WHATS_NEW.txt that shipped with it — every version up to this one,
+-- newest first, as Before / Now rows.
+function V5.ui_whats_new_installed(ctx)
+  if not reaper.ImGui_CollapsingHeader(ctx, "What's new in this version") then
+    return
+  end
+  local by_ver, order = {}, {}
+  for line in ((read_all(V5.APP_ROOT .. SEP .. "WHATS_NEW.txt") or "") .. "\n"):gmatch("(.-)\n") do
+    local v, before, after = line:match("^%s*(%d+%.%d+%.%d+)%s*|%s*(.-)%s*|%s*(.-)%s*$")
+    if v and not V5.ver_less(V5.APP_VERSION, v) then
+      if not by_ver[v] then by_ver[v] = {}; order[#order + 1] = v end
+      table.insert(by_ver[v], { before, after })
+    end
+  end
+  if #order == 0 then
+    _grey_hint(ctx, 'No change list shipped with this version.')
+    return
+  end
+  table.sort(order, function(a, b) return V5.ver_less(b, a) end)
+  for _, v in ipairs(order) do
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
+    reaper.ImGui_Text(ctx, 'Version ' .. v .. (v == V5.APP_VERSION and '  (this one)' or ''))
+    reaper.ImGui_PopStyleColor(ctx)
+    if reaper.ImGui_BeginTable and reaper.ImGui_BeginTable(ctx, '##wn' .. v, 2,
+         reaper.ImGui_TableFlags_Borders and reaper.ImGui_TableFlags_Borders() or 0) then
+      reaper.ImGui_TableSetupColumn(ctx, 'Before')
+      reaper.ImGui_TableSetupColumn(ctx, 'Now')
+      reaper.ImGui_TableHeadersRow(ctx)
+      for _, r in ipairs(by_ver[v]) do
+        reaper.ImGui_TableNextRow(ctx)
+        reaper.ImGui_TableSetColumnIndex(ctx, 0); reaper.ImGui_TextWrapped(ctx, r[1])
+        reaper.ImGui_TableSetColumnIndex(ctx, 1); reaper.ImGui_TextWrapped(ctx, r[2])
+      end
+      reaper.ImGui_EndTable(ctx)
+    end
+    reaper.ImGui_Dummy(ctx, 0, 4)
+  end
+end
+
 function V5.rollback_choices()
   local seen, out = {}, {}
   local function add(v)
@@ -3009,7 +3423,7 @@ local function preflight_engine(need_llm)
       ui_set_banner("error",
         "This run needs the translation LLM, but its credentials are " ..
         "incomplete:\n" .. why ..
-        "\n\nFix it in the settings window (⚙ in the header), then press " ..
+        "\n\nFix it in the settings window (in the header), then press " ..
         "'Test connection'.")
       return nil
     end
@@ -4353,7 +4767,7 @@ local function start_voice_change()
   local voice = (VC_VOICE_ID ~= "" and VC_VOICE_ID) or VOICE_ID
   if not (voice or ""):match("%S") then
     ui_set_banner("error",
-      "Pick a target voice — fetch voices in ⚙ Settings, or paste a " ..
+      "Pick a target voice — fetch voices in Settings, or paste a " ..
       "voice id in the voice-change section.")
     return false
   end
@@ -4480,8 +4894,18 @@ local function _finish_run(exit_code)
   local cancelled = _ui_cancelled or _cancel_pending
 
   -- Shared error detail: manifest error text, else a log tail.
+  -- 0.15.14: plain words first. The quick jobs (Test connection, Fetch
+  -- voices, Redo, Text to Speech, Add voice tags…) used to put a raw
+  -- traceback in their banner; they now get the same plain-English reason
+  -- as a failed dub (error_explain.lua). The raw text stays in the Log tab.
   local function _error_detail(limit)
     local detail = (m and m.error ~= "" and m.error) or nil
+    if V5.EX then
+      local ok, d = pcall(V5.EX.diagnose,
+        (read_all(LOG_PATH) or "") .. "\n" .. (detail or ""), "failed")
+      local plain = ok and d and V5.EX.as_text(d) or ""
+      if plain ~= "" then return plain end
+    end
     if not detail then
       detail = read_all(LOG_PATH) or "(no output)"
       if #detail > limit then detail = "...\n" .. detail:sub(-limit) end
@@ -4513,7 +4937,7 @@ local function _finish_run(exit_code)
         (m.reply ~= "" and m.reply or "(empty)"), extra))
     else
       ui_set_banner("error", "LLM connection test failed:\n" ..
-                             _error_detail(600) .. "\n\nFull log: " .. LOG_PATH)
+                             _error_detail(600) .. "\n\nTechnical details: the Log tab.")
     end
     _ui_phase = _util_return_phase or "setup"
     return
@@ -4537,7 +4961,7 @@ local function _finish_run(exit_code)
         V5.voice_cache_save()
         ui_set_banner("info", string.format(
           "Fetched %d %s voices for %s — pick one in any Voice list " ..
-          "(the Tools tab, or ⚙ Settings → Voices).",
+          "(the Tools tab, or Settings → Voices).",
           #voices, V5.tts_label(), LANGUAGE))
       else
         ui_set_banner("warn",
@@ -4546,7 +4970,7 @@ local function _finish_run(exit_code)
       end
     else
       ui_set_banner("error", "Voice fetch failed:\n" ..
-                             _error_detail(600) .. "\n\nFull log: " .. LOG_PATH)
+                             _error_detail(600) .. "\n\nTechnical details: the Log tab.")
     end
     _ui_phase = _util_return_phase or "setup"
     return
@@ -4570,7 +4994,7 @@ local function _finish_run(exit_code)
       end
     else
       ui_set_banner("error", "Adding voice tags failed:\n" ..
-                             _error_detail(600) .. "\n\nFull log: " .. LOG_PATH)
+                             _error_detail(600) .. "\n\nTechnical details: the Log tab.")
     end
     _ui_phase = _util_return_phase or "setup"
     return
@@ -4597,7 +5021,7 @@ local function _finish_run(exit_code)
     else
       ui_set_banner("error", "Voice change failed:\n" ..
                              _error_detail(600) ..
-                             "\n\nFull log: " .. LOG_PATH)
+                             "\n\nTechnical details: the Log tab.")
     end
     _vc_pending = nil
     _ui_phase = back
@@ -4625,7 +5049,7 @@ local function _finish_run(exit_code)
     else
       ui_set_banner("error", "Speech generation failed:\n" ..
                              _error_detail(600) ..
-                             "\n\nFull log: " .. LOG_PATH)
+                             "\n\nTechnical details: the Log tab.")
     end
     V5.tts_pending = nil
     _ui_phase = back
@@ -4647,7 +5071,7 @@ local function _finish_run(exit_code)
       local ok, why = V5.play_wav(m.regen_wav)
       if ok then
         ui_set_banner("info", string.format(
-          "Previewing %s — nothing was imported. Press 🔊 Test voice again " ..
+          "Previewing %s — nothing was imported. Press Test voice again " ..
           "to replay it.", V5.voice_label_for_banner(
             pend and pend.voice or "")))
       else
@@ -4658,7 +5082,7 @@ local function _finish_run(exit_code)
     else
       ui_set_banner("error", "Voice preview failed:\n" ..
                              _error_detail(600) ..
-                             "\n\nFull log: " .. LOG_PATH)
+                             "\n\nTechnical details: the Log tab.")
     end
     V5.preview_pending = nil
     _ui_phase = back
@@ -4717,7 +5141,7 @@ local function _finish_run(exit_code)
           string.format("chunk %d: %s", V5.regen_qi, detail)
       else
         ui_set_banner("error", "Chunk regeneration failed:\n" .. detail ..
-                               "\n\nFull log: " .. LOG_PATH)
+                               "\n\nTechnical details: the Log tab.")
       end
     end
     _regen_pending = nil
@@ -4783,9 +5207,64 @@ end
 -- to its REAPER project (run_dub.py wipes the live log at the next launch —
 -- a Test connection click used to erase a failed dub's only log) and, for the
 -- two real pipelines, arm the star card on the success/failure screen.
+-- 0.15.14: closing the window by mistake no longer loses the screen. The
+-- end screen of a dub run (finished / failed / paused for review) is noted
+-- in this project's status folder, and the next time the window opens it
+-- goes straight back there — no trip through history, no re-upload. A new
+-- launch wipes the status folder, so a stale note never outlives its run;
+-- "Run again" / "Back to setup" forget it on purpose.
+function V5.screen_note_path() return STATUS_DIR .. SEP .. "panel_screen.txt" end
+
+function V5.remember_screen()
+  if _ui_phase ~= "success" and _ui_phase ~= "failure"
+     and _ui_phase ~= "review" then return end
+  local f = io.open(V5.screen_note_path(), "wb")
+  if not f then return end
+  f:write("phase=" .. _ui_phase .. "\nimported=" .. (_imported and "1" or "0")
+          .. "\nmode=" .. tostring(_run_mode) .. "\n")
+  f:close()
+end
+
+function V5.forget_screen() os.remove(V5.screen_note_path()) end
+
+function V5.restore_screen()
+  if _ui_phase ~= "setup" then return end
+  local note = read_all(V5.screen_note_path())
+  if not note then return end
+  local phase = note:match("phase=(%a+)")
+  local m = file_exists(DONE_JSON) and load_manifest_json(DONE_JSON) or nil
+  if not (phase and m) then return end
+  _run_mode = note:match("mode=(%a+)") or "full"
+  if phase == "review" and m.status == "review" then
+    if enter_review_phase(m) then
+      -- Edits saved before the window closed (auto-saved, see the review
+      -- screen) come back too.
+      local saved = read_all(_review.edited_path)
+      if saved and saved:match("%S") then
+        _review_replace_text(saved)
+        _review.dirty = false
+      end
+      _resume_manifest = nil
+    end
+  elseif phase == "success" and m.status == "ok" then
+    _manifest, _imported = m, note:match("imported=1") ~= nil
+    if V5.EX then V5.ui_notes = V5.EX.notes(read_all(LOG_PATH) or "") end
+    _ui_progress, _ui_phase = 1.0, "success"
+  elseif phase == "failure" then
+    local detail = (m.error ~= "" and m.error) or read_all(LOG_PATH) or ""
+    if #detail > 1600 then detail = "...\n" .. detail:sub(-1600) end
+    _ui_failure = { error_tail = detail, log_path = LOG_PATH }
+    V5.explain_failure(detail, "failed")
+    _manifest, _ui_phase = m, "failure"
+  end
+end
+
 V5.QUIET_OK = { test_llm = true, list_voices = true, preview = true,
                 add_tags = true }
 function V5.after_run(exit_code)
+  if _run_mode == "full" or _run_mode == "translate" or _run_mode == "dub" then
+    V5.remember_screen()
+  end
   if not V5.FB then return end
   local mode = _run_mode
   local status
@@ -4938,17 +5417,148 @@ local function _stage_line()
                        STAGE_LABELS[_ui_stage_tag] or "Working…")
 end
 
-local function _render_log_child(ctx, height)
-  if reaper.ImGui_BeginChild(ctx, '##loglines', -1, height, _child_border_flag()) then
-    local pushed = _push_font(ctx, 16)
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xBBBBBBFF)
-    local start = math.max(1, #_log_buffer - 300)
-    for i = start, #_log_buffer do
-      reaper.ImGui_Text(ctx, _log_buffer[i])
+-- 0.15.14: the Log tab opens on a SIMPLE view — the run's steps in plain
+-- words (done / now / next), any warning in a sentence, and the outcome.
+-- "Full" is the raw log, as before. The raw lines' "…" is not in the log
+-- font (it drew as "?"), so it is shown as "...".
+V5.STEP_PLAIN = {
+  S1a = "Listening to the English audio",
+  S1b = "Finding where each English sentence is spoken",
+  S2a = "Translating",
+  S2b = "Checking the translation",
+  S2c = "Polishing punctuation (and adding voice tags)",
+  S2d = "Making the voice",
+  S3a = "Preparing the English timing",
+  S3b = "Finding where each dubbed line is spoken",
+  S3c = "Matching dubbed lines to English lines",
+  S3d = "Placing each line on the timeline",
+  S3e = "Making the final audio",
+}
+V5.log_view = "simple"
+
+function V5.simple_log_lines()
+  local seen, notes, last = {}, {}, nil
+  for _, line in ipairs(_log_buffer) do
+    local tag = line:match("^%s*%[(S%d%a?)%]")
+    if tag then seen[tag] = true; last = tag end
+    if line:find("WARNING", 1, true) then
+      local t = line:gsub("^%s*%[[^%]]*%]%s*", ""):gsub("^WARNING:?%s*", "")
+      notes[#notes + 1] = t:gsub("…", "...")
     end
-    reaper.ImGui_PopStyleColor(ctx)
-    if pushed then _pop_font(ctx) end
-    if _log_autoscroll then reaper.ImGui_SetScrollHereY(ctx, 1.0) end
+  end
+  local list = MODE_STAGES[_run_mode] or STAGE_ORDER
+  local rows = {}
+  local cur = 0
+  for i, t in ipairs(list) do if t == last then cur = i end end
+  for i, t in ipairs(list) do
+    local state
+    if _ui_phase == "running" then
+      state = (i < cur) and "done" or (i == cur) and "now" or "next"
+    else
+      state = seen[t] and "done" or "next"
+      if _ui_phase == "failure" and t == last then state = "stopped" end
+    end
+    rows[#rows + 1] = { state = state, text = V5.STEP_PLAIN[t] or t }
+  end
+  return rows, notes
+end
+
+function V5.render_simple_log(ctx)
+  local rows, notes = V5.simple_log_lines()
+  local pushed = _push_font(ctx, 18)
+  if #_log_buffer == 0 then
+    _grey_hint(ctx, 'Nothing has run yet.')
+  elseif not (MODE_STAGES[_run_mode]) then
+    -- A quick job (test, voices, redo…): its last line, in plain words.
+    local lastl = _log_buffer[#_log_buffer] or ""
+    reaper.ImGui_TextWrapped(ctx, (lastl:gsub("^%s*%[[^%]]*%]%s*", "")
+                                        :gsub("…", "...")))
+  else
+    local col = { done = 0x55DD77FF, now = 0xFFCC55FF, next = 0x667788FF,
+                  stopped = 0xFF6666FF }
+    local word = { done = "Done   ", now = "Now    ", next = "Next   ",
+                   stopped = "Stopped" }
+    for _, r in ipairs(rows) do
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), col[r.state])
+      reaper.ImGui_Text(ctx, word[r.state] .. "   " .. r.text ..
+                             (r.state == "now" and " ..." or ""))
+      reaper.ImGui_PopStyleColor(ctx)
+    end
+    reaper.ImGui_Dummy(ctx, 0, 6)
+    local outcome = ({ review  = "Paused — the script is ready for you to check.",
+                       success = "Finished.",
+                       failure = "Stopped with a problem — see below." })[_ui_phase]
+    if outcome then reaper.ImGui_TextWrapped(ctx, outcome) end
+    if _ui_phase == "failure" and V5.EX and _ui_failure and _ui_failure.reason then
+      reaper.ImGui_TextWrapped(ctx, V5.EX.as_text(_ui_failure.reason))
+    end
+    for _, n in ipairs(notes) do
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
+      reaper.ImGui_TextWrapped(ctx, "Note: " .. n)
+      reaper.ImGui_PopStyleColor(ctx)
+    end
+  end
+  if pushed then _pop_font(ctx) end
+end
+
+-- 0.15.14: errors summarised above the log, in plain words, in BOTH views:
+-- how many problem lines the log has, and what they mean (error_explain).
+-- Re-read only when the log grows.
+function V5.log_problems()
+  local n = #_log_buffer
+  if V5.lp_cache and V5.lp_cache.n == n then return V5.lp_cache end
+  local count, lines = 0, {}
+  for _, l in ipairs(_log_buffer) do
+    if l:find("Traceback", 1, true) or l:find("ERROR", 1, true)
+       or l:find("Error:", 1, true) or l:find("FAILED", 1, true) then
+      count = count + 1
+    end
+    lines[#lines + 1] = l
+  end
+  local text = ""
+  if count > 0 and V5.EX then
+    local ok, d = pcall(V5.EX.diagnose, table.concat(lines, "\n"), "failed")
+    text = (ok and d) and V5.EX.as_text(d) or ""
+  end
+  V5.lp_cache = { n = n, count = count, text = text }
+  return V5.lp_cache
+end
+
+function V5.render_log_problems(ctx)
+  local p = V5.log_problems()
+  if p.count == 0 then return end
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF7070FF)
+  reaper.ImGui_Text(ctx, string.format('Problems in this run: %d', p.count))
+  reaper.ImGui_PopStyleColor(ctx)
+  if p.text ~= "" then reaper.ImGui_TextWrapped(ctx, p.text) end
+  reaper.ImGui_Dummy(ctx, 0, 4)
+end
+
+local function _render_log_child(ctx, height)
+  -- Simple | Full
+  for _, v in ipairs({ { "simple", " Simple " }, { "full", " Full log " } }) do
+    local on = (V5.log_view == v[1])
+    if on then reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x2A6699FF) end
+    if reaper.ImGui_SmallButton(ctx, v[2] .. '##lv') then V5.log_view = v[1] end
+    if on then reaper.ImGui_PopStyleColor(ctx) end
+    reaper.ImGui_SameLine(ctx, 0, 2)
+  end
+  reaper.ImGui_NewLine(ctx)
+  V5.render_log_problems(ctx)
+  if reaper.ImGui_BeginChild(ctx, '##loglines', -1, height, _child_border_flag()) then
+    if V5.log_view == "simple" then
+      V5.render_simple_log(ctx)
+    else
+      local pushed = _push_font(ctx, 16)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xBBBBBBFF)
+      local start = math.max(1, #_log_buffer - 300)
+      for i = start, #_log_buffer do
+        reaper.ImGui_Text(ctx, (_log_buffer[i]:gsub("…", "...")))
+      end
+      reaper.ImGui_PopStyleColor(ctx)
+      if pushed then _pop_font(ctx) end
+      if _log_autoscroll then reaper.ImGui_SetScrollHereY(ctx, 1.0) end
+    end
     reaper.ImGui_EndChild(ctx)
   end
   local rv
@@ -5337,7 +5947,7 @@ function V5.ui_regen_multi(ctx, sel)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x2A9945FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x44CC55FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x119911FF)
-  if reaper.ImGui_Button(ctx, string.format('⟳  Redo these %d chunks', #sel),
+  if reaper.ImGui_Button(ctx, string.format(' Redo these %d chunks', #sel),
                          230, 30) and can then
     local entries = {}
     for _, it in ipairs(sel) do
@@ -5416,7 +6026,7 @@ local function ui_regen_section(ctx, default_open)
                                   .. SEP .. 'regen')
     reaper.ImGui_PopStyleColor(ctx)
     -- 0.15.12: open the video folder from here.
-    if reaper.ImGui_SmallButton(ctx, '📂 Open folder##rgopen') then
+    if reaper.ImGui_SmallButton(ctx, 'Open folder##rgopen') then
       open_path(_regen_out_dir)
     end
     reaper.ImGui_SameLine(ctx)
@@ -5429,7 +6039,7 @@ local function ui_regen_section(ctx, default_open)
     reaper.ImGui_SameLine(ctx)
     local sel_it = reaper.CountSelectedMediaItems(0) > 0
                    and reaper.GetSelectedMediaItem(0, 0) or nil
-    if reaper.ImGui_SmallButton(ctx, '💾 Save final dub audio##rgfinal') then
+    if reaper.ImGui_SmallButton(ctx, 'Save final dub audio##rgfinal') then
       local wav, why = V5.save_final_audio(
         sel_it and reaper.GetMediaItem_Track(sel_it) or nil, _regen_out_dir)
       if wav then
@@ -5467,7 +6077,7 @@ local function ui_regen_section(ctx, default_open)
       'redo them in one go, each in its own voice.')
     reaper.ImGui_PopStyleColor(ctx)
     _ui_begin_disabled(ctx, true)
-    reaper.ImGui_Button(ctx, '⟳ Regenerate', 150, 30)
+    reaper.ImGui_Button(ctx, 'Regenerate', 150, 30)
     _ui_end_disabled(ctx)
   -- A batch keeps the row view on screen while it runs even though REAPER's
   -- selection is untouched: otherwise the panel would flip back to the
@@ -5493,9 +6103,16 @@ local function ui_regen_section(ctx, default_open)
       math.floor(pos / 60), pos % 60))
     reaper.ImGui_PopStyleColor(ctx)
 
+    -- 0.15.14: the line as one wrapped block (no sideways scrolling), and
+    -- the same two views as the review when tags are in play.
+    local rview = "tags"
+    if V5.tags_usable() or V5.has_tags(_regen_text) then
+      rview = V5.view_switch(ctx, "regen")
+      if rview == "tags" then V5.tag_chips(ctx, "rg") end
+    end
     local pushed = _push_font(ctx, 17)
-    local rv, txt = reaper.ImGui_InputTextMultiline(
-      ctx, '##regentext', _regen_text or '', -1, 90)
+    local rv, txt = V5.script_box(ctx, '##regentext', _regen_text or '',
+                                  rview, 3)
     if pushed then _pop_font(ctx) end
     if rv then _regen_text = txt end
 
@@ -5517,7 +6134,7 @@ local function ui_regen_section(ctx, default_open)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x2A6699FF)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x4488CCFF)
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x114477FF)
-    if reaper.ImGui_Button(ctx, '⟳ Regenerate', 150, 30) and can then
+    if reaper.ImGui_Button(ctx, 'Regenerate', 150, 30) and can then
       start_regen(item, _regen_text, V5.regen_voice)
     end
     reaper.ImGui_PopStyleColor(ctx, 3)
@@ -5550,7 +6167,7 @@ local function ui_regen_section(ctx, default_open)
     end
     -- v0.11: say what "🔊 Test voice" above will actually speak — the chunk's
     -- own words, so the audition matches the regen it is standing in for.
-    _grey_hint(ctx, '🔊 Test voice speaks the start of this chunk in the ' ..
+    _grey_hint(ctx, 'Test voice speaks the start of this chunk in the ' ..
                     'picked voice and plays it — nothing is imported or ' ..
                     'replaced.')
 
@@ -5561,7 +6178,7 @@ local function ui_regen_section(ctx, default_open)
       'No voice set anywhere — the engine picks one from your account.'
       or string.format('Regenerates with %s%s.',
           use_nm ~= "" and (use_nm .. '  ·  ') or '', use_id)
-         .. ((V5.regen_voice or "") == "" and '  (⚙ Settings voice)' or ''))
+         .. ((V5.regen_voice or "") == "" and '  (Settings voice)' or ''))
   end
 
   reaper.ImGui_Unindent(ctx, 12)
@@ -6076,7 +6693,7 @@ function V5.bookmark_toggle(id)
 end
 
 function V5.voice_label(vc, starred)
-  return (starred and '★ ' or '')
+  return (starred and '* ' or '')
          .. ((vc.name or "") ~= "" and vc.name or "(unnamed)")
          .. '  —  ' .. (vc.id or "")
 end
@@ -6110,7 +6727,7 @@ function V5.ui_voice_picker(ctx, key, cur, label)
   if key ~= 'settings' then
     reaper.ImGui_SameLine(ctx)
     _ui_begin_disabled(ctx, _ui_phase == "running")
-    if reaper.ImGui_SmallButton(ctx, '⟳ Fetch voices##fetch' .. key) then
+    if reaper.ImGui_SmallButton(ctx, 'Fetch voices##fetch' .. key) then
       start_fetch_voices()
     end
     _ui_end_disabled(ctx)
@@ -6140,7 +6757,7 @@ function V5.ui_voice_picker(ctx, key, cur, label)
   local starred = V5.bookmark_index(cur) ~= nil
   _ui_begin_disabled(ctx, not (cur or ""):match("%S"))
   if reaper.ImGui_SmallButton(ctx,
-      (starred and '★ Remove bookmark##bm' or '☆ Bookmark this voice##bm')
+      (starred and '* Remove bookmark##bm' or 'Bookmark this voice##bm')
       .. key) then
     V5.bookmark_toggle(cur)
   end
@@ -6153,7 +6770,7 @@ function V5.ui_voice_picker(ctx, key, cur, label)
   local test_voice = ((cur or "") ~= "" and cur) or (VOICE_ID or "")
   _ui_begin_disabled(ctx, _ui_phase == "running"
                           or not test_voice:match("%S"))
-  if reaper.ImGui_SmallButton(ctx, '🔊 Test voice##try' .. key) then
+  if reaper.ImGui_SmallButton(ctx, 'Test voice##try' .. key) then
     V5.start_voice_preview(test_voice, V5.preview_text(key))
   end
   _ui_end_disabled(ctx)
@@ -6204,7 +6821,7 @@ local function ui_voice_change_section(ctx, default_open)
   if default_open and reaper.ImGui_TreeNodeFlags_DefaultOpen then
     flags = reaper.ImGui_TreeNodeFlags_DefaultOpen()
   end
-  if not reaper.ImGui_CollapsingHeader(ctx, '🎤 Change track voice', nil,
+  if not reaper.ImGui_CollapsingHeader(ctx, 'Change track voice', nil,
                                        flags) then
     return
   end
@@ -6247,7 +6864,7 @@ local function ui_voice_change_section(ctx, default_open)
   local rv
   rv, VC_VOICE_ID = reaper.ImGui_InputText(ctx, 'Voice id##vc',
                                            VC_VOICE_ID or '')
-  _grey_hint(ctx, 'Leave empty to fall back to the ⚙ Settings voice.')
+  _grey_hint(ctx, 'Leave empty to fall back to the Settings voice.')
 
   local voice = (VC_VOICE_ID ~= "" and VC_VOICE_ID) or VOICE_ID
   local can = _vc_track_idx >= 0 and _vc_track_idx < reaper.CountTracks(0)
@@ -6256,7 +6873,7 @@ local function ui_voice_change_section(ctx, default_open)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x2A6699FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x4488CCFF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x114477FF)
-  if reaper.ImGui_Button(ctx, '🎤 Change voice', 160, 30) and can then
+  if reaper.ImGui_Button(ctx, 'Change voice', 160, 30) and can then
     start_voice_change()
   end
   reaper.ImGui_PopStyleColor(ctx, 3)
@@ -6343,7 +6960,7 @@ function V5.start_tts()
   if not (voice or ""):match("%S") then
     ui_set_banner("error",
       "No voice selected. Bookmark one here, or fetch the catalogue in " ..
-      "⚙ Settings → Voices.")
+      "Settings → Voices.")
     return false
   end
   -- Audio lands in the project media folder's TTS/, like the track renders
@@ -6423,7 +7040,7 @@ function V5.ui_tts_tab(ctx)
   if pushedf then _pop_font(ctx) end
   if rv then V5.tts_text = txt end
 
-  if reaper.ImGui_SmallButton(ctx, '📥 Paste from clipboard##tts') then
+  if reaper.ImGui_SmallButton(ctx, 'Paste from clipboard##tts') then
     local t = reaper.ImGui_GetClipboardText and
               reaper.ImGui_GetClipboardText(ctx)
     if t and t:match("%S") then
@@ -6447,7 +7064,7 @@ function V5.ui_tts_tab(ctx)
   local rv2
   rv2, V5.tts_voice = reaper.ImGui_InputText(ctx, 'Voice id##ttsid',
                                              V5.tts_voice or '')
-  _grey_hint(ctx, 'Leave empty to use the ⚙ Settings voice'
+  _grey_hint(ctx, 'Leave empty to use the Settings voice'
                   .. ((VOICE_ID or "") ~= "" and (' (' .. VOICE_ID .. ')')
                       or ' (none set yet)') .. '.')
   if V5.tts_provider == "cartesia" then
@@ -6467,7 +7084,7 @@ function V5.ui_tts_tab(ctx)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x2A9945FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x44CC55FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x119911FF)
-  if reaper.ImGui_Button(ctx, '🔊  Generate + import', 220, 36) and can then
+  if reaper.ImGui_Button(ctx, ' Generate + import', 220, 36) and can then
     V5.start_tts()
   end
   reaper.ImGui_PopStyleColor(ctx, 3)
@@ -6548,12 +7165,6 @@ function V5.ui_tools_tab(ctx)
 end
 
 -- ─── Review phase (staged run paused after translation) ─────
--- Estimated pixel height for one editable paragraph box (grows with text).
-local function _para_box_height(en, tr)
-  local n = math.max(#(en or ""), #(tr or ""))
-  local lines = math.max(2, math.min(10, math.ceil(n / 90)))
-  return lines * 20 + 14
-end
 
 -- ─── 0.15.10: review playback — listen to the English while proofreading ──
 -- Ported from the abandoned 0.16.2 line (review_times / review_relink /
@@ -6765,7 +7376,7 @@ function V5.review_transport(ctx, R)
     return
   end
   local st = V5.review_state()
-  if reaper.ImGui_Button(ctx, '⏮ Play from start##rv', 0, 26) then
+  if reaper.ImGui_Button(ctx, 'Play from start##rv', 0, 26) then
     local first = nil
     for i, s in ipairs(R.slots) do if s.timed then first = i break end end
     if first then V5.review_play_row(R, first) R.scroll_to = first end
@@ -6775,11 +7386,11 @@ function V5.review_transport(ctx, R)
     V5.review_play_row(R, R.sel or 1)
   end
   reaper.ImGui_SameLine(ctx)
-  local plabel = (st == "pause") and '▶ Resume##rvp' or '⏸ Pause##rvp'
+  local plabel = (st == "pause") and '▶ Resume##rvp' or 'Pause##rvp'
   if reaper.ImGui_Button(ctx, plabel, 0, 26) then
     if st ~= "stop" and reaper.CSurf_OnPause then reaper.CSurf_OnPause() end
   end
-  for _, j in ipairs({ { -5, '⏪ 5s' }, { -3, '⏪ 3s' }, { 3, '⏩ 3s' }, { 5, '⏩ 5s' } }) do
+  for _, j in ipairs({ { -5, '« 5s' }, { -3, '« 3s' }, { 3, '3s »' }, { 5, '5s »' } }) do
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, j[2] .. '##rvj' .. j[1], 0, 26) then
       V5.review_jump(R, j[1])
@@ -6795,7 +7406,7 @@ function V5.review_transport(ctx, R)
     R.follow = not R.follow
   end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, '⇱ Re-link audio##rv', 0, 26) then
+  if reaper.ImGui_Button(ctx, 'Re-link audio##rv', 0, 26) then
     if V5.review_relink(R) then
       ui_set_banner("info", string.format('Linked to "%s" at %s on the timeline.',
                     R.linked or "?", V5.review_at(R.item_pos or 0)))
@@ -6815,33 +7426,31 @@ function V5.review_transport(ctx, R)
 end
 
 local function ui_phase_review(ctx)
+  -- 0.15.14: edits are saved by themselves 2 s after the last keystroke, so
+  -- closing the window by mistake loses nothing (see V5.restore_screen).
+  if _review.dirty then
+    if _review.dirty_seen ~= _review.dirty_rev then
+      _review.dirty_seen, _review.dirty_at = _review.dirty_rev, reaper.time_precise()
+    elseif reaper.time_precise() - (_review.dirty_at or 0) > 2 then
+      save_review_text()
+    end
+  end
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
   reaper.ImGui_Text(ctx, 'Paused for review — check the translation, then continue to dubbing')
   reaper.ImGui_PopStyleColor(ctx)
   reaper.ImGui_Separator(ctx)
   _ui_render_banner(ctx)
 
+  -- 0.15.14: one short status line; the file path and the long notes moved
+  -- into tooltips (hover the line / the buttons).
   local m = _review.manifest
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-  reaper.ImGui_Text(ctx, string.format('%s  ·  %d EN / %d translated paragraphs',
-    (m.language ~= "" and m.language or LANGUAGE),
-    #_review.en_paras, #_review.tr_paras))
-  reaper.ImGui_TextWrapped(ctx, 'Edited file: ' .. _review.edited_path
-    .. (_review.dirty and '   (unsaved changes)' or ''))
+  reaper.ImGui_Text(ctx, string.format('%s  ·  %d paragraphs%s',
+    (m.language ~= "" and m.language or LANGUAGE), #_review.tr_paras,
+    _review.dirty and '  ·  unsaved changes' or ''))
   reaper.ImGui_PopStyleColor(ctx)
-  -- 0.15.14: the engine now puts the voice tags into the review text (legacy
-  -- sync + ElevenLabs v3/v4). Say what they are, once, above the editor.
-  if _review.has_tags then
-    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x66CCFFFF)
-    reaper.ImGui_TextWrapped(ctx,
-      'Voice tags are in the script: words in [square brackets] tell the ' ..
-      'ElevenLabs voice HOW to speak — they are not spoken. Change, delete ' ..
-      'or add tags as needed; they go to ElevenLabs exactly as you leave them.')
-    reaper.ImGui_PopStyleColor(ctx)
-    _grey_hint(ctx, 'Tags: [calm] [contemplative] [thoughtful] [soft] ' ..
-      '[warm] [gentle] [slow] [pause] [sighs] [smiling] [curious] ' ..
-      '[lighthearted] [emphatic] [serious] — put a tag just before the ' ..
-      'words it should colour.')
+  if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+    reaper.ImGui_SetTooltip(ctx, 'Saved to: ' .. _review.edited_path)
   end
   reaper.ImGui_Dummy(ctx, 0, 2)
 
@@ -6849,19 +7458,19 @@ local function ui_phase_review(ctx)
   -- conjuncts, so the supported path for a perfectly rendered view is:
   -- copy the script out, edit it anywhere, paste it back (or open the file
   -- in an external editor and reload).
-  if reaper.ImGui_Button(ctx, '📋 Copy script', 130, 26) then
+  if reaper.ImGui_Button(ctx, 'Copy script', 130, 26) then
     reaper.ImGui_SetClipboardText(ctx, review_collect_text())
     ui_set_banner("info",
       "Whole translation copied — paste it into any editor.")
   end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, '📋 Copy English', 130, 26) then
+  if reaper.ImGui_Button(ctx, 'Copy English', 130, 26) then
     reaper.ImGui_SetClipboardText(ctx,
       table.concat(_review.en_paras, "\n\n") .. "\n")
     ui_set_banner("info", "English transcript copied to the clipboard.")
   end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, '📥 Paste script', 130, 26) then
+  if reaper.ImGui_Button(ctx, 'Paste script', 130, 26) then
     local txt = reaper.ImGui_GetClipboardText(ctx)
     if txt and txt:match("%S") then
       _review_replace_text(txt)
@@ -6876,8 +7485,13 @@ local function ui_phase_review(ctx)
   if reaper.ImGui_Button(ctx, 'Open in editor', 125, 26) then
     if save_review_text() then open_path(_review.edited_path) end
   end
+  if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+    reaper.ImGui_SetTooltip(ctx, 'Letters look broken? REAPER cannot join ' ..
+      'Indic letters — the AUDIO is not affected. Open the script in a ' ..
+      'text editor to see it perfectly; save there, then Reload file.')
+  end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, '⟲ Reload file', 115, 26) then
+  if reaper.ImGui_Button(ctx, 'Reload file', 115, 26) then
     local path = file_exists(_review.edited_path) and _review.edited_path
                  or _review.manifest.translation_text
     local raw = read_all(path or "")
@@ -6889,10 +7503,6 @@ local function ui_phase_review(ctx)
       ui_set_banner("error", "Could not read:\n" .. tostring(path))
     end
   end
-  _grey_hint(ctx,
-    'Script looks distorted? REAPER cannot shape Indic conjuncts — the ' ..
-    'AUDIO is not affected. For a perfect view: 📋 Copy script → edit ' ..
-    'anywhere → 📥 Paste script, or Open in editor → save → ⟲ Reload file.')
   reaper.ImGui_Dummy(ctx, 0, 2)
 
   V5.review_follow_poll(ctx, _review)
@@ -6902,6 +7512,23 @@ local function ui_phase_review(ctx)
   -- Side-by-side panes: EN transcript read-only left, translation editable
   -- right. -52 leaves room for the button row below.
   V5.script_font_warning(ctx)
+  -- 0.15.14: Script / Script + tags. Same text, two views; edits in either
+  -- show up in the other. Tags chips only where tags make sense.
+  local view = "tags"
+  local tagged = V5.tags_usable() or _review.has_tags
+  if tagged then view = V5.view_switch(ctx, "review") end
+  if not tagged then
+    -- No voice tags in this setup: one plain editor, nothing to switch.
+  elseif view == "tags" then
+    reaper.ImGui_SameLine(ctx)
+    _grey_hint(ctx, 'Words in [brackets] tell the voice HOW to speak — ' ..
+                    'they are not spoken. Click a tag to copy it:')
+    V5.tag_chips(ctx, "rv")
+  else
+    reaper.ImGui_SameLine(ctx)
+    _grey_hint(ctx, 'Tags hidden — edit the words only. Tags stay with ' ..
+                    'their words; see them in Script + tags.')
+  end
   local pane_h = -52
   local pushed = _push_font(ctx, 17)
   if _review.use_table then
@@ -6934,7 +7561,7 @@ local function ui_phase_review(ctx)
         end
         if _review.slots then
           _ui_begin_disabled(ctx, not (slot and slot.timed))
-          if reaper.ImGui_SmallButton(ctx, '▶##rp' .. i) then
+          if reaper.ImGui_SmallButton(ctx, '>##rp' .. i) then
             V5.review_play_row(_review, i)
           end
           _ui_end_disabled(ctx)
@@ -6955,12 +7582,13 @@ local function ui_phase_review(ctx)
         reaper.ImGui_TableSetColumnIndex(ctx, 1)
         -- ReaImGui grows string buffers automatically — passing the current
         -- string each frame is the whole buffer-management story.
-        local rv, txt = reaper.ImGui_InputTextMultiline(
-          ctx, '##tr' .. i, _review.tr_paras[i] or '', -1,
-          _para_box_height(_review.en_paras[i], _review.tr_paras[i]))
+        -- 0.15.14: wrapped to the column, two views (see V5.script_box).
+        local rv, txt = V5.script_box(ctx, '##tr' .. i,
+                                      _review.tr_paras[i] or '', view, 2)
         if rv then
           _review.tr_paras[i] = txt
           _review.dirty = true
+          _review.dirty_rev = (_review.dirty_rev or 0) + 1
         end
       end
       reaper.ImGui_EndTable(ctx)
@@ -6989,7 +7617,7 @@ local function ui_phase_review(ctx)
   if pushed then _pop_font(ctx) end
 
   reaper.ImGui_Dummy(ctx, 0, 2)
-  if reaper.ImGui_Button(ctx, '💾 Save', 110, 34) then
+  if reaper.ImGui_Button(ctx, 'Save', 110, 34) then
     if save_review_text() then
       ui_set_banner("info", "Saved:\n" .. _review.edited_path)
     end
@@ -7019,6 +7647,7 @@ local function ui_phase_review(ctx)
     _resume_manifest = _review.manifest
     _review = nil
     _ui_phase = 'setup'
+    V5.forget_screen()
   end
 end
 
@@ -7183,11 +7812,9 @@ function V5.pane_voices(ctx)
   -- v0.15.8: the provider switch. Everything that speaks follows it: dub
   -- runs, chunk redo, Text to Speech, Track Voice, Test voice, voice lists.
   V5.field(ctx, 'Voice provider', 260)
-  _ui_begin_disabled(ctx, _ui_phase == "running")
   local chg, picked = _ui_combo(ctx, '##ttsprov', V5.tts_label(),
                                 { "ElevenLabs", "Cartesia" })
-  _ui_end_disabled(ctx)
-  if chg and _ui_phase ~= "running" then
+  if chg then
     V5.set_tts_provider(picked == "Cartesia" and "cartesia" or "elevenlabs")
     cartesia = (V5.tts_provider == "cartesia")
   end
@@ -7292,7 +7919,7 @@ end
 -- button as before — the settings window owns a Save of its own.
 local function ui_settings_section(ctx, always_open)
   if not always_open then
-    if not reaper.ImGui_CollapsingHeader(ctx, '⚙ Settings  (LLM + TTS keys)') then
+    if not reaper.ImGui_CollapsingHeader(ctx, 'Settings  (LLM + TTS keys)') then
       return
     end
   end
@@ -7303,7 +7930,7 @@ local function ui_settings_section(ctx, always_open)
   V5.pane_voices(ctx)
 
   reaper.ImGui_Dummy(ctx, 0, 4)
-  if reaper.ImGui_Button(ctx, '💾 Save settings', 150, 24) then
+  if reaper.ImGui_Button(ctx, 'Save settings', 150, 24) then
     local ok, path = save_config_files()
     if ok and LAST_SYNC_CRED_ERR then
       ui_set_banner("error", "Saved for dubbing, but could not share the keys " ..
@@ -7446,11 +8073,26 @@ function V5.ui_source_inputs(ctx)
   if SCRIPT_MODE == 'have' then
     reaper.ImGui_Dummy(ctx, 0, 4)
     V5.label(ctx, 'Your script')
+    -- 0.15.14: two views (words only / words + tags), wrapped to the box.
+    local pview = "tags"
+    local ptagged = V5.tags_usable() or V5.has_tags(_provided_text)
+    if ptagged then
+      reaper.ImGui_SameLine(ctx)
+      pview = V5.view_switch(ctx, "provided")
+    end
+    if ptagged and pview == "tags" and V5.has_tags(_provided_text) then
+      V5.tag_chips(ctx, "pv")
+    end
+    -- A tall script scrolls in its own frame instead of growing the page.
     local pushedf = _push_font(ctx, 17)
-    local rv2, txt = reaper.ImGui_InputTextMultiline(
-      ctx, '##provided', _provided_text or '', -1, 150)
+    if reaper.ImGui_BeginChild(ctx, '##providedwrap', -1, 220,
+                               _child_border_flag()) then
+      local rv2, txt = V5.script_box(ctx, '##provided', _provided_text or '',
+                                     pview, 6)
+      if rv2 then _provided_text = txt end
+      reaper.ImGui_EndChild(ctx)
+    end
     if pushedf then _pop_font(ctx) end
-    if rv2 then _provided_text = txt end
 
     reaper.ImGui_SameLine(ctx, V5.LABEL_W)
     if reaper.ImGui_SmallButton(ctx, 'Paste##prov') then
@@ -7481,14 +8123,12 @@ function V5.ui_source_inputs(ctx)
     V5.hint(ctx, 'Separate paragraphs with one blank line — they are what ' ..
                  'the matcher pairs against the transcript.')
     if V5.tags_usable() then
-      V5.hint(ctx, 'Optional: "Add voice tags" puts ElevenLabs directions ' ..
-                   'like [calm] [pause] [slow] into your script. Words in ' ..
-                   '[brackets] are not spoken. Edit, delete or add tags in ' ..
-                   'the box; they are used exactly as you leave them. ' ..
+      V5.hint(ctx, 'Optional: "Add voice tags" adds [calm] [pause]… for you. ' ..
+                   'Fix the words in Script, the tags in Script + tags. ' ..
                    'Pressing it again re-tags from scratch.')
     else
       _grey_hint(ctx, 'Voice tags are used only in legacy sync mode with an ' ..
-                      'ElevenLabs v3/v4 voice (⚙ Settings).')
+                      'ElevenLabs v3/v4 voice (Settings).')
     end
   end
 end
@@ -7888,14 +8528,14 @@ function V5.ui_prompts_section(ctx, bare)
   if rv then V5.prompt_text = txt; V5.prompt_dirty = true end
 
   _ui_begin_disabled(ctx, not V5.prompt_dirty)
-  if reaper.ImGui_Button(ctx, '💾 Save prompt', 140, 26) then
+  if reaper.ImGui_Button(ctx, 'Save prompt', 140, 26) then
     local ok, why = V5.prompt_editor_save()
     ui_set_banner(ok and "info" or "error",
       ok and ('Saved ' .. basename(V5.prompt_open)) or why)
   end
   _ui_end_disabled(ctx)
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, '⟲ Reload', 100, 26) then
+  if reaper.ImGui_Button(ctx, 'Reload', 100, 26) then
     V5.prompt_editor_load(V5.prompt_lang, V5.prompt_stage)
     ui_set_banner("info", 'Reloaded from disk — unsaved edits discarded.')
   end
@@ -8025,6 +8665,10 @@ function V5.pane_about(ctx)
     V5.hint(ctx, 'Updates the whole fast-syncs install — the sync tool AND ' ..
                  'this dubbing app.')
 
+    -- 0.15.14: what changed, version by version, from the installed list.
+    reaper.ImGui_Dummy(ctx, 0, 8)
+    V5.ui_whats_new_installed(ctx)
+
     -- v0.15.6: roll back when a new version misbehaves.
     reaper.ImGui_Dummy(ctx, 0, 10)
     local choices = V5.rollback_choices()
@@ -8068,15 +8712,17 @@ V5.PANES = {
 }
 
 -- The settings window itself: sidebar left, one pane right, one Save for the
--- whole window at the bottom. Locked while a run is active — the engine reads
--- config/*.json at launch time, so editing mid-run would be a lie.
+-- whole window at the bottom. 0.15.14: never locked. The engine reads
+-- config/*.json when a run starts, so an edit made mid-run is for the NEXT
+-- run (a few settings are re-read between stages and may reach the current
+-- one — said plainly on screen).
 function V5.ui_settings_body(ctx)
-  local locked = (_ui_phase ~= "setup")
-  if locked then
+  local locked = false
+  if _ui_phase == "running" then
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
     reaper.ImGui_TextWrapped(ctx,
-      'Locked while a run is active — settings are read at launch time. ' ..
-      'Finish or cancel the run to edit them.')
+      'A run is going. You can change settings — they apply from the next ' ..
+      'run (a few may reach this run\'s later steps).')
     reaper.ImGui_PopStyleColor(ctx)
     reaper.ImGui_Dummy(ctx, 0, 4)
   end
@@ -8185,6 +8831,7 @@ end
 -- One readiness light for the whole app, instead of each tab working it out
 -- again when you press Start.
 function V5.ui_header(ctx)
+  V5.ui_update_notice(ctx)
   -- v0.15.7: the version moved into the top tab's label.
   local why = V5.llm_creds_error()
   local no_voice_key = (EL_KEY or '') == ''
@@ -8206,31 +8853,82 @@ function V5.ui_header(ctx)
   end
 
   local ww = reaper.ImGui_GetWindowWidth(ctx)
-  -- 0.15.12: minimise = roll the panel up to its title bar (ImGui collapse).
-  -- Not a taskbar minimise: a ReaImGui window belongs to REAPER's main
-  -- window and would vanish with no button to bring it back. A run keeps
-  -- going while rolled up (it is polled outside the window). Not offered
-  -- while docked — a docked window cannot roll up.
-  local docked = reaper.ImGui_IsWindowDocked and reaper.ImGui_IsWindowDocked(ctx)
-  local can_min = reaper.ImGui_SetNextWindowCollapsed and not docked
-  reaper.ImGui_SameLine(ctx, math.max(220, ww - (can_min and 232 or 122)))
-  if can_min then
-    if reaper.ImGui_Button(ctx, '—  Minimize', 104, 22) then
-      V5.collapse_next = true
-    end
-    if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
-      reaper.ImGui_SetTooltip(ctx, 'Roll the window up to its title bar. ' ..
-        'Bring it back with the ▶ arrow on the title bar, or double-click ' ..
-        'the title. A run keeps going meanwhile.')
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
-  if reaper.ImGui_Button(ctx, '⚙  Settings', 104, 22) then
+  -- 0.15.14: minimise moved to the window bar (V5.title_bar).
+  reaper.ImGui_SameLine(ctx, math.max(220, ww - 122))
+  if reaper.ImGui_Button(ctx, 'Settings', 104, 22) then
     -- Selects the Settings tab on the next frame (or opens the fallback
     -- window on a ReaImGui without tabs).
     V5.settings_open = true
   end
   V5.ui_folder_row(ctx)
+end
+
+-- 0.15.14: the window bar — title on the left, − and × on the right, like
+-- any desktop window. Dragging the bar moves the window (ImGui's own title
+-- bar is switched off, so nothing else would). − shrinks the window to
+-- this bar and back; × closes the panel (a run keeps going in the
+-- background, as before). Docked, REAPER's docker owns all of this.
+function V5.title_bar(ctx, on_close)
+  if reaper.ImGui_IsWindowDocked and reaper.ImGui_IsWindowDocked(ctx) then
+    V5.mini = false
+    return
+  end
+  local avail = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 400
+  local x0, y0 = reaper.ImGui_GetCursorPos(ctx)
+  -- The drag handle: an invisible button under the title text.
+  reaper.ImGui_InvisibleButton(ctx, '##titledrag', math.max(40, avail - 70), 22)
+  if reaper.ImGui_IsItemActive(ctx) and reaper.ImGui_GetMouseDelta then
+    local dx, dy = reaper.ImGui_GetMouseDelta(ctx)
+    if (dx ~= 0 or dy ~= 0) and reaper.ImGui_GetWindowPos then
+      local wx, wy = reaper.ImGui_GetWindowPos(ctx)
+      V5.win_pos_next = { wx + dx, wy + dy }
+    end
+  end
+  if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked
+     and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+    V5.toggle_mini(ctx)
+  end
+  reaper.ImGui_SetCursorPos(ctx, x0 + 4, y0 + 3)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xDDE6F0FF)
+  local title = 'Fast Syncs' ..
+    (V5.APP_VERSION ~= '' and ('  v' .. V5.APP_VERSION) or '')
+  if _ui_phase == "running" then
+    title = title .. '   ' .. _spinner_glyph() .. ' running'
+  end
+  reaper.ImGui_Text(ctx, title)
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_SetCursorPos(ctx, x0 + avail - 62, y0)
+  if reaper.ImGui_Button(ctx, V5.mini and '+##winmin' or '-##winmin', 28, 22) then
+    V5.toggle_mini(ctx)
+  end
+  if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+    reaper.ImGui_SetTooltip(ctx, V5.mini and 'Restore the window'
+      or 'Shrink the window to this bar — a run keeps going')
+  end
+  reaper.ImGui_SameLine(ctx, 0, 4)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0xC0392BFF)
+  if reaper.ImGui_Button(ctx, 'x##winclose', 28, 22) then on_close() end
+  reaper.ImGui_PopStyleColor(ctx)
+  if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+    reaper.ImGui_SetTooltip(ctx, 'Close the panel — a run keeps going')
+  end
+  if not V5.mini then reaper.ImGui_Separator(ctx) end
+end
+
+function V5.toggle_mini(ctx)
+  if V5.mini then
+    V5.mini = false
+    local fs = V5.full_size or { 760, 680 }
+    V5.win_size_next = { fs[1], fs[2] }
+  else
+    if reaper.ImGui_GetWindowSize then
+      local w, h = reaper.ImGui_GetWindowSize(ctx)
+      V5.full_size = { w, h }
+    end
+    V5.mini = true
+    local w = (V5.full_size and V5.full_size[1]) or 760
+    V5.win_size_next = { math.min(w, 460), 40 }
+  end
 end
 
 -- 0.15.12: the video's folder, shown and one click away on every tab — so
@@ -8265,7 +8963,7 @@ function V5.ui_folder_row(ctx)
   local d, exists = V5.video_folder()
   if not d then return end
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
-  reaper.ImGui_Text(ctx, '📁 Video folder:')
+  reaper.ImGui_Text(ctx, 'Video folder:')
   reaper.ImGui_PopStyleColor(ctx)
   reaper.ImGui_SameLine(ctx)
   _ui_begin_disabled(ctx, not exists)
@@ -8424,7 +9122,7 @@ end
 -- ─── Success phase ────────────────────────────────────────
 local function ui_phase_success(ctx, on_close)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x55DD55FF)
-  reaper.ImGui_Text(ctx, '✓  Pipeline finished')
+  reaper.ImGui_Text(ctx, 'Pipeline finished')
   reaper.ImGui_PopStyleColor(ctx)
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_Dummy(ctx, 0, 6)
@@ -8464,7 +9162,7 @@ local function ui_phase_success(ctx, on_close)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(),        0x2A9945FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), 0x44CC55FF)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(),  0x119911FF)
-  if reaper.ImGui_Button(ctx, _imported and 'Imported ✓' or 'Import to timeline',
+  if reaper.ImGui_Button(ctx, _imported and 'Imported' or 'Import to timeline',
                          200, 36) and can_import then
     -- v0.5: the user may have switched REAPER project tabs mid-run — put
     -- the import into the project the run was launched from, if it is
@@ -8475,6 +9173,7 @@ local function ui_phase_success(ctx, on_close)
     end
     _import_summary = import_to_timeline(_manifest)
     _imported = true
+    V5.remember_screen()
   end
   reaper.ImGui_PopStyleColor(ctx, 3)
   _ui_end_disabled(ctx)
@@ -8488,7 +9187,7 @@ local function ui_phase_success(ctx, on_close)
   -- 0.15.12: after import (and any redos), the finished dub as one file.
   if _imported and V5.final_track then
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, '💾 Save final dub audio', 190, 36) then
+    if reaper.ImGui_Button(ctx, 'Save final dub audio', 190, 36) then
       local wav, why = V5.save_final_audio(V5.final_track,
                                            _manifest and _manifest.out_dir)
       if wav then
@@ -8527,6 +9226,7 @@ local function ui_phase_success(ctx, on_close)
   if reaper.ImGui_Button(ctx, 'Close', 120, 32) then on_close() end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, 'Run again', 120, 32) then
+    V5.forget_screen()
     _ui_phase = 'setup'; _log_buffer = {}
     _ui_stage_tag = nil; _ui_progress = 0.0
     _manifest = nil; _import_summary = nil; _imported = false
@@ -8537,7 +9237,7 @@ end
 -- ─── Failure phase ────────────────────────────────────────
 local function ui_phase_failure(ctx, on_close)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF5555FF)
-  reaper.ImGui_Text(ctx, '✗  Pipeline failed')
+  reaper.ImGui_Text(ctx, 'Pipeline failed')
   reaper.ImGui_PopStyleColor(ctx)
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_Dummy(ctx, 0, 6)
@@ -8594,6 +9294,7 @@ local function ui_phase_failure(ctx, on_close)
   if reaper.ImGui_Button(ctx, 'Close', 120, 32) then on_close() end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, 'Back to setup', 140, 32) then
+    V5.forget_screen()
     _ui_phase = 'setup'; _ui_failure = nil
     _ui_stage_tag = nil; _ui_progress = 0.0
     _manifest = nil; _import_summary = nil; _imported = false
@@ -8745,19 +9446,38 @@ local function main()
     end
     -- Wide enough for the side-by-side review table.
     reaper.ImGui_SetNextWindowSize(_ui_ctx, 760, 680, reaper.ImGui_Cond_FirstUseEver())
-    -- 0.15.12: the header's Minimize rolls the window up (applied before
-    -- Begin, where it has to be).
-    if V5.collapse_next and reaper.ImGui_SetNextWindowCollapsed then
-      reaper.ImGui_SetNextWindowCollapsed(_ui_ctx, true)
+    -- 0.15.14: our own window bar (V5.title_bar) replaces ImGui's: a drag
+    -- moves the window, − shrinks it to the bar, × closes. Size and
+    -- position changes queued by the bar apply here, before Begin.
+    if V5.win_pos_next then
+      reaper.ImGui_SetNextWindowPos(_ui_ctx, V5.win_pos_next[1],
+                                    V5.win_pos_next[2])
+      V5.win_pos_next = nil
     end
-    V5.collapse_next = nil
-    -- v0.7: version in the title bar. The "###dub_pipeline" suffix pins the
-    -- ImGui window ID, so future version bumps never reset the saved
-    -- window position/size again (only this first rename does, once).
+    if V5.win_size_next then
+      reaper.ImGui_SetNextWindowSize(_ui_ctx, V5.win_size_next[1],
+                                     V5.win_size_next[2],
+                                     reaper.ImGui_Cond_Always())
+      V5.win_size_next = nil
+    end
+    local wflags = 0
+    if reaper.ImGui_WindowFlags_NoTitleBar then
+      wflags = reaper.ImGui_WindowFlags_NoTitleBar()
+    end
+    if V5.mini then
+      if reaper.ImGui_WindowFlags_NoResize then
+        wflags = wflags | reaper.ImGui_WindowFlags_NoResize()
+      end
+      if reaper.ImGui_WindowFlags_NoScrollbar then
+        wflags = wflags | reaper.ImGui_WindowFlags_NoScrollbar()
+      end
+    end
+    -- v0.7: the "###dub_pipeline" suffix pins the ImGui window ID, so
+    -- version bumps never reset the saved window position/size.
     local visible, open = reaper.ImGui_Begin(_ui_ctx,
       'Dub Pipeline' .. (V5.APP_VERSION ~= '' and ('  v' .. V5.APP_VERSION) or '')
       .. '###dub_pipeline',
-      true)   -- 0.15.12: collapsible (Minimize, title-bar arrow, double-click)
+      true, wflags)
     -- Outside the `visible` guard on purpose: a fully off-screen window can
     -- report itself as not visible, which is the case we must still rescue.
     check_offscreen(_ui_ctx)
@@ -8769,7 +9489,7 @@ local function main()
     -- background (closing the panel never stops the engine).
     if not V5.reattach_checked then
       V5.reattach_checked = true
-      V5.reattach_running()
+      if not V5.reattach_running() then V5.restore_screen() end
     end
     if _ui_phase == "running" then poll_engine() end
     -- v0.15.3: a multi-chunk batch waits here between chunks.
@@ -8779,11 +9499,17 @@ local function main()
     if V5.SYNC then V5.SYNC.poll() end
     -- 0.15.12: keep the final script in the video folder current.
     V5.final_script_tick()
-    if visible then
+    if visible and V5.mini then
+      -- 0.15.14: minimised — only the bar (a run keeps going: it is
+      -- polled above, outside this guard).
+      V5.title_bar(_ui_ctx, close_window)
+      reaper.ImGui_End(_ui_ctx)
+    elseif visible then
       -- Follow the language combo with a matching Indic font (v0.4).
       _ensure_lang_font(_ui_ctx)
       -- v0.15.7: every piece of text in the window uses the all-scripts font.
       V5.gfont_pushed = V5.push_global_font(_ui_ctx)
+      V5.title_bar(_ui_ctx, close_window)
 
       -- v0.13: the Script control on the Dub tab decides where the translated
       -- script comes from, so there is nothing left for the caller to
