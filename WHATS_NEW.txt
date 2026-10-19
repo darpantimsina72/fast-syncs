@@ -1,0 +1,24 @@
+# What changed, shown in the panel's blinking "New version" notice.
+# One line per change:  <version> | <before> | <now>
+# Keep each side short — a few words, plain language. Newest at the bottom.
+# The panel shows every line whose version is newer than the user's own.
+0.15.9 | One long English clip matched badly | Long clip cut into sentences before matching
+0.15.9 | Speech under music missed | Speech under music heard
+0.15.9 | ElevenLabs v3 voice only | ElevenLabs v4 also offered
+0.15.10 | Proofreading without sound | Listen to the English while proofreading
+0.15.10 | Redo lost the rest of the script | Whole script kept after every redo
+0.15.11 | Too-long lines cut hard | Long lines fitted to the English timing
+0.15.12 | Video folder hard to find | Video folder one click away
+0.15.12 | Final dub file went stale | Final dub kept current
+0.15.13 | Failed run showed raw log | Failed run explained in plain words
+0.15.14 | Voice tags added after review, never seen | Editors see, edit and add voice tags before speech
+0.15.14 | "I have the script" had no tags | Optional "Add voice tags" button, then edit them
+0.15.14 | One editor with tags mixed in | Switch: Script (words only) or Script + tags
+0.15.14 | Long lines ran off the box | Text wraps to fit the box
+0.15.14 | Tags typed by hand | Tag buttons to copy, plus "More..." for every tag
+0.15.14 | Minimize button inside the page | Window bar with - and x; drag to move
+0.15.14 | Settings locked during a run | Settings editable anytime; used from the next run
+0.15.14 | Errors shown as technical text | Errors in plain words, with a short summary
+0.15.14 | Log full of technical lines | Simple log: each step Done / Now / Next
+0.15.14 | Closing the window lost the screen | Reopening goes back to where you were
+0.15.14 | "?" boxes on buttons | Clean button labels

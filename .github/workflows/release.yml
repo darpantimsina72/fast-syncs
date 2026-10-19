@@ -19,6 +19,11 @@ on:
   push:
     branches: [production]
   workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Test release: publish as a pre-release, NOT latest. The normal Update button skips it; install with the updater's --version X.Y.Z."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -207,9 +212,15 @@ jobs:
           git push origin "$tag"
           # --generate-notes builds the changelog from merged PRs since the
           # previous tag, so no CHANGELOG file has to be maintained by hand.
+          # A test release (manual run, prerelease=true) is never "latest", so
+          # /releases/latest keeps serving the production version to everyone.
+          extra=""
+          if [ "${{ inputs.prerelease || false }}" = "true" ]; then
+            extra="--prerelease --latest=false"
+          fi
           gh release create "$tag" \
             --title "fast-syncs $version" \
-            --generate-notes \
+            --generate-notes $extra \
             /tmp/fast-syncs.zip
           {
             echo "### Released $tag"

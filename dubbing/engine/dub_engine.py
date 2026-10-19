@@ -30,10 +30,14 @@ Modes (v0.1 + v0.2 modes keep IDENTICAL flags and manifests):
                       row, blank-line separated, SAME count and order in
                       both files) and a "status":"review" manifest, then
                       exits 0 so the panel can pause for human review.
+                      0.15.14: in legacy sync mode with an ElevenLabs
+                      v3/v4 voice, the translation file already carries
+                      the Step-4 voice tags, so editors review them too.
   --steps dub         Resume after review. Re-derives out_dir from --audio,
                       validates the translate-stage artifacts, reads the
                       (possibly user-edited) translation from --script,
-                      runs emotion (unless --no-emotion) + TTS + S3a..S3e
+                      runs emotion (unless --no-emotion, or the tags were
+                      already reviewed — 0.15.14) + TTS + S3a..S3e
                       and writes the normal "status":"ok" manifest,
                       overwriting the stale review manifest.
   --regen-chunk       Synthesize ONE chunk text (--text-file, UTF-8; Indic
@@ -273,6 +277,7 @@ TEST_LLM_MANIFEST_KEYS = ["status", "error", "provider", "model", "reply",
                           "models", "models_all"]
 VOICES_MANIFEST_KEYS = ["status", "error", "voices"]
 VOICE_CHANGE_MANIFEST_KEYS = ["status", "error", "vc_wav"]
+ADD_TAGS_MANIFEST_KEYS = ["status", "error", "tagged_text"]   # 0.15.14
 
 # Stand-in for a review row that has no text on one side (e.g. more
 # translation paragraphs than English segments). A visible placeholder keeps
@@ -384,6 +389,11 @@ def _parse_args():
                     help="Make one tiny LLM call on the configured provider "
                          "and write a {status, provider, model, reply} "
                          "manifest. No audio, no TTS.")
+    ap.add_argument("--add-tags", dest="add_tags", action="store_true",
+                    help="0.15.14: add Step-4 voice tags to the script in "
+                         "--text-file (requires --language) and write "
+                         "<text-file>_tagged.txt beside it. One LLM call; "
+                         "no audio, no TTS. Manifest: {status, tagged_text}.")
     ap.add_argument("--list-voices", dest="list_voices", action="store_true",
                     help="Fetch the ElevenLabs account voice catalogue "
                          "(language-token sorted, requires --language) and "
@@ -397,6 +407,15 @@ def _parse_args():
     args = ap.parse_args()
 
     if args.selfcheck:
+        return args
+    if args.add_tags:
+        if (args.test_llm or args.list_voices or args.voice_change
+                or args.regen_chunk):
+            ap.error("--add-tags cannot be combined with other modes")
+        if not args.language:
+            ap.error("--add-tags requires --language")
+        if not args.text_file:
+            ap.error("--add-tags requires --text-file <utf-8 script>")
         return args
     if args.test_llm:
         if args.regen_chunk or args.list_voices or args.voice_change:
@@ -1322,7 +1341,18 @@ def _stage_dub_legacy(pl, args, api_key, manifest, ctx, voice_id):
     # the tags for its non-ElevenLabs Google TTS path, which this engine
     # does not have). Best-effort: on any LLM failure the original text
     # comes back unchanged.
-    if _emotion_enabled(args) and vb.provider == "cartesia":
+    if not ctx.get("reviewed_tts_text") and _has_tags(script_text):
+        # 0.15.14: a straight-through run on a pasted script the editor
+        # already tagged. Same rule as a reviewed one: tags go to TTS as
+        # written, the mapping below compares plain words.
+        ctx["reviewed_tts_text"] = script_text
+        script_text = _without_tags(script_text)
+    if ctx.get("reviewed_tts_text"):
+        # 0.15.14: the editor saw and approved the tags at review.
+        tts_text = ctx["reviewed_tts_text"]
+        _say("S2d", "Using the reviewed voice tags as they are — no second "
+                    "tagging pass.")
+    elif _emotion_enabled(args) and vb.provider == "cartesia":
         # The Step-4 tags ([calm], [pause]…) are an ElevenLabs v3 feature;
         # Cartesia would have them stripped anyway, so skip the paid pass.
         tts_text = script_text
@@ -1528,6 +1558,10 @@ def _required_prompts(args):
     if args.steps in ("full", "translate") and not args.provided_script:
         need += ["Step1_Translation_Prompt", "Step2_Review_Prompt",
                  "Step3_Punctuation_Prompt"]
+    if (args.steps == "translate" and _sync_mode(args) != "match"
+            and _emotion_enabled(args)):
+        # 0.15.14: the voice tags are added before the review pause.
+        need.append("Step4_Emotion_Prompt")
     if args.steps in ("full", "dub") and _sync_mode(args) != "match":
         # match mode builds its matcher prompt inline and skips Step 4.
         if _emotion_enabled(args):
@@ -1680,6 +1714,103 @@ def _paired_paragraph_texts(pl, final_srt, punc_result):
     return en_text, tr_text, len(rows)
 
 
+# ── 0.15.14: voice tags go into the review, not after it ─────────────────────
+# The Step-4 tags ([calm], [pause], [slow]…) used to be added AFTER the review
+# pause, straight before ElevenLabs, so editors never saw them and could not
+# fix or add any. Now, when this run will actually use them, the translate
+# stage tags the review text itself; the dub stage then sends the reviewed
+# tags exactly as the editor left them and does not tag a second time.
+#
+# The marker file records that the review carried tags. It matters when an
+# editor deletes every tag on purpose: without it the dub stage would see an
+# untagged script and quietly tag it again.
+_TAG_RE = re.compile(r"\[/?[\w\s]+\]")
+TAGS_REVIEWED_SUFFIX = "_tags_reviewed.txt"
+
+
+def _tags_before_review(args, vb) -> bool:
+    """Will this run's dub half use Step-4 tags? Only then are they shown at
+    review. Match mode skips Step 4, Cartesia ignores the tags, and only the
+    ElevenLabs v3/v4 models act on them (the others strip them)."""
+    return (_sync_mode(args) == "legacy" and _emotion_enabled(args)
+            and getattr(vb, "provider", "") == "elevenlabs"
+            and (getattr(vb, "model", "") or "").startswith(
+                ("eleven_v3", "eleven_v4")))
+
+
+def _has_tags(text) -> bool:
+    return bool(_TAG_RE.search(text or ""))
+
+
+def _without_tags(text) -> str:
+    """The script with every voice tag removed, tidily: no double spaces, and
+    a line that held only tags (the leading [hindi accent]) disappears."""
+    out = []
+    for line in (text or "").split("\n"):
+        if not line.strip():
+            out.append("")
+            continue
+        clean = " ".join(_TAG_RE.sub(" ", line).split())
+        if clean:
+            out.append(clean)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+def _tag_review_text(pl, args, tr_text, say=None):
+    """Add Step-4 tags to the review translation, paragraph for paragraph.
+
+    Returns (tagged_text, n_untagged) or (None, reason). The review file must
+    keep EXACTLY its paragraph count — the panel pairs it row by row with the
+    English — so the reply is checked hard:
+      * a leading tag-only block (the accent tag on its own) joins the first
+        paragraph instead of becoming an extra row;
+      * the reply must have the same number of paragraphs, or nothing is used;
+      * a paragraph whose words changed (the prompt forbids it, but a model
+        can still do it) falls back to its untagged original — the editor's
+        text is never silently rewritten.
+    Never raises: a failure here just means "tag after review, as before".
+    """
+    paras = [p for p in re.split(r"\n\s*\n", tr_text.strip())]
+    say = say or (lambda m: _say("S2c", m))
+    try:
+        tagged = pl._run_emotion_enrichment(
+            tr_text, language=args.language, model=pl.GEMINI_DEFAULT_MODEL,
+            status_cb=say, strict=True)
+    except Exception as e:
+        return None, f"the tagging call failed ({e})"
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", (tagged or "").strip())
+              if b.strip()]
+    # Tag-only blocks (normally just the accent tag) ride on the next block.
+    merged, lead = [], ""
+    for b in blocks:
+        if not _without_tags(b):
+            lead = (lead + "\n" + b).strip()
+            continue
+        merged.append((lead + "\n" + b) if lead else b)
+        lead = ""
+    if len(merged) != len(paras):
+        return None, (f"the tagged reply has {len(merged)} paragraph(s), the "
+                      f"review has {len(paras)}")
+
+    def _same(a, b):
+        return "".join(a.split()) == "".join(b.split())
+
+    out, n_untagged = [], 0
+    for orig, tag_p in zip(paras, merged):
+        if orig.strip() == EMPTY_PARAGRAPH_PLACEHOLDER:
+            out.append(orig)            # keep the placeholder row recognisable
+        elif _same(_without_tags(tag_p), orig):
+            out.append(tag_p)
+        else:
+            out.append(orig)
+            n_untagged += 1
+    # The accent tag belongs at the very top even if paragraph 1 fell back.
+    m = re.match(r"\s*(\[[^\]\n]*accent\])", merged[0], re.IGNORECASE)
+    if m and not out[0].lstrip().lower().startswith(m.group(1).lower()):
+        out[0] = m.group(1) + "\n" + out[0]
+    return "\n\n".join(out) + "\n", n_untagged
+
+
 def _run_translate(args, manifest):
     """--steps translate: S1a..S2c, then stop for review.
 
@@ -1699,16 +1830,52 @@ def _run_translate(args, manifest):
                                                  ctx["words"])
     _write_text(_out(pl, ctx, "work", "_sync_en.srt"), en_sync_srt)
 
-    # Delete any stale edited translation script from a previous run
+    # Delete any stale edited translation script (and stale tags marker)
+    # from a previous run
     edited_path = _out(pl, ctx, "script", "_translation_edited.txt")
-    if os.path.exists(edited_path):
-        try:
-            os.remove(edited_path)
-        except Exception:
-            pass
+    tags_marker = _out(pl, ctx, "script", TAGS_REVIEWED_SUFFIX)
+    for stale in (edited_path, tags_marker):
+        if os.path.exists(stale):
+            try:
+                os.remove(stale)
+            except Exception:
+                pass
 
     en_text, tr_text, n_rows = _paired_paragraph_texts(
         pl, ctx["final_srt"], ctx["punc_result"])
+
+    # 0.15.14: show the voice tags at review so editors can change them.
+    if _has_tags(tr_text):
+        # A pasted script that already carries tags (the panel's "Add voice
+        # tags" button, or typed by hand): those are the editor's — keep
+        # them, never tag on top.
+        if _sync_mode(args) == "legacy":
+            _write_text(tags_marker,
+                        "The provided script already carried voice tags. "
+                        "The dub step sends them to ElevenLabs as they are "
+                        "and does not add tags again.\n")
+        _say("S2c", "The script already has voice tags — kept as they are "
+                    "for review; no tags added on top.")
+    elif _tags_before_review(args, ctx["vb"]):
+        _say("S2c", "Adding voice tags ([calm], [pause]…) so they can be "
+                    "checked at review…")
+        tagged, info = _tag_review_text(pl, args, tr_text)
+        if tagged is None:
+            _say("S2c", f"WARNING: voice tags could not be added for review "
+                        f"— {info}. The review shows the plain translation; "
+                        "tags will be added after review, as before.")
+        else:
+            tr_text = tagged
+            _write_text(tags_marker,
+                        "Voice tags were added BEFORE review. The dub step "
+                        "sends the reviewed script to ElevenLabs as it is "
+                        "and does not add tags again.\n")
+            if info:
+                _say("S2c", f"Voice tags added — {info} paragraph(s) kept "
+                            "plain because the tagger changed their words.")
+            else:
+                _say("S2c", "Voice tags added — editors can change, remove "
+                            "or add tags at review.")
     en_text_path = _out(pl, ctx, "script", "_review_en.txt")
     tr_text_path = _out(pl, ctx, "script", "_review_translation.txt")
     _write_text(en_text_path, en_text)
@@ -1770,14 +1937,30 @@ def _run_dub(args, manifest):
     _note(f"Dub script loaded: {script_path} ({n_paras} paragraph(s)).")
     ctx["script_text"] = script_text
 
+    # 0.15.14: tags reviewed by an editor are final. They go to ElevenLabs
+    # exactly as left, Step 4 is not run again, and everything that compares
+    # text (the subtitle mapping, FinalScript) gets the plain words. Applies
+    # to legacy mode only: match mode has always sent the script untouched.
+    tags_marker = pl.layout_path(out_dir, "script",
+                                 bname + TAGS_REVIEWED_SUFFIX, make=False)
+    if _sync_mode(args) == "legacy" and (os.path.isfile(tags_marker)
+                                         or _has_tags(script_text)):
+        ctx["reviewed_tts_text"] = script_text
+        ctx["script_text"] = _without_tags(script_text)
+        tagged_path = _out(pl, ctx, "script", "_tagged_script.txt")
+        _write_text(tagged_path, script_text + "\n")
+        _note("The reviewed script carries its voice tags — they go to "
+              "ElevenLabs as reviewed; no second tagging pass. Saved as "
+              f"{os.path.basename(tagged_path)}.")
+
     # Rewrite FinalScript so the saved file matches what actually gets
     # dubbed — the same thing the bulk app does after its review window.
     marker = f"=== {args.language.upper()} TRANSLATION ==="
     fs_path = required["FinalScript"]
     fs_text = _read_text(fs_path)
     if marker in fs_text:
-        _write_text(fs_path,
-                    fs_text.split(marker, 1)[0] + marker + "\n" + script_text)
+        _write_text(fs_path, fs_text.split(marker, 1)[0] + marker + "\n"
+                    + ctx["script_text"])
         _note("FinalScript updated with the reviewed translation.")
     else:
         _note(f"WARNING: marker {marker!r} not found in "
@@ -1879,6 +2062,44 @@ def _run_voice_change(args, manifest):
     _note(f"Voice-changed audio saved: {os.path.basename(out_wav)}")
 
 
+def _run_add_tags(args, manifest):
+    """--add-tags: voice-tag a pasted script so the editor can check it.
+
+    The panel's "I have the script" box writes the pasted text to
+    --text-file; this adds the Step-4 tags with the same checks the review
+    uses (_tag_review_text) and writes <text-file>_tagged.txt beside it. Any
+    tags already in the text are removed first, so pressing the button
+    twice re-tags instead of piling tags on tags.
+    """
+    manifest["tagged_text"] = ""
+    _note("Importing pipeline modules…")
+    pl = _import_pipeline()
+    _check_symbols(pl)
+    pl._validate_llm_config()
+    src = os.path.abspath(os.path.expanduser(args.text_file))
+    if not os.path.isfile(src):
+        raise RuntimeError(f"--text-file not found: {src}")
+    paras = [_without_tags(p) for p in
+             re.split(r"\n\s*\n", _read_text(src).strip())]
+    paras = [p for p in paras if p]
+    if not paras:
+        raise RuntimeError("The script is empty — nothing to tag.")
+    plain = "\n\n".join(paras) + "\n"
+    _note(f"Adding voice tags to {len(paras)} paragraph(s) "
+          f"({args.language})…")
+    tagged, info = _tag_review_text(pl, args, plain, say=_note)
+    if tagged is None:
+        raise RuntimeError(f"Voice tags could not be added: {info}.")
+    out = os.path.splitext(src)[0] + "_tagged.txt"
+    _write_text(out, tagged)
+    manifest["tagged_text"] = out
+    if info:
+        _note(f"Voice tags added — {info} paragraph(s) left plain because "
+              "the tagger changed their words.")
+    else:
+        _note("Voice tags added.")
+
+
 def _run_test_llm(args, manifest):
     """--test-llm: one tiny call on the configured LLM provider.
 
@@ -1961,7 +2182,9 @@ def main() -> int:
     if args.selfcheck:
         return _selfcheck(args)
 
-    if args.test_llm:
+    if args.add_tags:
+        keys, runner, ok_status = ADD_TAGS_MANIFEST_KEYS, _run_add_tags, "ok"
+    elif args.test_llm:
         keys, runner, ok_status = TEST_LLM_MANIFEST_KEYS, _run_test_llm, "ok"
     elif args.list_voices:
         keys, runner, ok_status = VOICES_MANIFEST_KEYS, _run_list_voices, "ok"
