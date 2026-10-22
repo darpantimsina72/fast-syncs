@@ -170,6 +170,25 @@ function M.script_box(ctx, id, text, view, min_lines)
   n = math.max(n, min_lines or 2)
   local lh = (reaper.ImGui_GetTextLineHeight and
               reaper.ImGui_GetTextLineHeight(ctx)) or 18
+  -- Not being typed in: show the text as a picture drawn by the OS text
+  -- engine, which joins Indic letters (ImGui draws them apart). A click
+  -- turns it into the edit box; clicking out turns it back.
+  local boxh = n * lh + 12
+  if not c.editing and M.can_draw_joined() then
+    local img = M.picture(ctx, c, avail, boxh, lh, pad)
+    if img then
+      reaper.ImGui_Image(ctx, img, avail, boxh)
+      if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
+        reaper.ImGui_SetTooltip(ctx, 'Click to edit')
+      end
+      if reaper.ImGui_IsItemClicked(ctx) then c.editing, c.focus = true, true end
+      return false, text
+    end
+  end
+  if c.focus and reaper.ImGui_SetKeyboardFocusHere then
+    reaper.ImGui_SetKeyboardFocusHere(ctx)
+  end
+  c.focus = nil
   local cb = M._wrap_cb(ctx)
   local rv, txt
   if cb then
@@ -179,6 +198,10 @@ function M.script_box(ctx, id, text, view, min_lines)
     rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1, n * lh + 12)
   end
   c.active = reaper.ImGui_IsItemActive(ctx)
+  if c.editing and reaper.ImGui_IsItemDeactivated
+     and reaper.ImGui_IsItemDeactivated(ctx) then
+    c.editing = false
+  end
   if rv then
     c.disp = txt
     -- Wrap WHILE typing: the line being typed past the edge gets a soft
@@ -193,6 +216,63 @@ function M.script_box(ctx, id, text, view, min_lines)
     return true, new
   end
   return false, text
+end
+
+-- ── Joined-letter pictures (needs js_ReaScriptAPI) ────────────────────────
+-- The panel sets M.joined_font to the OS font family for the language.
+M.joined_font = nil
+function M.can_draw_joined()
+  return reaper.JS_LICE_CreateBitmap ~= nil and reaper.JS_GDI_DrawText ~= nil
+     and reaper.ImGui_CreateImageFromLICE ~= nil and M.joined_font ~= nil
+end
+
+M._gdi_fonts = {}
+local function gdi_font(name, px)
+  local k = name .. "@" .. px
+  if not M._gdi_fonts[k] then
+    M._gdi_fonts[k] = reaper.JS_GDI_CreateFont(px, 400, 0, false, false, false, name)
+  end
+  return M._gdi_fonts[k]
+end
+
+-- The picture for cache entry *c* (its soft-wrapped lines), redrawn only
+-- when the text, size or font change. Lines are drawn one by one at the
+-- breaks the editor uses, so the picture and the edit box wrap alike.
+function M.picture(ctx, c, w, h, lh, pad)
+  local scale = (reaper.ImGui_GetWindowDpiScale and
+                 reaper.ImGui_GetWindowDpiScale(ctx)) or 1
+  local key = table.concat({ c.disp, w, h, M.joined_font, scale }, "\1")
+  if c.pic and c.pic_key == key and
+     (not reaper.ImGui_ValidatePtr or reaper.ImGui_ValidatePtr(c.pic, "ImGui_Image*")) then
+    return c.pic
+  end
+  local bw, bh = math.max(1, math.floor(w * scale)), math.max(1, math.floor(h * scale))
+  local bmp = reaper.JS_LICE_CreateBitmap(true, bw, bh)
+  if not bmp then return nil end
+  -- Background = the edit box colour (opaque), so a click shows no jump.
+  local bg = 0xFF232A36
+  if reaper.ImGui_GetStyleColor and reaper.ImGui_Col_FrameBg then
+    local rgba = reaper.ImGui_GetStyleColor(ctx, reaper.ImGui_Col_FrameBg())
+    bg = 0xFF000000 | ((rgba >> 8) & 0xFFFFFF)
+  end
+  reaper.JS_LICE_Clear(bmp, bg)
+  local dc = reaper.JS_LICE_GetDC(bmp)
+  local px = math.floor(((reaper.ImGui_GetFontSize and reaper.ImGui_GetFontSize(ctx)) or 17) * scale + 0.5)
+  reaper.JS_GDI_SelectObject(dc, gdi_font(M.joined_font, px))
+  reaper.JS_GDI_SetTextColor(dc, 0xE6E6E6)   -- grey: same in RGB and BGR
+  if reaper.JS_GDI_SetTextBkMode then reaper.JS_GDI_SetTextBkMode(dc, 0) end
+  local y = 6 * scale
+  for line in (c.disp .. "\n"):gmatch("(.-)\n") do
+    if line ~= "" then
+      reaper.JS_GDI_DrawText(dc, line, #line, math.floor(pad * scale), math.floor(y),
+                             bw, math.floor(y + lh * scale), "LEFT|TOP|SINGLELINE|NOPREFIX|NOCLIP")
+    end
+    y = y + lh * scale
+  end
+  local img = reaper.ImGui_CreateImageFromLICE(bmp)
+  if reaper.JS_LICE_DestroyBitmap then reaper.JS_LICE_DestroyBitmap(bmp) end
+  c.pic, c.pic_key = img, key
+  return img
 end
 
 -- Byte offset (0-based, for the callback) just after the last space that

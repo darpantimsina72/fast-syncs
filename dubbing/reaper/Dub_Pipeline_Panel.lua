@@ -1638,7 +1638,9 @@ do
           .. "run Update. (" .. tostring(SK) .. ")")
   end
   for k, v in pairs(SK) do V5[k] = v end
+  V5.SK = SK
 end
+
 
 -- Clickable tag chips. A click copies the tag; Ctrl/Cmd+V puts it where the
 -- cursor is in the text box.
@@ -1848,6 +1850,25 @@ local _LANG_TO_SCRIPT = {
   Malayalam = "Malayalam", Gujarati = "Gujarati", Odia = "Oriya",
   Punjabi = "Gurmukhi",
 }
+
+-- OS font family the joined-letter pictures use, per script. Windows:
+-- Nirmala UI covers every Indic script here (8.1+). macOS: the system
+-- Sangam MN families. Latin/tags fall back inside the OS text engine.
+V5.JOINED_FONTS_MAC = {
+  Devanagari = "Devanagari Sangam MN", Bengali = "Bangla Sangam MN",
+  Tamil = "Tamil Sangam MN", Telugu = "Telugu Sangam MN",
+  Kannada = "Kannada Sangam MN", Malayalam = "Malayalam Sangam MN",
+  Gujarati = "Gujarati Sangam MN", Oriya = "Oriya Sangam MN",
+  Gurmukhi = "Gurmukhi Sangam MN",
+}
+function V5.joined_font_tick()
+  local lang = (_review and _review.manifest and
+                (_review.manifest.language or "") ~= "" and
+                _review.manifest.language) or LANGUAGE or ""
+  local script = _LANG_TO_SCRIPT[lang] or "Devanagari"
+  V5.SK.joined_font = _is_windows() and "Nirmala UI"
+                      or V5.JOINED_FONTS_MAC[script] or "Devanagari Sangam MN"
+end
 
 -- v0.4: one font PER SCRIPT, created+attached lazily and cached, so the
 -- review editor renders correctly for whatever language is selected NOW
@@ -3078,6 +3099,86 @@ function V5.ui_whats_new_installed(ctx)
       reaper.ImGui_EndTable(ctx)
     end
     reaper.ImGui_Dummy(ctx, 0, 4)
+  end
+end
+
+-- js_ReaScriptAPI (free REAPER extension by Julian Sader, listed in the
+-- ReaTeam/ReaPack index) draws the joined-letter pictures. Installed by
+-- the panel itself on every machine that lacks it — the user asked for
+-- this to happen with updates, like the other dependencies. Pinned
+-- version and pinned SHA-256 (recorded 2026-10-22 from the official
+-- download): a file that does not match is deleted, never loaded. REAPER
+-- loads extensions at start-up, so the first install asks for one restart.
+V5.JSAPI = {
+  ver = "v1.310",
+  arm = { "reaper_js_ReaScriptAPI64ARM.dylib",
+          "484765a944ee7fe39b71db1a16b3ec8e6311c1d8f93d141720942762b4679d70", 1932990 },
+  mac = { "reaper_js_ReaScriptAPI64.dylib",
+          "645da47e8c766bc49e249467dc70c143cb618583aa0f408dfc42f5274049383e", 2006768 },
+  win = { "reaper_js_ReaScriptAPI64.dll",
+          "7231862247efcd935f14a648364f7808631cb99b0fd55eb5ed6af1fbf7405072", 1003520 },
+}
+function V5.jsapi_asset()
+  local o = reaper.GetOS() or ""
+  if o:match("Win") then return o:match("64") and V5.JSAPI.win or nil end
+  if o:match("arm64") or o:match("aarch64") then return V5.JSAPI.arm end
+  if o:match("OSX") or o:match("macOS") then return V5.JSAPI.mac end
+  return nil   -- Linux / 32-bit Windows: not offered
+end
+
+-- Lower-case hex SHA-256 of a file, via the OS tool (shasum / certutil).
+function V5.sha256(path)
+  local cmd = _is_windows()
+    and ('certutil -hashfile ' .. V5.winquote(path) .. ' SHA256')
+    or  ('/usr/bin/shasum -a 256 ' .. shellquote(path))
+  local out = (reaper.ExecProcess(cmd, 20000) or ""):lower():gsub("[ \t]", "")
+  return out:match(string.rep("%x", 64))
+end
+
+-- Called every frame; returns at once when there is nothing to do.
+function V5.jsapi_tick()
+  if V5.jsapi_state == "done" or V5.jsapi_state == "restart" then return end
+  if reaper.JS_LICE_CreateBitmap then V5.jsapi_state = "done" return end
+  local a = V5.jsapi_asset()
+  if not a then V5.jsapi_state = "done" return end
+  local dir  = reaper.GetResourcePath() .. SEP .. "UserPlugins"
+  local dest = dir .. SEP .. a[1]
+  local part = dest .. ".download"
+  if file_exists(dest) then V5.jsapi_state = "restart" return end
+  local now = reaper.time_precise()
+  if not V5.jsapi_state then
+    V5.jsapi_state, V5.jsapi_t0, V5.jsapi_at = "downloading", now, now
+    reaper.RecursiveCreateDirectory(dir, 0)
+    os.remove(part)
+    local url = "https://github.com/juliansader/ReaExtensions/raw/master/js_ReaScriptAPI/"
+                .. V5.JSAPI.ver .. "/" .. a[1]
+    if _is_windows() then
+      reaper.ExecProcess('curl.exe -fsSL --retry 2 -o ' .. V5.winquote(part) .. ' '
+                         .. V5.winquote(url), -2)
+    else
+      os.execute('/usr/bin/curl -fsSL --retry 2 -o ' .. shellquote(part) .. ' '
+                 .. shellquote(url) .. ' >/dev/null 2>&1 &')
+    end
+    return
+  end
+  if now - V5.jsapi_at < 2 then return end
+  V5.jsapi_at = now
+  local f = io.open(part, "rb")
+  local size = f and f:seek("end") or 0
+  if f then f:close() end
+  if size < a[3] then
+    if now - V5.jsapi_t0 > 600 then os.remove(part); V5.jsapi_state = "done" end
+    return   -- still downloading (or offline: gives up after 10 minutes)
+  end
+  if size == a[3] and V5.sha256(part) == a[2] and os.rename(part, dest) then
+    V5.jsapi_state = "restart"
+    log_append("[panel] Installed js_ReaScriptAPI " .. V5.JSAPI.ver ..
+               " (checksum OK). Restart REAPER once to switch it on.")
+  else
+    os.remove(part)
+    V5.jsapi_state = "done"
+    log_append("[panel] js_ReaScriptAPI download did not match its checksum — " ..
+               "deleted, not installed.")
   end
 end
 
@@ -8694,6 +8795,12 @@ end
 -- again when you press Start.
 function V5.ui_header(ctx)
   V5.ui_update_notice(ctx)
+  if V5.jsapi_state == "restart" then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x66CCFFFF)
+    reaper.ImGui_TextWrapped(ctx, 'Correct Indic letters are ready: restart ' ..
+      'REAPER once to switch them on.')
+    reaper.ImGui_PopStyleColor(ctx)
+  end
   -- v0.15.7: the version moved into the top tab's label.
   local why = V5.llm_creds_error()
   local no_voice_key = (EL_KEY or '') == ''
@@ -9356,6 +9463,8 @@ local function main()
     if _ui_phase == "running" then poll_engine() end
     -- v0.15.3: a multi-chunk batch waits here between chunks.
     V5.regen_queue_tick()
+    V5.joined_font_tick()
+    V5.jsapi_tick()
     -- v0.5: the embedded Auto Sync run polls every frame too — it is
     -- independent of the dub run and of which tab is showing.
     if V5.SYNC then V5.SYNC.poll() end
