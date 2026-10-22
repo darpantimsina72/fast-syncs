@@ -26,5 +26,8 @@ eq(M.soft_unwrap(w), "alpha beta gamma delta epsilon zeta", "wrap round trip")
 eq(tostring(M.next_break(nil, "alpha beta gamma", 80)), "11", "live break offset")
 eq(tostring(M.next_break(nil, "short", 80)), "nil", "no break needed")
 eq(tostring(M.next_break(nil, "averyveryverylongword", 80)), "nil", "long word kept whole")
+-- A tag pasted in the words-only view is kept, other tags stay put.
+eq(M.tags_merge("[warm] one two [slow] three", "one [pause] two three"),
+   "[warm] one [pause] two [slow] three", "tag pasted in Script view")
 print(fails == 0 and "ALL PASS" or (fails .. " FAILED"))
 os.exit(fails == 0 and 0 or 1)

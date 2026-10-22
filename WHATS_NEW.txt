@@ -33,3 +33,4 @@
 0.15.15 | Script boxes fixed height | Drag the bottom edge to make a box taller
 0.15.15 | Indic letters drawn broken in script boxes | Letters joined correctly, also while typing
 0.15.15 | Text add-on installed by hand | Installed by itself; restart REAPER once
+next | Tag buttons only in Script + tags | Tag buttons in both views; paste a tag anywhere
