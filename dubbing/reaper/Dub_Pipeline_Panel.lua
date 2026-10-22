@@ -6037,7 +6037,7 @@ local function ui_regen_section(ctx, default_open)
     local rview = "tags"
     if V5.tags_usable() or V5.has_tags(_regen_text) then
       rview = V5.view_switch(ctx, "regen")
-      if rview == "tags" then V5.tag_chips(ctx, "rg") end
+      V5.tag_chips(ctx, "rg")
     end
     local pushed = _push_font(ctx, 17)
     local rv, txt = V5.script_box(ctx, '##regentext', _regen_text or '',
@@ -6969,7 +6969,7 @@ function V5.ui_tts_tab(ctx)
   if V5.tags_usable() or V5.has_tags(V5.tts_text) then
     reaper.ImGui_SameLine(ctx)
     tview = V5.view_switch(ctx, "tts")
-    if tview == "tags" then V5.tag_chips(ctx, "tt") end
+    V5.tag_chips(ctx, "tt")
   end
   local pushedf = _push_font(ctx, 17)
   if reaper.ImGui_BeginChild(ctx, '##ttswrap', -1, 200, V5.frame_flags()) then
@@ -7471,12 +7471,14 @@ local function ui_phase_review(ctx)
     reaper.ImGui_SameLine(ctx)
     _grey_hint(ctx, 'Words in [brackets] tell the voice HOW to speak — ' ..
                     'they are not spoken. Click a tag to copy it:')
-    V5.tag_chips(ctx, "rv")
   else
     reaper.ImGui_SameLine(ctx)
-    _grey_hint(ctx, 'Tags hidden — edit the words only. Tags stay with ' ..
-                    'their words; see them in Script + tags.')
+    _grey_hint(ctx, 'Tags hidden. To add one: click a tag, paste it where ' ..
+                    'it goes — it then shows in Script + tags.')
   end
+  -- Tag buttons in BOTH views (and on an untagged script), so a tag can be
+  -- pasted wherever it is needed.
+  if tagged then V5.tag_chips(ctx, "rv") end
   local pane_h = -52
   local pushed = _push_font(ctx, 17)
   if _review.use_table then
@@ -8028,9 +8030,7 @@ function V5.ui_source_inputs(ctx)
       reaper.ImGui_SameLine(ctx)
       pview = V5.view_switch(ctx, "provided")
     end
-    if ptagged and pview == "tags" and V5.has_tags(_provided_text) then
-      V5.tag_chips(ctx, "pv")
-    end
+    if ptagged then V5.tag_chips(ctx, "pv") end
     -- A tall script scrolls in its own frame instead of growing the page.
     local pushedf = _push_font(ctx, 17)
     if reaper.ImGui_BeginChild(ctx, '##providedwrap', -1, 220,
