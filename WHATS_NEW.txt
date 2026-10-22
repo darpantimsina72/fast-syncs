@@ -24,12 +24,12 @@
 0.15.14 | Log full of technical lines | Simple log: each step Done / Now / Next
 0.15.14 | Closing the window lost the screen | Reopening goes back to where you were
 0.15.14 | "?" boxes on buttons | Clean button labels
-next | Review with no tags had no way to add them | "Add voice tags" button on the review screen
-next | Tags lost when the AI merged paragraphs | Tags added paragraph by paragraph instead
-next | "Add voice tags" by the pasted script did nothing | Button works
-next | Text to Speech box had no tag view | Script / Script + tags switch and tag buttons there too
-next | Auto Sync script box: tags mixed in, no wrap | Same two views; tags ignored when matching
-next | Long lines wrapped only after clicking out | Lines wrap while typing; words never split
-next | Script boxes fixed height | Drag the bottom edge to make a box taller
-next | Indic letters drawn broken in script boxes | Letters joined correctly, also while typing
-next | Text add-on installed by hand | Installed by itself; restart REAPER once
+0.15.15 | Review with no tags had no way to add them | "Add voice tags" button on the review screen
+0.15.15 | Tags lost when the AI merged paragraphs | Tags added paragraph by paragraph instead
+0.15.15 | "Add voice tags" by the pasted script did nothing | Button works
+0.15.15 | Text to Speech box had no tag view | Script / Script + tags switch and tag buttons there too
+0.15.15 | Auto Sync script box: tags mixed in, no wrap | Same two views; tags ignored when matching
+0.15.15 | Long lines wrapped only after clicking out | Lines wrap while typing; words never split
+0.15.15 | Script boxes fixed height | Drag the bottom edge to make a box taller
+0.15.15 | Indic letters drawn broken in script boxes | Letters joined correctly, also while typing
+0.15.15 | Text add-on installed by hand | Installed by itself; restart REAPER once
