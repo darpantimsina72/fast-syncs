@@ -8109,7 +8109,8 @@ function V5.ui_source_inputs(ctx)
     end
     if pushedf then _pop_font(ctx) end
 
-    reaper.ImGui_SameLine(ctx, V5.LABEL_W)
+    -- Buttons on their own row UNDER the box: SameLine here put them on top
+    -- of the script frame, which then swallowed every click.
     if reaper.ImGui_SmallButton(ctx, 'Paste##prov') then
       local t = reaper.ImGui_GetClipboardText(ctx)
       if t and t:match("%S") then

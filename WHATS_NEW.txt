@@ -2,6 +2,8 @@
 # One line per change:  <version> | <before> | <now>
 # Keep each side short — a few words, plain language. Newest at the bottom.
 # The panel shows every line whose version is newer than the user's own.
+# "next" lines are built but unpublished; they get the real version number
+# only when a release is cut (the panel ignores them until then).
 0.15.9 | One long English clip matched badly | Long clip cut into sentences before matching
 0.15.9 | Speech under music missed | Speech under music heard
 0.15.9 | ElevenLabs v3 voice only | ElevenLabs v4 also offered
@@ -22,5 +24,6 @@
 0.15.14 | Log full of technical lines | Simple log: each step Done / Now / Next
 0.15.14 | Closing the window lost the screen | Reopening goes back to where you were
 0.15.14 | "?" boxes on buttons | Clean button labels
-0.15.15 | Review with no tags had no way to add them | "Add voice tags" button on the review screen
-0.15.15 | Tags lost when the AI merged paragraphs | Tags added paragraph by paragraph instead
+next | Review with no tags had no way to add them | "Add voice tags" button on the review screen
+next | Tags lost when the AI merged paragraphs | Tags added paragraph by paragraph instead
+next | "Add voice tags" by the pasted script did nothing | Button works
