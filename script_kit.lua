@@ -170,37 +170,51 @@ function M.script_box(ctx, id, text, view, min_lines)
   n = math.max(n, min_lines or 2)
   local lh = (reaper.ImGui_GetTextLineHeight and
               reaper.ImGui_GetTextLineHeight(ctx)) or 18
-  -- Not being typed in: show the text as a picture drawn by the OS text
-  -- engine, which joins Indic letters (ImGui draws them apart). A click
-  -- turns it into the edit box; clicking out turns it back.
   local boxh = n * lh + 12
-  if not c.editing and M.can_draw_joined() then
-    local img = M.picture(ctx, c, avail, boxh, lh, pad)
+  local pady = 3
+  if reaper.ImGui_GetStyleVar and reaper.ImGui_StyleVar_FramePadding then
+    pady = select(2, reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding())) or pady
+  end
+  local cb = M._wrap_cb(ctx)
+  -- Joined letters ALWAYS, typing included: the OS-drawn picture sits under
+  -- an invisible edit box that does the typing; the cursor and selection
+  -- are drawn on the picture at the joined-letter positions (measured with
+  -- the OS text engine, see M.joined_x). Without js_ReaScriptAPI: the
+  -- ordinary box.
+  local joined = cb and M.can_draw_joined()
+  local x0, y0
+  if joined then
+    x0, y0 = reaper.ImGui_GetCursorScreenPos(ctx)
+    local img = M.picture(ctx, c, avail, boxh, lh, pad, pady)
     if img then
       reaper.ImGui_Image(ctx, img, avail, boxh)
-      if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_SetTooltip then
-        reaper.ImGui_SetTooltip(ctx, 'Click to edit')
-      end
-      if reaper.ImGui_IsItemClicked(ctx) then c.editing, c.focus = true, true end
-      return false, text
+      reaper.ImGui_SetCursorScreenPos(ctx, x0, y0)
+    else
+      joined = false
     end
   end
-  if c.focus and reaper.ImGui_SetKeyboardFocusHere then
-    reaper.ImGui_SetKeyboardFocusHere(ctx)
+  local hidden = 0
+  if joined then
+    for _, col in ipairs({ "Col_Text", "Col_FrameBg", "Col_FrameBgHovered",
+                           "Col_FrameBgActive", "Col_TextSelectedBg",
+                           "Col_InputTextCursor" }) do
+      if reaper["ImGui_" .. col] then
+        reaper.ImGui_PushStyleColor(ctx, reaper["ImGui_" .. col](), 0x00000000)
+        hidden = hidden + 1
+      end
+    end
   end
-  c.focus = nil
-  local cb = M._wrap_cb(ctx)
   local rv, txt
   if cb then
-    rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1, n * lh + 12,
+    rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1, boxh,
       reaper.ImGui_InputTextFlags_CallbackAlways(), cb)
   else
-    rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1, n * lh + 12)
+    rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1, boxh)
   end
+  if hidden > 0 then reaper.ImGui_PopStyleColor(ctx, hidden) end
   c.active = reaper.ImGui_IsItemActive(ctx)
-  if c.editing and reaper.ImGui_IsItemDeactivated
-     and reaper.ImGui_IsItemDeactivated(ctx) then
-    c.editing = false
+  if joined and c.active then
+    M.joined_overlay(ctx, cb, c, rv and txt or c.disp, x0, y0, pad, pady, lh, avail)
   end
   if rv then
     c.disp = txt
@@ -227,7 +241,7 @@ function M.can_draw_joined()
 end
 
 M._gdi_fonts = {}
-local function gdi_font(name, px)
+function M._gdi_font(name, px)
   local k = name .. "@" .. px
   if not M._gdi_fonts[k] then
     M._gdi_fonts[k] = reaper.JS_GDI_CreateFont(px, 400, 0, false, false, false, name)
@@ -238,7 +252,7 @@ end
 -- The picture for cache entry *c* (its soft-wrapped lines), redrawn only
 -- when the text, size or font change. Lines are drawn one by one at the
 -- breaks the editor uses, so the picture and the edit box wrap alike.
-function M.picture(ctx, c, w, h, lh, pad)
+function M.picture(ctx, c, w, h, lh, pad, pady)
   local scale = (reaper.ImGui_GetWindowDpiScale and
                  reaper.ImGui_GetWindowDpiScale(ctx)) or 1
   local key = table.concat({ c.disp, w, h, M.joined_font, scale }, "\1")
@@ -258,10 +272,10 @@ function M.picture(ctx, c, w, h, lh, pad)
   reaper.JS_LICE_Clear(bmp, bg)
   local dc = reaper.JS_LICE_GetDC(bmp)
   local px = math.floor(((reaper.ImGui_GetFontSize and reaper.ImGui_GetFontSize(ctx)) or 17) * scale + 0.5)
-  reaper.JS_GDI_SelectObject(dc, gdi_font(M.joined_font, px))
+  reaper.JS_GDI_SelectObject(dc, M._gdi_font(M.joined_font, px))
   reaper.JS_GDI_SetTextColor(dc, 0xE6E6E6)   -- grey: same in RGB and BGR
   if reaper.JS_GDI_SetTextBkMode then reaper.JS_GDI_SetTextBkMode(dc, 0) end
-  local y = 6 * scale
+  local y = (pady or 3) * scale
   for line in (c.disp .. "\n"):gmatch("(.-)\n") do
     if line ~= "" then
       reaper.JS_GDI_DrawText(dc, line, #line, math.floor(pad * scale), math.floor(y),
@@ -273,6 +287,131 @@ function M.picture(ctx, c, w, h, lh, pad)
   if reaper.JS_LICE_DestroyBitmap then reaper.JS_LICE_DestroyBitmap(bmp) end
   c.pic, c.pic_key = img, key
   return img
+end
+
+-- ── Joined-letter cursor, selection and clicks ────────────────────────────
+-- Shaped width of *s* in screen pixels: draw s.."|" off-screen with the OS
+-- text engine and find the tall bar from the right on a few middle rows.
+-- The add-on has no text-measure call for shaped text; the bar is exact.
+M._wcache = {}
+function M.joined_x(ctx, s)
+  local scale = (reaper.ImGui_GetWindowDpiScale and
+                 reaper.ImGui_GetWindowDpiScale(ctx)) or 1
+  local px = math.floor(((reaper.ImGui_GetFontSize and reaper.ImGui_GetFontSize(ctx)) or 17) * scale + 0.5)
+  local key = M.joined_font .. "@" .. px .. "@" .. s
+  if M._wcache[key] then return M._wcache[key] end
+  local W, H = 4096, px * 2
+  if M._mbmp_h ~= H then
+    if M._mbmp and reaper.JS_LICE_DestroyBitmap then reaper.JS_LICE_DestroyBitmap(M._mbmp) end
+    M._mbmp, M._mbmp_h = reaper.JS_LICE_CreateBitmap(true, W, H), H
+  end
+  local b = M._mbmp
+  reaper.JS_LICE_Clear(b, 0xFF000000)
+  local dc = reaper.JS_LICE_GetDC(b)
+  reaper.JS_GDI_SelectObject(dc, M._gdi_font(M.joined_font, px))
+  reaper.JS_GDI_SetTextColor(dc, 0xFFFFFF)
+  if reaper.JS_GDI_SetTextBkMode then reaper.JS_GDI_SetTextBkMode(dc, 0) end
+  local t = s .. "|"
+  reaper.JS_GDI_DrawText(dc, t, #t, 0, 0, W, H, "LEFT|TOP|SINGLELINE|NOPREFIX|NOCLIP")
+  local rows = { math.floor(px * 0.45), math.floor(px * 0.6), math.floor(px * 0.75) }
+  -- Start the scan a little right of the unjoined width (joined text is
+  -- never much wider), not at the far edge: ~100x fewer pixel reads.
+  local est = W - 1
+  if reaper.ImGui_CalcTextSize then
+    est = math.min(W - 1, math.floor((reaper.ImGui_CalcTextSize(ctx, t) * 1.5 + 40) * scale))
+  end
+  local edge = 0
+  for x = est, 0, -1 do
+    local hit = false
+    for _, y in ipairs(rows) do
+      if (reaper.JS_LICE_GetPixel(b, x, y) & 0xFFFFFF) > 0x404040 then hit = true break end
+    end
+    if hit then edge = x break end
+  end
+  if not M._bar0 then M._bar0 = {} end
+  local k0 = M.joined_font .. "@" .. px
+  if s ~= "" and not M._bar0[k0] then M.joined_x(ctx, "") end
+  if s == "" then M._bar0[k0] = edge end
+  local w = (edge - (M._bar0[k0] or edge)) / scale
+  M._wcache[key] = w
+  return w
+end
+
+-- Line index (0-based), line start offset and line text for byte offset *pos*.
+local function line_at(txt, pos)
+  local start, i = 0, 0
+  for line in (txt .. "\n"):gmatch("(.-)\n") do
+    if pos <= start + #line then return i, start, line end
+    start, i = start + #line + 1, i + 1
+  end
+  return i, start, ""
+end
+
+-- Byte offset in *line* nearest to x (screen px from the text start), on
+-- UTF-8 character boundaries, by binary search over shaped widths.
+local function offset_at_x(ctx, line, x)
+  local cuts = { 0 }
+  for p in line:gmatch("()[^\128-\191]") do if p > 1 then cuts[#cuts + 1] = p - 1 end end
+  cuts[#cuts + 1] = #line
+  local lo, hi = 1, #cuts
+  while hi - lo > 1 do
+    local mid = (lo + hi) // 2
+    if M.joined_x(ctx, line:sub(1, cuts[mid])) < x then lo = mid else hi = mid end
+  end
+  local wl = M.joined_x(ctx, line:sub(1, cuts[lo]))
+  local wh = M.joined_x(ctx, line:sub(1, cuts[hi]))
+  return (x - wl < wh - x) and cuts[lo] or cuts[hi]
+end
+
+function M.joined_overlay(ctx, cb, c, txt, x0, y0, pad, pady, lh, w)
+  local dl = reaper.ImGui_GetWindowDrawList(ctx)
+  -- Mouse: place the cursor (and drag a selection) by joined positions,
+  -- overriding the box's own guess, which uses unjoined widths.
+  local mx, my = reaper.ImGui_GetMousePos(ctx)
+  local inside = mx >= x0 and mx <= x0 + w and my >= y0
+  if inside and (reaper.ImGui_IsMouseClicked(ctx, 0) or
+                 (reaper.ImGui_IsMouseDown(ctx, 0) and c.drag)) then
+    local li = math.max(0, math.floor((my - y0 - pady) / lh))
+    local start, i = 0, 0
+    local line = ""
+    for l in (txt .. "\n"):gmatch("(.-)\n") do
+      if i == li then line = l break end
+      start, i = start + #l + 1, i + 1
+    end
+    if i < li then line = "" end
+    local pos = start + offset_at_x(ctx, line, mx - x0 - pad)
+    if reaper.ImGui_IsMouseClicked(ctx, 0) then c.drag = pos end
+    local a, b = math.min(c.drag, pos), math.max(c.drag, pos)
+    reaper.ImGui_Function_SetValue(cb, "sets", a)
+    reaper.ImGui_Function_SetValue(cb, "sete", b)
+    reaper.ImGui_Function_SetValue(cb, "setc", pos)
+  end
+  if not reaper.ImGui_IsMouseDown(ctx, 0) then c.drag = nil end
+  local cur = math.floor(reaper.ImGui_Function_GetValue(cb, "cur") or 0)
+  local ss  = math.floor(reaper.ImGui_Function_GetValue(cb, "ss") or cur)
+  local se  = math.floor(reaper.ImGui_Function_GetValue(cb, "se") or cur)
+  local function xy(pos)
+    local li, start, line = line_at(txt, pos)
+    return x0 + pad + M.joined_x(ctx, line:sub(1, pos - start)), y0 + pady + li * lh
+  end
+  -- Selection: one band per line it covers.
+  if se ~= ss then
+    local a, b = math.min(ss, se), math.max(ss, se)
+    local p = a
+    while p < b do
+      local li, start, line = line_at(txt, p)
+      local e = math.min(b, start + #line)
+      local xa, ya = xy(p)
+      local xb = select(1, xy(e))
+      reaper.ImGui_DrawList_AddRectFilled(dl, xa, ya, math.max(xb, xa + 4), ya + lh, 0x4488FF66)
+      p = start + #line + 1
+    end
+  end
+  -- Blinking cursor.
+  if math.floor(reaper.time_precise() * 2) % 2 == 0 then
+    local cx, cy = xy(cur)
+    reaper.ImGui_DrawList_AddLine(dl, cx, cy, cx, cy + lh, 0xFFFFFFFF, 1.5)
+  end
 end
 
 -- Byte offset (0-based, for the callback) just after the last space that
@@ -307,10 +446,13 @@ function M._wrap_cb(ctx)
      and reaper.ImGui_InputTextFlags_CallbackAlways
      and reaper.ImGui_Function_SetValue then
     local ok, f = pcall(reaper.ImGui_CreateFunctionFromEEL,
-      'want >= 0 ? ( InputTextCallback_InsertChars(want, "\\n"); want = -1; );')
+      'cur = CursorPos; ss = SelectionStart; se = SelectionEnd;' ..
+      'want >= 0 ? ( InputTextCallback_InsertChars(want, "\\n"); want = -1; );' ..
+      'setc >= 0 ? ( CursorPos = setc; SelectionStart = sets; SelectionEnd = sete; setc = -1; );')
     if ok and f then
       reaper.ImGui_Attach(ctx, f)
       reaper.ImGui_Function_SetValue(f, "want", -1)
+      reaper.ImGui_Function_SetValue(f, "setc", -1)
       fn = f
     end
   end

@@ -31,5 +31,5 @@ next | Text to Speech box had no tag view | Script / Script + tags switch and ta
 next | Auto Sync script box: tags mixed in, no wrap | Same two views; tags ignored when matching
 next | Long lines wrapped only after clicking out | Lines wrap while typing; words never split
 next | Script boxes fixed height | Drag the bottom edge to make a box taller
-next | Indic letters drawn broken in script boxes | Letters joined correctly (click a box to type)
+next | Indic letters drawn broken in script boxes | Letters joined correctly, also while typing
 next | Text add-on installed by hand | Installed by itself; restart REAPER once
