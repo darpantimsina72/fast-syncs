@@ -737,6 +737,26 @@ def _out(pl, ctx, kind, suffix):
     return pl.layout_path(ctx["out_dir"], kind, ctx["bname"] + suffix)
 
 
+# 0.15.15: the final edited script is the one file the user looks for in the
+# run folder, so it gets a plain, unprefixed name: "final script.txt".
+# Older runs wrote "<base>_FinalScript.txt"; readers below still fall back to
+# that name so a run translated on an older version can still be dubbed.
+FINAL_SCRIPT_NAME = "final script.txt"
+FINAL_SCRIPT_NAME_LEGACY = "_FinalScript.txt"
+
+
+def _final_script_path(pl, out_dir, bname, make=True):
+    """Where this run's final edited script lives. Prefers the new plain name;
+    when only the old "<base>_FinalScript.txt" exists on disk, returns that so
+    old runs keep working."""
+    new = pl.layout_path(out_dir, "script", FINAL_SCRIPT_NAME, make=make)
+    old = pl.layout_path(out_dir, "script", bname + FINAL_SCRIPT_NAME_LEGACY,
+                         make=False)
+    if not os.path.isfile(new) and os.path.isfile(old):
+        return old
+    return new
+
+
 def _write_text(path, text):
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
@@ -1090,8 +1110,8 @@ def _stage_translate(pl, args, api_key, manifest, ctx):
     _write_text(_out(pl, ctx, "script", "_ReviewStep.txt"), rev_result)
     combined = (f"=== ENGLISH TRANSCRIPTION ===\n{raw_eng}\n\n"
                 f"=== {language.upper()} TRANSLATION ===\n{punc_result}")
-    _write_text(_out(pl, ctx, "script", "_FinalScript.txt"), combined)
-    _say("S2c", "FinalScript saved.")
+    _write_text(_final_script_path(pl, ctx["out_dir"], ctx["bname"]), combined)
+    _say("S2c", "Final script saved.")
     ctx["punc_result"] = punc_result
 
 
@@ -1789,8 +1809,28 @@ def _tag_review_text(pl, args, tr_text, say=None):
         merged.append((lead + "\n" + b) if lead else b)
         lead = ""
     if len(merged) != len(paras):
-        return None, (f"the tagged reply has {len(merged)} paragraph(s), the "
-                      f"review has {len(paras)}")
+        # The model merged or split paragraphs. Rather than lose every tag,
+        # tag each paragraph on its own (one small call each); a paragraph
+        # whose call fails stays plain. The accent tag stays on the first.
+        say(f"Tagged reply had {len(merged)} paragraph(s) for "
+            f"{len(paras)} — tagging paragraph by paragraph instead…")
+        merged = []
+        for k, para in enumerate(paras):
+            if para.strip() == EMPTY_PARAGRAPH_PLACEHOLDER:
+                merged.append(para)
+                continue
+            try:
+                one = pl._run_emotion_enrichment(
+                    para, language=args.language,
+                    model=pl.GEMINI_DEFAULT_MODEL, status_cb=None,
+                    strict=True) or para
+            except Exception:
+                one = para
+            one = " ".join(b.strip() for b in re.split(r"\n\s*\n", one.strip()))
+            if k > 0:
+                one = re.sub(r"\[[^\]\n]*accent\]\s*", "", one,
+                             flags=re.IGNORECASE)
+            merged.append(one)
 
     def _same(a, b):
         return "".join(a.split()) == "".join(b.split())
@@ -1882,7 +1922,8 @@ def _run_translate(args, manifest):
     _write_text(tr_text_path, tr_text)
     manifest["en_text"] = en_text_path
     manifest["translation_text"] = tr_text_path
-    manifest["final_script"] = _out(pl, ctx, "script", "_FinalScript.txt")
+    manifest["final_script"] = _final_script_path(pl, ctx["out_dir"],
+                                                  ctx["bname"])
     _say("S2c", f"Review files saved ({n_rows} paragraph pair(s)) — "
                 "waiting for script review.")
 
@@ -1914,8 +1955,7 @@ def _run_dub(args, manifest):
                                       make=False),
         "English sync SRT": pl.layout_path(out_dir, "work",
                                            bname + "_sync_en.srt", make=False),
-        "FinalScript": pl.layout_path(out_dir, "script",
-                                      bname + "_FinalScript.txt", make=False),
+        "FinalScript": _final_script_path(pl, out_dir, bname, make=False),
     }
     missing = [f"{name}: {path}" for name, path in required.items()
                if not os.path.isfile(path)]

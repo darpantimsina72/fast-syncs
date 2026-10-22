@@ -1629,194 +1629,18 @@ end
 -- kept (they never have a space in front: trailing spaces are trimmed).
 -- All on V5: the main chunk is at Lua's 200-locals limit.
 
-V5.TAG_PAT = "%[/?[%a ]+%]"
--- The tag palette (same set the Step-4 prompts use). Click = copy.
-V5.TAG_LIST = {
-  { "[calm]", "steady, unhurried" }, { "[contemplative]", "reflective" },
-  { "[thoughtful]", "considered" },  { "[soft]", "quiet, gentle volume" },
-  { "[warm]", "friendly, kind" },    { "[gentle]", "tender" },
-  { "[slow]", "slower pace for a deep line" },
-  { "[pause]", "a short pause before what follows" },
-  { "[sighs]", "an exhale — use rarely" },
-  { "[smiling]", "light, a smile in the voice" },
-  { "[curious]", "questioning" },    { "[lighthearted]", "playful" },
-  { "[emphatic]", "strong emphasis — rarely" },
-  { "[serious]", "grave — rarely" },
-}
-
-function V5.has_tags(s) return (s or ""):find(V5.TAG_PAT) ~= nil end
-
--- The script with its tags removed, tidily (no double spaces, a line that
--- only held tags disappears). Mirrors the engine's _without_tags.
-function V5.tags_strip(s)
-  local out = {}
-  for line in ((s or "") .. "\n"):gmatch("(.-)\n") do
-    if not line:match("%S") then
-      out[#out + 1] = ""
-    else
-      local clean = line:gsub(V5.TAG_PAT, " "):gsub("%s+", " ")
-                        :gsub("^ ", ""):gsub(" $", "")
-      if clean ~= "" then out[#out + 1] = clean end
-    end
+-- The editor kit (two views, tag merge, wrapped boxes) lives in the shared
+-- script_kit.lua next to Auto Sync, so both windows edit scripts the same way.
+do
+  local ok, SK = pcall(dofile, V5.APP_ROOT .. SEP .. "script_kit.lua")
+  if not ok or type(SK) ~= "table" then
+    error("script_kit.lua is missing or broken next to auto_sync_pipeline.lua — "
+          .. "run Update. (" .. tostring(SK) .. ")")
   end
-  local r = table.concat(out, "\n"):gsub("\n\n\n+", "\n\n")
-  return (r:gsub("^%s+", ""):gsub("%s+$", ""))
+  for k, v in pairs(SK) do V5[k] = v end
+  V5.SK = SK
 end
 
--- Tags of a tagged text, each with the index of the plain word it precedes
--- (#words + 1 = at the end), plus that plain word list.
-function V5._tag_anchors(tagged)
-  local words, tags = {}, {}
-  local pos = 1
-  local s = tagged or ""
-  while pos <= #s do
-    local a, b = s:find(V5.TAG_PAT, pos)
-    local chunk = s:sub(pos, (a or (#s + 1)) - 1)
-    for w in chunk:gmatch("%S+") do words[#words + 1] = w end
-    if not a then break end
-    tags[#tags + 1] = { tag = s:sub(a, b), at = #words + 1 }
-    pos = b + 1
-  end
-  return words, tags
-end
-
--- Re-attach the tags of *old_tagged* to *new_plain* (the words an editor
--- just typed in the Script view). Words are lined up with a longest-common-
--- subsequence pass; a tag whose word was deleted moves to the next surviving
--- word. The new text keeps its own spacing and line breaks.
-function V5.tags_merge(old_tagged, new_plain)
-  local old_words, tags = V5._tag_anchors(old_tagged)
-  if #tags == 0 then return new_plain end
-  local new_words = {}
-  for w in (new_plain or ""):gmatch("%S+") do new_words[#new_words + 1] = w end
-  local n, m = #old_words, #new_words
-  -- LCS table, bottom-up. A paragraph is a few hundred words at most.
-  local L = {}
-  for i = n + 1, 1, -1 do
-    L[i] = {}
-    for j = m + 1, 1, -1 do
-      if i > n or j > m then L[i][j] = 0
-      elseif old_words[i] == new_words[j] then L[i][j] = L[i + 1][j + 1] + 1
-      else L[i][j] = math.max(L[i + 1][j], L[i][j + 1]) end
-    end
-  end
-  local map, i, j = {}, 1, 1
-  while i <= n and j <= m do
-    if old_words[i] == new_words[j] then map[i] = j; i = i + 1; j = j + 1
-    elseif L[i + 1][j] >= L[i][j + 1] then i = i + 1
-    else j = j + 1 end
-  end
-  -- Where each old word's tags land in the new text.
-  local before = {}           -- new word index -> { tags… }
-  for _, t in ipairs(tags) do
-    local k, dest = t.at, nil
-    while k <= n do
-      if map[k] then dest = map[k] break end
-      k = k + 1
-    end
-    -- No surviving word after it: keep it in front of the word that now
-    -- sits where the old one was, else at the very end.
-    dest = dest or math.min(t.at, m + 1)
-    before[dest] = before[dest] or {}
-    table.insert(before[dest], t.tag)
-  end
-  local out, wi = {}, 0
-  for sp, w in (new_plain or ""):gmatch("(%s*)(%S+)") do
-    wi = wi + 1
-    out[#out + 1] = sp
-    if before[wi] then out[#out + 1] = table.concat(before[wi], " ") .. " " end
-    out[#out + 1] = w
-  end
-  local tail = (new_plain or ""):match("(%s*)$") or ""
-  if before[wi + 1] then
-    out[#out + 1] = (wi > 0 and " " or "") .. table.concat(before[wi + 1], " ")
-  end
-  out[#out + 1] = tail
-  return table.concat(out)
-end
-
--- Soft-wrap *s* to *width* pixels with the current font. Real line breaks
--- stay; inserted ones are " \n".
-function V5.soft_wrap(ctx, s, width)
-  if not reaper.ImGui_CalcTextSize or width < 40 then return s end
-  local lines = {}
-  for raw in ((s or "") .. "\n"):gmatch("(.-)\n") do
-    local line = raw:gsub("%s+$", "")
-    local cur = ""
-    for sp, w in line:gmatch("(%s*)(%S+)") do
-      local try = (cur == "") and (sp .. w) or (cur .. sp .. w)
-      if cur ~= "" and reaper.ImGui_CalcTextSize(ctx, try) > width then
-        lines[#lines + 1] = cur .. " "   -- the space marks a soft break
-        cur = w
-      else
-        cur = try
-      end
-    end
-    lines[#lines + 1] = cur
-  end
-  return table.concat(lines, "\n")
-end
-
-function V5.soft_unwrap(s)
-  return ((s or ""):gsub(" \n", " "))
-end
-
--- The editor. *id* keys its cache; *text* is the canonical (tagged) text;
--- *view* is "tags" or "plain"; *min_lines* sizes an empty box. Returns
--- changed, new_canonical. The box is as tall as its wrapped text, so it
--- never scrolls sideways or inside itself.
-V5.ed_cache = {}
-function V5.script_box(ctx, id, text, view, min_lines)
-  text = text or ""
-  local avail = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 400
-  local width = avail - 22          -- frame padding + a scrollbar's room
-  local c = V5.ed_cache[id]
-  if not (c and c.src == text and c.view == view and c.w == width) then
-    if not (c and c.active) then
-      local shown = (view == "plain") and V5.tags_strip(text) or text
-      c = { src = text, view = view, w = width,
-            disp = V5.soft_wrap(ctx, shown, width) }
-      V5.ed_cache[id] = c
-    end
-  end
-  local n = 1
-  for _ in c.disp:gmatch("\n") do n = n + 1 end
-  n = math.max(n, min_lines or 2)
-  local lh = (reaper.ImGui_GetTextLineHeight and
-              reaper.ImGui_GetTextLineHeight(ctx)) or 18
-  local rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1,
-                                                  n * lh + 12)
-  c.active = reaper.ImGui_IsItemActive(ctx)
-  if rv then
-    c.disp = txt
-    local flat = V5.soft_unwrap(txt)
-    local new = (view == "plain") and V5.tags_merge(text, flat) or flat
-    c.src = new
-    return true, new
-  end
-  return false, text
-end
-
--- The "Script | Script + tags" switch. *key* names whose view it sets.
-V5.views = {}
-function V5.view_switch(ctx, key)
-  -- 0.15.14: words-only view by default; tags one click away.
-  local v = V5.views[key] or "plain"
-  local function seg(label, val)
-    local on = (v == val)
-    if on then
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), 0x2A6699FF)
-    end
-    if reaper.ImGui_SmallButton(ctx, label .. '##vw' .. key) then
-      V5.views[key] = val
-    end
-    if on then reaper.ImGui_PopStyleColor(ctx) end
-  end
-  seg(' Script ', "plain")
-  reaper.ImGui_SameLine(ctx, 0, 2)
-  seg(' Script + tags ', "tags")
-  return V5.views[key] or "plain"
-end
 
 -- Clickable tag chips. A click copies the tag; Ctrl/Cmd+V puts it where the
 -- cursor is in the text box.
@@ -2026,6 +1850,25 @@ local _LANG_TO_SCRIPT = {
   Malayalam = "Malayalam", Gujarati = "Gujarati", Odia = "Oriya",
   Punjabi = "Gurmukhi",
 }
+
+-- OS font family the joined-letter pictures use, per script. Windows:
+-- Nirmala UI covers every Indic script here (8.1+). macOS: the system
+-- Sangam MN families. Latin/tags fall back inside the OS text engine.
+V5.JOINED_FONTS_MAC = {
+  Devanagari = "Devanagari Sangam MN", Bengali = "Bangla Sangam MN",
+  Tamil = "Tamil Sangam MN", Telugu = "Telugu Sangam MN",
+  Kannada = "Kannada Sangam MN", Malayalam = "Malayalam Sangam MN",
+  Gujarati = "Gujarati Sangam MN", Oriya = "Oriya Sangam MN",
+  Gurmukhi = "Gurmukhi Sangam MN",
+}
+function V5.joined_font_tick()
+  local lang = (_review and _review.manifest and
+                (_review.manifest.language or "") ~= "" and
+                _review.manifest.language) or LANGUAGE or ""
+  local script = _LANG_TO_SCRIPT[lang] or "Devanagari"
+  V5.SK.joined_font = _is_windows() and "Nirmala UI"
+                      or V5.JOINED_FONTS_MAC[script] or "Devanagari Sangam MN"
+end
 
 -- v0.4: one font PER SCRIPT, created+attached lazily and cached, so the
 -- review editor renders correctly for whatever language is selected NOW
@@ -3259,6 +3102,86 @@ function V5.ui_whats_new_installed(ctx)
   end
 end
 
+-- js_ReaScriptAPI (free REAPER extension by Julian Sader, listed in the
+-- ReaTeam/ReaPack index) draws the joined-letter pictures. Installed by
+-- the panel itself on every machine that lacks it — the user asked for
+-- this to happen with updates, like the other dependencies. Pinned
+-- version and pinned SHA-256 (recorded 2026-10-22 from the official
+-- download): a file that does not match is deleted, never loaded. REAPER
+-- loads extensions at start-up, so the first install asks for one restart.
+V5.JSAPI = {
+  ver = "v1.310",
+  arm = { "reaper_js_ReaScriptAPI64ARM.dylib",
+          "484765a944ee7fe39b71db1a16b3ec8e6311c1d8f93d141720942762b4679d70", 1932990 },
+  mac = { "reaper_js_ReaScriptAPI64.dylib",
+          "645da47e8c766bc49e249467dc70c143cb618583aa0f408dfc42f5274049383e", 2006768 },
+  win = { "reaper_js_ReaScriptAPI64.dll",
+          "7231862247efcd935f14a648364f7808631cb99b0fd55eb5ed6af1fbf7405072", 1003520 },
+}
+function V5.jsapi_asset()
+  local o = reaper.GetOS() or ""
+  if o:match("Win") then return o:match("64") and V5.JSAPI.win or nil end
+  if o:match("arm64") or o:match("aarch64") then return V5.JSAPI.arm end
+  if o:match("OSX") or o:match("macOS") then return V5.JSAPI.mac end
+  return nil   -- Linux / 32-bit Windows: not offered
+end
+
+-- Lower-case hex SHA-256 of a file, via the OS tool (shasum / certutil).
+function V5.sha256(path)
+  local cmd = _is_windows()
+    and ('certutil -hashfile ' .. V5.winquote(path) .. ' SHA256')
+    or  ('/usr/bin/shasum -a 256 ' .. shellquote(path))
+  local out = (reaper.ExecProcess(cmd, 20000) or ""):lower():gsub("[ \t]", "")
+  return out:match(string.rep("%x", 64))
+end
+
+-- Called every frame; returns at once when there is nothing to do.
+function V5.jsapi_tick()
+  if V5.jsapi_state == "done" or V5.jsapi_state == "restart" then return end
+  if reaper.JS_LICE_CreateBitmap then V5.jsapi_state = "done" return end
+  local a = V5.jsapi_asset()
+  if not a then V5.jsapi_state = "done" return end
+  local dir  = reaper.GetResourcePath() .. SEP .. "UserPlugins"
+  local dest = dir .. SEP .. a[1]
+  local part = dest .. ".download"
+  if file_exists(dest) then V5.jsapi_state = "restart" return end
+  local now = reaper.time_precise()
+  if not V5.jsapi_state then
+    V5.jsapi_state, V5.jsapi_t0, V5.jsapi_at = "downloading", now, now
+    reaper.RecursiveCreateDirectory(dir, 0)
+    os.remove(part)
+    local url = "https://github.com/juliansader/ReaExtensions/raw/master/js_ReaScriptAPI/"
+                .. V5.JSAPI.ver .. "/" .. a[1]
+    if _is_windows() then
+      reaper.ExecProcess('curl.exe -fsSL --retry 2 -o ' .. V5.winquote(part) .. ' '
+                         .. V5.winquote(url), -2)
+    else
+      os.execute('/usr/bin/curl -fsSL --retry 2 -o ' .. shellquote(part) .. ' '
+                 .. shellquote(url) .. ' >/dev/null 2>&1 &')
+    end
+    return
+  end
+  if now - V5.jsapi_at < 2 then return end
+  V5.jsapi_at = now
+  local f = io.open(part, "rb")
+  local size = f and f:seek("end") or 0
+  if f then f:close() end
+  if size < a[3] then
+    if now - V5.jsapi_t0 > 600 then os.remove(part); V5.jsapi_state = "done" end
+    return   -- still downloading (or offline: gives up after 10 minutes)
+  end
+  if size == a[3] and V5.sha256(part) == a[2] and os.rename(part, dest) then
+    V5.jsapi_state = "restart"
+    log_append("[panel] Installed js_ReaScriptAPI " .. V5.JSAPI.ver ..
+               " (checksum OK). Restart REAPER once to switch it on.")
+  else
+    os.remove(part)
+    V5.jsapi_state = "done"
+    log_append("[panel] js_ReaScriptAPI download did not match its checksum — " ..
+               "deleted, not installed.")
+  end
+end
+
 function V5.rollback_choices()
   local seen, out = {}, {}
   local function add(v)
@@ -4232,8 +4155,8 @@ end
 
 -- 0.15.10: after every redo, (re)write the whole script as it now stands —
 -- every chunk on the redone chunk's track, in timeline order, one chunk per
--- line — to "<name>_FinalScript_after_redo.txt" in the run folder, next to
--- the engine's own <name>_FinalScript.txt. A redo changes the words only on
+-- line — to "final script (after redo).txt" in the run folder, next to
+-- the engine's own "final script.txt". A redo changes the words only on
 -- the timeline (and in one small regen/chunk_N.txt), so without this there is
 -- no single file with the script that was actually spoken.
 -- Rebuilt from the timeline each time, so it is always complete and current.
@@ -4271,15 +4194,12 @@ function V5.write_final_script(track, dir)
       if txt ~= "" then last = txt end
     end
     if #lines == 0 then return nil end
-    local base, p
+    -- 0.15.15: one plainly-named file, matching the engine's "final script".
+    local p
     if V5.is_tidy(dir) then
-      local _, tn = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
-      -- (inline: _sanitize_filename is declared further down the file)
-      base = ((tn and tn ~= "") and tn or "dub"):gsub("[^%w%-_]", "_")
-      p = V5.layout_path(dir, "script", base .. "_FinalScript_after_redo.txt")
+      p = V5.layout_path(dir, "script", "final script (after redo).txt")
     else
-      base = basename(dir)
-      p = dir .. SEP .. base .. "_FinalScript_after_redo.txt"
+      p = dir .. SEP .. "final script (after redo).txt"
     end
     V5.final_track, V5.final_dir = track, dir
     local body = table.concat(lines, "\n") .. "\n"
@@ -4984,10 +4904,19 @@ local function _finish_run(exit_code)
            and (m.tagged_text or "") ~= "" then
       local t = read_all(m.tagged_text)
       if t and t:match("%S") then
-        _provided_text = _strip_bom(t):gsub("\r\n", "\n")
-        ui_set_banner("info",
-          "Voice tags added to your script. Check them in the box — " ..
-          "change, delete or add tags as needed, then start the run.")
+        t = _strip_bom(t):gsub("\r\n", "\n")
+        if V5.tags_for_review and _review then
+          _review_replace_text(t)
+          save_review_text()
+          V5.views.review = "tags"
+          ui_set_banner("info", "Voice tags added to the script. Check " ..
+            "them in Script + tags, then continue to dubbing.")
+        else
+          _provided_text = t
+          ui_set_banner("info",
+            "Voice tags added to your script. Check them in the box — " ..
+            "change, delete or add tags as needed, then start the run.")
+        end
       else
         ui_set_banner("error", "The tagged script could not be read:\n" ..
                                m.tagged_text)
@@ -7034,11 +6963,21 @@ function V5.ui_tts_tab(ctx)
   _ui_begin_disabled(ctx, running)
 
   reaper.ImGui_Text(ctx, 'Text')
+  -- Same two views and tag buttons as the review (ElevenLabs v3/v4 act on
+  -- the tags here too).
+  local tview = "tags"
+  if V5.tags_usable() or V5.has_tags(V5.tts_text) then
+    reaper.ImGui_SameLine(ctx)
+    tview = V5.view_switch(ctx, "tts")
+    if tview == "tags" then V5.tag_chips(ctx, "tt") end
+  end
   local pushedf = _push_font(ctx, 17)
-  local rv, txt = reaper.ImGui_InputTextMultiline(
-    ctx, '##ttstext', V5.tts_text or '', -1, 200)
+  if reaper.ImGui_BeginChild(ctx, '##ttswrap', -1, 200, V5.frame_flags()) then
+    local rv, txt = V5.script_box(ctx, '##ttstext', V5.tts_text or '', tview, 6)
+    if rv then V5.tts_text = txt end
+    reaper.ImGui_EndChild(ctx)
+  end
   if pushedf then _pop_font(ctx) end
-  if rv then V5.tts_text = txt end
 
   if reaper.ImGui_SmallButton(ctx, 'Paste from clipboard##tts') then
     local t = reaper.ImGui_GetClipboardText and
@@ -7517,7 +7456,16 @@ local function ui_phase_review(ctx)
   local view = "tags"
   local tagged = V5.tags_usable() or _review.has_tags
   if tagged then view = V5.view_switch(ctx, "review") end
-  if not tagged then
+  if tagged and not _review.has_tags then
+    -- 0.15.14: tags are on but this script has none (made by an older
+    -- version, or the tagging call failed) — add them here.
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Add voice tags##rvtag') then
+      V5.start_add_tags(true)
+    end
+    reaper.ImGui_SameLine(ctx)
+    _grey_hint(ctx, 'This script has no voice tags yet.')
+  elseif not tagged then
     -- No voice tags in this setup: one plain editor, nothing to switch.
   elseif view == "tags" then
     reaper.ImGui_SameLine(ctx)
@@ -8086,7 +8034,7 @@ function V5.ui_source_inputs(ctx)
     -- A tall script scrolls in its own frame instead of growing the page.
     local pushedf = _push_font(ctx, 17)
     if reaper.ImGui_BeginChild(ctx, '##providedwrap', -1, 220,
-                               _child_border_flag()) then
+                               V5.frame_flags()) then
       local rv2, txt = V5.script_box(ctx, '##provided', _provided_text or '',
                                      pview, 6)
       if rv2 then _provided_text = txt end
@@ -8094,7 +8042,8 @@ function V5.ui_source_inputs(ctx)
     end
     if pushedf then _pop_font(ctx) end
 
-    reaper.ImGui_SameLine(ctx, V5.LABEL_W)
+    -- Buttons on their own row UNDER the box: SameLine here put them on top
+    -- of the script frame, which then swallowed every click.
     if reaper.ImGui_SmallButton(ctx, 'Paste##prov') then
       local t = reaper.ImGui_GetClipboardText(ctx)
       if t and t:match("%S") then
@@ -8143,36 +8092,50 @@ end
 -- 0.15.14 "Add voice tags": write the paste box to the audio's run folder
 -- (Indic text never travels on argv) and run the engine's --add-tags.
 -- The result comes back into the paste box (see _finish_run).
-function V5.start_add_tags()
+-- *review* (0.15.14): tag the script under review instead of the paste
+-- box — for a review whose translate step ran without tags (an older
+-- version, a failed tagging call, a setup that had tags off).
+function V5.start_add_tags(review)
   ui_clear_banner()
-  if not (_provided_text or ""):match("%S") then
-    ui_set_banner("warn", "Paste your script first, then add the tags.")
-    return false
+  local text, path
+  if review then
+    text = review_collect_text()
+    path = V5.layout_path(_review.manifest.out_dir or "", "script",
+                          _review.base .. "_script_for_tags.txt")
+  else
+    text = _provided_text or ""
+    if not text:match("%S") then
+      ui_set_banner("warn", "Paste your script first, then add the tags.")
+      return false
+    end
+    local audio = LAST_AUDIO or ""
+    if audio == "" or not file_exists(audio) then
+      ui_set_banner("error", "Pick the English audio first — the script is " ..
+                             "saved next to its run files.")
+      return false
+    end
+    local out_dir, tidy = V5.out_dir_for(audio)
+    if tidy then V5.make_tidy_root(out_dir)
+    else reaper.RecursiveCreateDirectory(out_dir, 0) end
+    path = V5.layout_path(out_dir, "script",
+                          V5.audio_base(audio) .. "_script_for_tags.txt")
   end
-  local audio = LAST_AUDIO or ""
-  if audio == "" or not file_exists(audio) then
-    ui_set_banner("error", "Pick the English audio first — the script is " ..
-                           "saved next to its run files.")
-    return false
-  end
-  local out_dir, tidy = V5.out_dir_for(audio)
-  if tidy then V5.make_tidy_root(out_dir)
-  else reaper.RecursiveCreateDirectory(out_dir, 0) end
-  local path = V5.layout_path(out_dir, "script",
-                              V5.audio_base(audio) .. "_script_for_tags.txt")
+  V5.tags_for_review = review and true or false
   local f = io.open(path, "wb")
   if not f then
     ui_set_banner("error", "Could not write:\n" .. path)
     return false
   end
-  local body = _provided_text:gsub("\r\n", "\n")
+  local body = text:gsub("\r\n", "\n")
   if body:sub(-1) ~= "\n" then body = body .. "\n" end
   f:write(body)
   f:close()
   local py = preflight_engine()
   if not py then return false end
+  local lang = (review and (_review.manifest.language or "") ~= ""
+                and _review.manifest.language) or LANGUAGE
   local cmd = build_engine_cmd(py, {
-    add_tags = true, language = LANGUAGE, text_file = path,
+    add_tags = true, language = lang, text_file = path,
   })
   _util_return_phase = _ui_phase
   return launch_engine(cmd, "add_tags", {
@@ -8832,6 +8795,12 @@ end
 -- again when you press Start.
 function V5.ui_header(ctx)
   V5.ui_update_notice(ctx)
+  if V5.jsapi_state == "restart" then
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x66CCFFFF)
+    reaper.ImGui_TextWrapped(ctx, 'Correct Indic letters are ready: restart ' ..
+      'REAPER once to switch them on.')
+    reaper.ImGui_PopStyleColor(ctx)
+  end
   -- v0.15.7: the version moved into the top tab's label.
   local why = V5.llm_creds_error()
   local no_voice_key = (EL_KEY or '') == ''
@@ -9494,6 +9463,8 @@ local function main()
     if _ui_phase == "running" then poll_engine() end
     -- v0.15.3: a multi-chunk batch waits here between chunks.
     V5.regen_queue_tick()
+    V5.joined_font_tick()
+    V5.jsapi_tick()
     -- v0.5: the embedded Auto Sync run polls every frame too — it is
     -- independent of the dub run and of which tab is showing.
     if V5.SYNC then V5.SYNC.poll() end
