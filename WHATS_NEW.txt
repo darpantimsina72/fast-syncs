@@ -27,3 +27,5 @@
 next | Review with no tags had no way to add them | "Add voice tags" button on the review screen
 next | Tags lost when the AI merged paragraphs | Tags added paragraph by paragraph instead
 next | "Add voice tags" by the pasted script did nothing | Button works
+next | Text to Speech box had no tag view | Script / Script + tags switch and tag buttons there too
+next | Auto Sync script box: tags mixed in, no wrap | Same two views; tags ignored when matching

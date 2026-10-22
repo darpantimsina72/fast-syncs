@@ -737,6 +737,14 @@ do
                                  .. "error_explain.lua")
   if ok and type(mod) == "table" then EX = mod end
 end
+-- 0.15.14+: the shared script editor (two views, wrapped box). nil when
+-- the file is missing — the plain box below is used then.
+local SK = nil
+do
+  local ok, mod = pcall(dofile, get_script_dir() .. package.config:sub(1, 1)
+                                 .. "script_kit.lua")
+  if ok and type(mod) == "table" then SK = mod end
+end
 local _ui_notes   = nil   -- warnings on a FINISHED run ("Finished, but …")
 local _fb_card    = nil   -- created lazily (find_python is defined below)
 local _fb_project = nil   -- REAPER project the running sync belongs to
@@ -998,7 +1006,9 @@ local function write_config(en_items, dub_items, results_path)
   -- Optional dubbing-script content. We pass it inline as script_text so
   -- the user doesn't need to type a file path in the dialog.
   if SCRIPT_TEXT and SCRIPT_TEXT ~= "" then
-    lines[#lines+1] = string.format('  "script_text": "%s",', esc(SCRIPT_TEXT))
+    -- Voice tags ([calm]…) mean nothing to the matcher — send the words.
+    local words = SK and SK.tags_strip(SCRIPT_TEXT) or SCRIPT_TEXT
+    lines[#lines+1] = string.format('  "script_text": "%s",', esc(words))
   end
 
   -- EN items array
@@ -1467,8 +1477,24 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
   if script_open then
     reaper.ImGui_Indent(ctx, 12)
     local rv
-    rv, SCRIPT_TEXT = reaper.ImGui_InputTextMultiline(
-      ctx, '##script', SCRIPT_TEXT or '', -1, 140)
+    if SK then
+      -- A script pasted from a dub may carry voice tags: same two views as
+      -- the dub panel. Matching always uses the words only.
+      local view = "tags"
+      if SK.has_tags(SCRIPT_TEXT) then
+        view = SK.view_switch(ctx, "autosync")
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_TextDisabled(ctx, 'tags are ignored for matching')
+      end
+      if reaper.ImGui_BeginChild(ctx, '##scriptwrap', -1, 140, _child_border_flag()) then
+        local changed, txt = SK.script_box(ctx, '##script', SCRIPT_TEXT or '', view, 5)
+        if changed then SCRIPT_TEXT = txt end
+        reaper.ImGui_EndChild(ctx)
+      end
+    else
+      rv, SCRIPT_TEXT = reaper.ImGui_InputTextMultiline(
+        ctx, '##script', SCRIPT_TEXT or '', -1, 140)
+    end
     reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x8899AAFF)
     if SCRIPT_TEXT and SCRIPT_TEXT ~= '' then
       reaper.ImGui_Text(ctx, string.format('%d chars · paragraphs preserved', #SCRIPT_TEXT))
