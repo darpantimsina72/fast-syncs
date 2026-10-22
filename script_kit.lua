@@ -146,7 +146,16 @@ M.ed_cache = {}
 function M.script_box(ctx, id, text, view, min_lines)
   text = text or ""
   local avail = select(1, reaper.ImGui_GetContentRegionAvail(ctx)) or 400
-  local width = avail - 22          -- frame padding + a scrollbar's room
+  -- Usable text width = box width minus its inner padding on both sides
+  -- and room for a scrollbar, read from the live style (themes differ).
+  local pad, sb = 8, 14
+  if reaper.ImGui_GetStyleVar and reaper.ImGui_StyleVar_FramePadding then
+    pad = (reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding())) or pad
+  end
+  if reaper.ImGui_GetStyleVar and reaper.ImGui_StyleVar_ScrollbarSize then
+    sb = (reaper.ImGui_GetStyleVar(ctx, reaper.ImGui_StyleVar_ScrollbarSize())) or sb
+  end
+  local width = avail - 2 * pad - sb - 12
   local c = M.ed_cache[id]
   if not (c and c.src == text and c.view == view and c.w == width) then
     if not (c and c.active) then
