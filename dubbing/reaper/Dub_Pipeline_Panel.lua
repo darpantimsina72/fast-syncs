@@ -6871,7 +6871,7 @@ function V5.ui_tts_tab(ctx)
     if tview == "tags" then V5.tag_chips(ctx, "tt") end
   end
   local pushedf = _push_font(ctx, 17)
-  if reaper.ImGui_BeginChild(ctx, '##ttswrap', -1, 200, _child_border_flag()) then
+  if reaper.ImGui_BeginChild(ctx, '##ttswrap', -1, 200, V5.frame_flags()) then
     local rv, txt = V5.script_box(ctx, '##ttstext', V5.tts_text or '', tview, 6)
     if rv then V5.tts_text = txt end
     reaper.ImGui_EndChild(ctx)
@@ -7933,7 +7933,7 @@ function V5.ui_source_inputs(ctx)
     -- A tall script scrolls in its own frame instead of growing the page.
     local pushedf = _push_font(ctx, 17)
     if reaper.ImGui_BeginChild(ctx, '##providedwrap', -1, 220,
-                               _child_border_flag()) then
+                               V5.frame_flags()) then
       local rv2, txt = V5.script_box(ctx, '##provided', _provided_text or '',
                                      pview, 6)
       if rv2 then _provided_text = txt end

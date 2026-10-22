@@ -21,5 +21,10 @@ eq(M.tags_merge(T, M.tags_strip(T)),
 eq(M.tags_merge("plain words", "plain new words"), "plain new words", "no tags")
 local w = M.soft_wrap(nil, "alpha beta gamma delta epsilon zeta", 80)
 eq(M.soft_unwrap(w), "alpha beta gamma delta epsilon zeta", "wrap round trip")
+-- Live wrap: break goes right after the last space that fits (7 px/char,
+-- width 80 -> 11 chars), never inside a word.
+eq(tostring(M.next_break(nil, "alpha beta gamma", 80)), "11", "live break offset")
+eq(tostring(M.next_break(nil, "short", 80)), "nil", "no break needed")
+eq(tostring(M.next_break(nil, "averyveryverylongword", 80)), "nil", "long word kept whole")
 print(fails == 0 and "ALL PASS" or (fails .. " FAILED"))
 os.exit(fails == 0 and 0 or 1)

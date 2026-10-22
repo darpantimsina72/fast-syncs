@@ -1486,7 +1486,7 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
         reaper.ImGui_SameLine(ctx)
         reaper.ImGui_TextDisabled(ctx, 'tags are ignored for matching')
       end
-      if reaper.ImGui_BeginChild(ctx, '##scriptwrap', -1, 140, _child_border_flag()) then
+      if reaper.ImGui_BeginChild(ctx, '##scriptwrap', -1, 140, SK.frame_flags()) then
         local changed, txt = SK.script_box(ctx, '##script', SCRIPT_TEXT or '', view, 5)
         if changed then SCRIPT_TEXT = txt end
         reaper.ImGui_EndChild(ctx)

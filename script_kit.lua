@@ -161,17 +161,80 @@ function M.script_box(ctx, id, text, view, min_lines)
   n = math.max(n, min_lines or 2)
   local lh = (reaper.ImGui_GetTextLineHeight and
               reaper.ImGui_GetTextLineHeight(ctx)) or 18
-  local rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1,
-                                                  n * lh + 12)
+  local cb = M._wrap_cb(ctx)
+  local rv, txt
+  if cb then
+    rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1, n * lh + 12,
+      reaper.ImGui_InputTextFlags_CallbackAlways(), cb)
+  else
+    rv, txt = reaper.ImGui_InputTextMultiline(ctx, id, c.disp, -1, n * lh + 12)
+  end
   c.active = reaper.ImGui_IsItemActive(ctx)
   if rv then
     c.disp = txt
+    -- Wrap WHILE typing: the line being typed past the edge gets a soft
+    -- break after its last fitting space, inserted by the callback on the
+    -- next frame (the box owns its text while it has focus, so it cannot
+    -- simply be replaced). Words are never split.
+    local at = cb and M.next_break(ctx, txt, width)
+    if at then reaper.ImGui_Function_SetValue(cb, "want", at) end
     local flat = M.soft_unwrap(txt)
     local new = (view == "plain") and M.tags_merge(text, flat) or flat
     c.src = new
     return true, new
   end
   return false, text
+end
+
+-- Byte offset (0-based, for the callback) just after the last space that
+-- still fits on the first too-long line of *txt*, or nil.
+function M.next_break(ctx, txt, width)
+  if not reaper.ImGui_CalcTextSize then return nil end
+  local pos = 1
+  for line in (txt .. "\n"):gmatch("(.-)\n") do
+    if reaper.ImGui_CalcTextSize(ctx, line) > width then
+      local best
+      for k in line:gmatch("() ") do
+        if k > 1 and reaper.ImGui_CalcTextSize(ctx, line:sub(1, k - 1)) <= width then
+          best = k
+        end
+      end
+      if best then return pos + best - 1 end
+    end
+    pos = pos + #line + 1
+  end
+  return nil
+end
+
+-- The EEL callback that inserts a soft break ("\n" after a space) at the
+-- offset Lua asks for. Made once per ReaImGui context; nil when this
+-- ReaImGui lacks EEL callbacks (then wrapping waits for a click-out).
+M._cbs = {}
+function M._wrap_cb(ctx)
+  local have = M._cbs[ctx]
+  if have ~= nil then return have or nil end
+  local fn = false
+  if reaper.ImGui_CreateFunctionFromEEL and reaper.ImGui_Attach
+     and reaper.ImGui_InputTextFlags_CallbackAlways
+     and reaper.ImGui_Function_SetValue then
+    local ok, f = pcall(reaper.ImGui_CreateFunctionFromEEL,
+      'want >= 0 ? ( InputTextCallback_InsertChars(want, "\\n"); want = -1; );')
+    if ok and f then
+      reaper.ImGui_Attach(ctx, f)
+      reaper.ImGui_Function_SetValue(f, "want", -1)
+      fn = f
+    end
+  end
+  M._cbs[ctx] = fn
+  return fn or nil
+end
+
+-- Child-window flags for a script frame the editor can drag taller (bottom
+-- edge) as well as the window wider.
+function M.frame_flags()
+  local f = reaper.ImGui_ChildFlags_Borders and reaper.ImGui_ChildFlags_Borders() or 1
+  if reaper.ImGui_ChildFlags_ResizeY then f = f | reaper.ImGui_ChildFlags_ResizeY() end
+  return f
 end
 
 -- The "Script | Script + tags" switch. *key* names whose view it sets.
