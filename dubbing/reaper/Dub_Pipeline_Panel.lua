@@ -4232,8 +4232,8 @@ end
 
 -- 0.15.10: after every redo, (re)write the whole script as it now stands —
 -- every chunk on the redone chunk's track, in timeline order, one chunk per
--- line — to "<name>_FinalScript_after_redo.txt" in the run folder, next to
--- the engine's own <name>_FinalScript.txt. A redo changes the words only on
+-- line — to "final script (after redo).txt" in the run folder, next to
+-- the engine's own "final script.txt". A redo changes the words only on
 -- the timeline (and in one small regen/chunk_N.txt), so without this there is
 -- no single file with the script that was actually spoken.
 -- Rebuilt from the timeline each time, so it is always complete and current.
@@ -4271,15 +4271,12 @@ function V5.write_final_script(track, dir)
       if txt ~= "" then last = txt end
     end
     if #lines == 0 then return nil end
-    local base, p
+    -- 0.15.15: one plainly-named file, matching the engine's "final script".
+    local p
     if V5.is_tidy(dir) then
-      local _, tn = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
-      -- (inline: _sanitize_filename is declared further down the file)
-      base = ((tn and tn ~= "") and tn or "dub"):gsub("[^%w%-_]", "_")
-      p = V5.layout_path(dir, "script", base .. "_FinalScript_after_redo.txt")
+      p = V5.layout_path(dir, "script", "final script (after redo).txt")
     else
-      base = basename(dir)
-      p = dir .. SEP .. base .. "_FinalScript_after_redo.txt"
+      p = dir .. SEP .. "final script (after redo).txt"
     end
     V5.final_track, V5.final_dir = track, dir
     local body = table.concat(lines, "\n") .. "\n"
@@ -4984,10 +4981,19 @@ local function _finish_run(exit_code)
            and (m.tagged_text or "") ~= "" then
       local t = read_all(m.tagged_text)
       if t and t:match("%S") then
-        _provided_text = _strip_bom(t):gsub("\r\n", "\n")
-        ui_set_banner("info",
-          "Voice tags added to your script. Check them in the box — " ..
-          "change, delete or add tags as needed, then start the run.")
+        t = _strip_bom(t):gsub("\r\n", "\n")
+        if V5.tags_for_review and _review then
+          _review_replace_text(t)
+          save_review_text()
+          V5.views.review = "tags"
+          ui_set_banner("info", "Voice tags added to the script. Check " ..
+            "them in Script + tags, then continue to dubbing.")
+        else
+          _provided_text = t
+          ui_set_banner("info",
+            "Voice tags added to your script. Check them in the box — " ..
+            "change, delete or add tags as needed, then start the run.")
+        end
       else
         ui_set_banner("error", "The tagged script could not be read:\n" ..
                                m.tagged_text)
@@ -7517,7 +7523,16 @@ local function ui_phase_review(ctx)
   local view = "tags"
   local tagged = V5.tags_usable() or _review.has_tags
   if tagged then view = V5.view_switch(ctx, "review") end
-  if not tagged then
+  if tagged and not _review.has_tags then
+    -- 0.15.14: tags are on but this script has none (made by an older
+    -- version, or the tagging call failed) — add them here.
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, 'Add voice tags##rvtag') then
+      V5.start_add_tags(true)
+    end
+    reaper.ImGui_SameLine(ctx)
+    _grey_hint(ctx, 'This script has no voice tags yet.')
+  elseif not tagged then
     -- No voice tags in this setup: one plain editor, nothing to switch.
   elseif view == "tags" then
     reaper.ImGui_SameLine(ctx)
@@ -8143,36 +8158,50 @@ end
 -- 0.15.14 "Add voice tags": write the paste box to the audio's run folder
 -- (Indic text never travels on argv) and run the engine's --add-tags.
 -- The result comes back into the paste box (see _finish_run).
-function V5.start_add_tags()
+-- *review* (0.15.14): tag the script under review instead of the paste
+-- box — for a review whose translate step ran without tags (an older
+-- version, a failed tagging call, a setup that had tags off).
+function V5.start_add_tags(review)
   ui_clear_banner()
-  if not (_provided_text or ""):match("%S") then
-    ui_set_banner("warn", "Paste your script first, then add the tags.")
-    return false
+  local text, path
+  if review then
+    text = review_collect_text()
+    path = V5.layout_path(_review.manifest.out_dir or "", "script",
+                          _review.base .. "_script_for_tags.txt")
+  else
+    text = _provided_text or ""
+    if not text:match("%S") then
+      ui_set_banner("warn", "Paste your script first, then add the tags.")
+      return false
+    end
+    local audio = LAST_AUDIO or ""
+    if audio == "" or not file_exists(audio) then
+      ui_set_banner("error", "Pick the English audio first — the script is " ..
+                             "saved next to its run files.")
+      return false
+    end
+    local out_dir, tidy = V5.out_dir_for(audio)
+    if tidy then V5.make_tidy_root(out_dir)
+    else reaper.RecursiveCreateDirectory(out_dir, 0) end
+    path = V5.layout_path(out_dir, "script",
+                          V5.audio_base(audio) .. "_script_for_tags.txt")
   end
-  local audio = LAST_AUDIO or ""
-  if audio == "" or not file_exists(audio) then
-    ui_set_banner("error", "Pick the English audio first — the script is " ..
-                           "saved next to its run files.")
-    return false
-  end
-  local out_dir, tidy = V5.out_dir_for(audio)
-  if tidy then V5.make_tidy_root(out_dir)
-  else reaper.RecursiveCreateDirectory(out_dir, 0) end
-  local path = V5.layout_path(out_dir, "script",
-                              V5.audio_base(audio) .. "_script_for_tags.txt")
+  V5.tags_for_review = review and true or false
   local f = io.open(path, "wb")
   if not f then
     ui_set_banner("error", "Could not write:\n" .. path)
     return false
   end
-  local body = _provided_text:gsub("\r\n", "\n")
+  local body = text:gsub("\r\n", "\n")
   if body:sub(-1) ~= "\n" then body = body .. "\n" end
   f:write(body)
   f:close()
   local py = preflight_engine()
   if not py then return false end
+  local lang = (review and (_review.manifest.language or "") ~= ""
+                and _review.manifest.language) or LANGUAGE
   local cmd = build_engine_cmd(py, {
-    add_tags = true, language = LANGUAGE, text_file = path,
+    add_tags = true, language = lang, text_file = path,
   })
   _util_return_phase = _ui_phase
   return launch_engine(cmd, "add_tags", {

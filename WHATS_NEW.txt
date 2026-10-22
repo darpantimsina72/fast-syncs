@@ -22,3 +22,5 @@
 0.15.14 | Log full of technical lines | Simple log: each step Done / Now / Next
 0.15.14 | Closing the window lost the screen | Reopening goes back to where you were
 0.15.14 | "?" boxes on buttons | Clean button labels
+0.15.15 | Review with no tags had no way to add them | "Add voice tags" button on the review screen
+0.15.15 | Tags lost when the AI merged paragraphs | Tags added paragraph by paragraph instead
