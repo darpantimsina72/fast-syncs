@@ -35,3 +35,4 @@
 0.15.15 | Text add-on installed by hand | Installed by itself; restart REAPER once
 0.15.16 | Tag buttons only in Script + tags | Tag buttons in both views; paste a tag anywhere
 next | Voice tags guessed from the words only | Tags follow the real English pauses and pace
+next | Error 524 blamed the video length | Error 524 says the AI server was slow, and what to do
