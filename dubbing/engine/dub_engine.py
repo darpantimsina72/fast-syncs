@@ -487,6 +487,20 @@ def _emotion_enabled(args) -> bool:
     return True
 
 
+def _tags_follow_audio() -> bool:
+    """0.15.17 test switch: let the Step-4 tags follow the measured English
+    delivery (see _delivery_notes). ON unless engine_settings.json says
+    {"tags_follow_audio": false}."""
+    try:
+        with open(ENGINE_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and "tags_follow_audio" in data:
+            return bool(data["tags_follow_audio"])
+    except Exception:
+        pass
+    return True
+
+
 def _sync_mode(args) -> str:
     """v0.7 sync-mode toggle: --sync-mode CLI flag > 'sync_mode' key in
     engine_settings.json > 'match' (the new default)."""
@@ -1776,7 +1790,44 @@ def _without_tags(text) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
 
 
-def _tag_review_text(pl, args, tr_text, say=None):
+def _delivery_notes(pl, ctx) -> str:
+    """How the ENGLISH was actually delivered, for the tagging call.
+
+    Step 4 used to see the translated words only, so its [pause]/[slow] were
+    guessed from meaning. The S1b analysis of the real audio already has, per
+    English segment, how long it took, the silence after it and the speaking
+    pace — so the tags can follow the speaker instead. Text only: the audio
+    itself is never uploaded (the LLM may sit behind an OpenAI-compatible
+    gateway that takes text).
+
+    Returns "" when the analysis is unavailable; the caller then tags as
+    before.
+    """
+    try:
+        srt = ctx.get("final_srt") or ""
+        rows = [ln for ln in pl._parse_srt_to_analysis_format(srt).splitlines()
+                if ln.strip()]
+    except Exception:
+        return ""
+    if len(rows) < 2:
+        return ""
+    return (
+        "=== HOW THE ENGLISH SPEAKER ACTUALLY DELIVERED THIS ===\n"
+        "Measured from the English recording. One line per English segment:\n"
+        + "\n".join(rows[:200]) + "\n"
+        "Use it to place the tags where the speaker really slowed down or "
+        "stopped: a long [Gap after segment] is a real silence, so put "
+        "[pause] before the sentence that follows it; a low [Relative number "
+        "of syllables per second] means that stretch was spoken slowly, so "
+        "[slow]. The segments are English and do not line up one-to-one with "
+        "the paragraphs below — follow the order and the shape of the "
+        "delivery, not a strict mapping.\n"
+        "=== END OF DELIVERY NOTES. Tag ONLY the script that follows; never "
+        "output these notes. ===\n"
+    )
+
+
+def _tag_review_text(pl, args, tr_text, say=None, delivery=""):
     """Add Step-4 tags to the review translation, paragraph for paragraph.
 
     Returns (tagged_text, n_untagged) or (None, reason). The review file must
@@ -1794,8 +1845,8 @@ def _tag_review_text(pl, args, tr_text, say=None):
     say = say or (lambda m: _say("S2c", m))
     try:
         tagged = pl._run_emotion_enrichment(
-            tr_text, language=args.language, model=pl.GEMINI_DEFAULT_MODEL,
-            status_cb=say, strict=True)
+            (delivery or "") + tr_text, language=args.language,
+            model=pl.GEMINI_DEFAULT_MODEL, status_cb=say, strict=True)
     except Exception as e:
         return None, f"the tagging call failed ({e})"
     blocks = [b.strip() for b in re.split(r"\n\s*\n", (tagged or "").strip())
@@ -1899,7 +1950,11 @@ def _run_translate(args, manifest):
     elif _tags_before_review(args, ctx["vb"]):
         _say("S2c", "Adding voice tags ([calm], [pause]…) so they can be "
                     "checked at review…")
-        tagged, info = _tag_review_text(pl, args, tr_text)
+        delivery = _delivery_notes(pl, ctx) if _tags_follow_audio() else ""
+        if delivery:
+            _say("S2c", "Tags will follow how the English was actually "
+                        "spoken (real pauses and pace).")
+        tagged, info = _tag_review_text(pl, args, tr_text, delivery=delivery)
         if tagged is None:
             _say("S2c", f"WARNING: voice tags could not be added for review "
                         f"— {info}. The review shows the plain translation; "

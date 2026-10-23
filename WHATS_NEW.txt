@@ -34,3 +34,4 @@
 0.15.15 | Indic letters drawn broken in script boxes | Letters joined correctly, also while typing
 0.15.15 | Text add-on installed by hand | Installed by itself; restart REAPER once
 0.15.16 | Tag buttons only in Script + tags | Tag buttons in both views; paste a tag anywhere
+next | Voice tags guessed from the words only | Tags follow the real English pauses and pace
