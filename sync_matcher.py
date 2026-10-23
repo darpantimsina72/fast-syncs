@@ -1322,6 +1322,45 @@ _OPENAI_KEY    = None
 _ANTHROPIC_KEY = None
 
 
+def _sse_content(resp) -> str:
+    """Text of an OpenAI-style streamed reply, read chunk by chunk. Falls
+    back to a whole-body JSON parse when the server ignored "stream"."""
+    checked = False
+    parts = []
+    for raw_line in resp:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if not checked:
+            checked = True
+            # ":" lines are SSE keep-alive comments — real gateways send them
+            # while the model thinks, and they are what keeps Cloudflare from
+            # cutting the request off. Only a line that is neither a comment
+            # nor "data:" means the server answered the ordinary way.
+            if not line.startswith(b"data:") and not line.startswith(b":"):
+                body = (line + b"\n" + resp.read()).decode("utf-8", "replace")
+                try:
+                    return json.loads(body)["choices"][0]["message"]["content"] or ""
+                except Exception:
+                    return ""
+        if not line.startswith(b"data:"):
+            continue
+        chunk = line[5:].strip()
+        if chunk == b"[DONE]":
+            break
+        try:
+            obj = json.loads(chunk)
+        except ValueError:
+            continue
+        for ch in obj.get("choices") or []:
+            piece = (ch.get("delta") or {}).get("content")
+            if piece is None:
+                piece = (ch.get("message") or {}).get("content")
+            if piece:
+                parts.append(piece)
+    return "".join(parts)
+
+
 def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1):
     """Send the matcher prompt to an OpenAI-compatible gateway serving Gemini.
 
@@ -1340,11 +1379,19 @@ def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1)
               "(your gateway/Gemini key) — aborting")
         return None
 
+    # Streamed on purpose: a gateway behind Cloudflare only answers a
+    # non-streaming request once the whole reply is ready, and a 39k-char
+    # match prompt takes minutes — Cloudflare gives up at ~100 s with HTTP
+    # 524 (2026-10-23 runs). Streaming puts the first bytes on the wire at
+    # once, so the request is never cut off. SYNC_LLM_STREAM=0 turns it off.
+    streaming = os.environ.get("SYNC_LLM_STREAM", "1") != "0"
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt_text}],
         "temperature": temperature,
     }
+    if streaming:
+        payload["stream"] = True
     data = json.dumps(payload).encode("utf-8")
     urls = _gateway_urls(base_url)
     for i, url in enumerate(urls):
@@ -1364,8 +1411,11 @@ def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1)
             print(f"    [GATEWAY] Sending {len(prompt_text)} chars to {model} "
                   f"via {url}…")
             with _urlopen(req, timeout=180) as resp:
-                result = json.loads(resp.read())
-            text = (result["choices"][0]["message"]["content"] or "").strip()
+                if streaming:
+                    text = _sse_content(resp).strip()
+                else:
+                    result = json.loads(resp.read())
+                    text = (result["choices"][0]["message"]["content"] or "").strip()
             print(f"    [GATEWAY] Got {len(text)} chars in {time.time()-t0:.1f}s")
             return text or None
         except urllib.error.HTTPError as e:
