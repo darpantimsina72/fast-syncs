@@ -390,6 +390,65 @@ def _llm_wait(url: str, attempt: int, attempts: int, detail: str) -> None:
     time.sleep(delay)
 
 
+def _stream_enabled() -> bool:
+    """Streaming is ON unless llm_settings.json says {"stream": false}.
+
+    Why it matters: a gateway behind Cloudflare answers a non-streaming
+    request only when the whole reply is ready. Our prompts take minutes,
+    Cloudflare gives up at ~100 s and returns HTTP 524 — which is why an
+    ordinary chat app on the SAME gateway works (it streams) while a dub or
+    a sync run failed. Streaming puts the first bytes on the wire in a
+    second or two, so the request is never cut off.
+    """
+    try:
+        return bool(_get_llm_settings().get("stream", True))
+    except Exception:
+        return True
+
+
+def _sse_content(resp) -> str:
+    """Text of an OpenAI-style streamed reply, read chunk by chunk.
+
+    Falls back to a whole-body JSON parse when the server ignored
+    "stream" and answered the ordinary way. Returns "" when neither shape
+    yields content, so the caller can report the raw body.
+    """
+    checked = False
+    parts = []
+    for raw_line in resp:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if not checked:
+            checked = True
+            # ":" lines are SSE keep-alive comments — real gateways send them
+            # while the model thinks, and they are what keeps Cloudflare from
+            # cutting the request off. Only a line that is neither a comment
+            # nor "data:" means the server answered the ordinary way.
+            if not line.startswith(b"data:") and not line.startswith(b":"):
+                body = (line + b"\n" + resp.read()).decode("utf-8", "replace")
+                try:
+                    return json.loads(body)["choices"][0]["message"]["content"] or ""
+                except Exception:
+                    return ""
+        if not line.startswith(b"data:"):
+            continue
+        chunk = line[5:].strip()
+        if chunk == b"[DONE]":
+            break
+        try:
+            obj = json.loads(chunk)
+        except ValueError:
+            continue
+        for ch in obj.get("choices") or []:
+            piece = (ch.get("delta") or {}).get("content")
+            if piece is None:
+                piece = (ch.get("message") or {}).get("content")
+            if piece:
+                parts.append(piece)
+    return "".join(parts)
+
+
 def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
                  attempts: Optional[int] = None) -> str:
     """Single-turn /v1/chat/completions call against the configured base URL.
@@ -410,11 +469,14 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
     api_key = (s.get("openai_api_key") or "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    payload = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode("utf-8")
+    streaming = _stream_enabled()
+    body = {"model": model,
+            "messages": [{"role": "user", "content": prompt}]}
+    if streaming:
+        body["stream"] = True
+    payload = json.dumps(body).encode("utf-8")
     raw = final_url = sent_url = None
+    streamed = None
     for i, url in enumerate(urls):
         try_next_url = False
         for attempt in range(1, attempts + 1):
@@ -423,8 +485,12 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
                                          method="POST")
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    raw       = resp.read().decode("utf-8", "replace")
                     final_url = resp.geturl()
+                    if streaming:
+                        streamed = _sse_content(resp)
+                        raw = ""
+                    else:
+                        raw = resp.read().decode("utf-8", "replace")
                 sent_url = url
                 break
             except urllib.error.HTTPError as e:
@@ -480,6 +546,10 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
         if not try_next_url:
             break
     url = sent_url or urls[-1]
+    if streaming:
+        if streamed:
+            return streamed
+        raise ValueError(f"{url} returned an empty streamed reply.")
     try:
         data = json.loads(raw)
     except ValueError:

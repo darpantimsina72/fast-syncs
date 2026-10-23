@@ -35,3 +35,4 @@
 0.15.15 | Text add-on installed by hand | Installed by itself; restart REAPER once
 0.15.16 | Tag buttons only in Script + tags | Tag buttons in both views; paste a tag anywhere
 0.15.17 | Error 524 blamed the video length | Error 524 says the AI server was slow, and what to do
+0.15.17 | Big AI requests died at 100s with error 524 | Replies stream in, so long requests no longer time out
