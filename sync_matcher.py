@@ -304,6 +304,10 @@ _GEMINI_AUDIO_MODEL   = os.environ.get("SYNC_GEMINI_AUDIO_MODEL", "gemini-2.5-fl
 # this mode is a Bearer token (often "sk-..."), NOT a Google "AIza..." key.
 _GEMINI_BASE_URL = os.environ.get("SYNC_GEMINI_BASE_URL", "").rstrip("/")
 
+# Set once if the gateway rejects the reasoning_effort hint, so the rest of
+# the run stops sending it instead of retrying on every call.
+_GATEWAY_NO_EFFORT = False
+
 # Browser agent string for the gateway path. Cloudflare-fronted gateways deny
 # the default "Python-urllib/x.y" agent with a 403 / "error code: 1010" before
 # the request ever reaches the model. Override with SYNC_HTTP_USER_AGENT.
@@ -1322,6 +1326,45 @@ _OPENAI_KEY    = None
 _ANTHROPIC_KEY = None
 
 
+def _sse_content(resp) -> str:
+    """Text of an OpenAI-style streamed reply, read chunk by chunk. Falls
+    back to a whole-body JSON parse when the server ignored "stream"."""
+    checked = False
+    parts = []
+    for raw_line in resp:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if not checked:
+            checked = True
+            # ":" lines are SSE keep-alive comments — real gateways send them
+            # while the model thinks, and they are what keeps Cloudflare from
+            # cutting the request off. Only a line that is neither a comment
+            # nor "data:" means the server answered the ordinary way.
+            if not line.startswith(b"data:") and not line.startswith(b":"):
+                body = (line + b"\n" + resp.read()).decode("utf-8", "replace")
+                try:
+                    return json.loads(body)["choices"][0]["message"]["content"] or ""
+                except Exception:
+                    return ""
+        if not line.startswith(b"data:"):
+            continue
+        chunk = line[5:].strip()
+        if chunk == b"[DONE]":
+            break
+        try:
+            obj = json.loads(chunk)
+        except ValueError:
+            continue
+        for ch in obj.get("choices") or []:
+            piece = (ch.get("delta") or {}).get("content")
+            if piece is None:
+                piece = (ch.get("message") or {}).get("content")
+            if piece:
+                parts.append(piece)
+    return "".join(parts)
+
+
 def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1):
     """Send the matcher prompt to an OpenAI-compatible gateway serving Gemini.
 
@@ -1331,6 +1374,7 @@ def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1)
     response_format is forced — not all gateways accept it; the prompt already
     asks for JSON and the callers strip ``` fences.
     """
+    global _GATEWAY_NO_EFFORT
     if not base_url:
         print("    [GATEWAY] backend=gateway but no gateway URL set "
               "(SYNC_GEMINI_BASE_URL) — aborting")
@@ -1340,11 +1384,43 @@ def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1)
               "(your gateway/Gemini key) — aborting")
         return None
 
+    # Streamed on purpose: a gateway behind Cloudflare only answers a
+    # non-streaming request once the whole reply is ready, and a 39k-char
+    # match prompt takes minutes — Cloudflare gives up at ~100 s with HTTP
+    # 524 (2026-10-23 runs). Streaming puts the first bytes on the wire at
+    # once, so the request is never cut off. SYNC_LLM_STREAM=0 turns it off.
+    streaming = os.environ.get("SYNC_LLM_STREAM", "1") != "0"
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt_text}],
         "temperature": temperature,
     }
+    if streaming:
+        payload["stream"] = True
+    # Ask the model not to think for minutes before it says anything.
+    #
+    # Streaming alone does NOT prevent the 100-second Cloudflare cut-off:
+    # a reasoning model sends NOTHING while it thinks, so there is no reply
+    # to stream yet. That is the 2026-10-24 failure — 251 EN + 324 DUB
+    # clips, 36,764 chars, not one byte for 125 s, HTTP 524.
+    #
+    # Measured against the office gateway the same day (gemini-3-flash),
+    # on a 20-pair scrambled-paraphrase matching test:
+    #
+    #     think freely          20/20 correct   first byte 41.2s
+    #     reasoning_effort=low  20/20 correct   first byte  1.2s
+    #
+    # and the real 37,792-char match prompt went from "524 after 125 s" to
+    # a complete 7,077-char reply in 18.5 s. Matching clips is recall, not
+    # deduction: the thinking buys no accuracy here and costs the run.
+    #
+    # Prompt size is NOT the lever — in the same tests a 3,841-char prompt
+    # timed out while a 9,628-char one answered in 10 s. Cutting the video
+    # into parts is therefore not a reliable workaround; this is.
+    # SYNC_REASONING_EFFORT=off restores the old behaviour.
+    effort = (os.environ.get("SYNC_REASONING_EFFORT") or "low").strip().lower()
+    if effort and effort != "off" and not _GATEWAY_NO_EFFORT:
+        payload["reasoning_effort"] = effort
     data = json.dumps(payload).encode("utf-8")
     urls = _gateway_urls(base_url)
     for i, url in enumerate(urls):
@@ -1364,8 +1440,11 @@ def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1)
             print(f"    [GATEWAY] Sending {len(prompt_text)} chars to {model} "
                   f"via {url}…")
             with _urlopen(req, timeout=180) as resp:
-                result = json.loads(resp.read())
-            text = (result["choices"][0]["message"]["content"] or "").strip()
+                if streaming:
+                    text = _sse_content(resp).strip()
+                else:
+                    result = json.loads(resp.read())
+                    text = (result["choices"][0]["message"]["content"] or "").strip()
             print(f"    [GATEWAY] Got {len(text)} chars in {time.time()-t0:.1f}s")
             return text or None
         except urllib.error.HTTPError as e:
@@ -1380,6 +1459,15 @@ def _call_gemini_gateway(prompt_text, api_key, base_url, model, temperature=0.1)
                 print(f"    [GATEWAY] HTTP {e.code} at {url} — retrying "
                       f"{urls[i + 1]}")
                 continue
+            if e.code == 400 and "reasoning_effort" in payload:
+                # This gateway does not know the field. Remember that for
+                # the rest of the run and retry once without it — a speed
+                # hint must never be the reason a run fails.
+                _GATEWAY_NO_EFFORT = True
+                print("    [GATEWAY] HTTP 400 — this gateway does not accept "
+                      "the reasoning_effort hint; retrying without it")
+                return _call_gemini_gateway(prompt_text, api_key, base_url,
+                                            model, temperature)
             hint = ""
             if e.code == 403 and "1010" in err:
                 hint = (" — Cloudflare is blocking this client's user-agent, not "

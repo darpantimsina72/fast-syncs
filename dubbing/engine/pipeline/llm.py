@@ -390,14 +390,95 @@ def _llm_wait(url: str, attempt: int, attempts: int, detail: str) -> None:
     time.sleep(delay)
 
 
+def _stream_enabled() -> bool:
+    """Streaming is ON unless llm_settings.json says {"stream": false}.
+
+    Why it matters: a gateway behind Cloudflare answers a non-streaming
+    request only when the whole reply is ready. Our prompts take minutes,
+    Cloudflare gives up at ~100 s and returns HTTP 524 — which is why an
+    ordinary chat app on the SAME gateway works (it streams) while a dub or
+    a sync run failed. Streaming puts the first bytes on the wire in a
+    second or two, so the request is never cut off.
+    """
+    try:
+        return bool(_get_llm_settings().get("stream", True))
+    except Exception:
+        return True
+
+
+def _sse_content(resp) -> str:
+    """Text of an OpenAI-style streamed reply, read chunk by chunk.
+
+    Falls back to a whole-body JSON parse when the server ignored
+    "stream" and answered the ordinary way. Returns "" when neither shape
+    yields content, so the caller can report the raw body.
+    """
+    checked = False
+    parts = []
+    for raw_line in resp:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if not checked:
+            checked = True
+            # ":" lines are SSE keep-alive comments — real gateways send them
+            # while the model thinks, and they are what keeps Cloudflare from
+            # cutting the request off. Only a line that is neither a comment
+            # nor "data:" means the server answered the ordinary way.
+            if not line.startswith(b"data:") and not line.startswith(b":"):
+                body = (line + b"\n" + resp.read()).decode("utf-8", "replace")
+                try:
+                    return json.loads(body)["choices"][0]["message"]["content"] or ""
+                except Exception:
+                    return ""
+        if not line.startswith(b"data:"):
+            continue
+        chunk = line[5:].strip()
+        if chunk == b"[DONE]":
+            break
+        try:
+            obj = json.loads(chunk)
+        except ValueError:
+            continue
+        for ch in obj.get("choices") or []:
+            piece = (ch.get("delta") or {}).get("content")
+            if piece is None:
+                piece = (ch.get("message") or {}).get("content")
+            if piece:
+                parts.append(piece)
+    return "".join(parts)
+
+
+# Roles whose job is recall and bookkeeping rather than deduction. Asking a
+# reasoning model to think hard about them buys nothing and costs the run: a
+# gateway behind Cloudflare sends NOTHING while the model thinks, so there is
+# no reply to stream, and the request is cut off at ~100 s with HTTP 524.
+#
+# Measured on the office gateway, gemini-3-flash, 2026-10-24, on a 20-pair
+# scrambled-paraphrase matching test:
+#     think freely          20/20 correct   first byte 41.2 s
+#     reasoning_effort=low  20/20 correct   first byte  1.2 s
+# and a full 37,792-char match prompt went from 524-after-125 s to a complete
+# reply in 18.5 s. Translation, review and the voice tags are NOT in this
+# list: those really are deduction and keep their thinking.
+_LOW_EFFORT_ROLES = ("match", "mapping")
+_LOW_EFFORT = "low"
+
+# Set once if the gateway rejects the hint, so the rest of the run stops
+# sending it. A speed hint must never be why a run fails.
+_GATEWAY_NO_EFFORT = False
+
+
 def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
-                 attempts: Optional[int] = None) -> str:
+                 attempts: Optional[int] = None,
+                 effort: Optional[str] = None) -> str:
     """Single-turn /v1/chat/completions call against the configured base URL.
 
     Transient network and 5xx failures are retried up to *attempts* times with
     a growing backoff. Pass attempts=1 for a probe that should report a broken
     configuration immediately instead of waiting out the backoff.
     """
+    global _GATEWAY_NO_EFFORT
     s = _get_llm_settings()
     urls = _openai_api_urls(s.get("openai_base_url") or "")
     model = (model or "").strip()
@@ -410,11 +491,16 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
     api_key = (s.get("openai_api_key") or "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    payload = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode("utf-8")
+    streaming = _stream_enabled()
+    body = {"model": model,
+            "messages": [{"role": "user", "content": prompt}]}
+    if effort and not _GATEWAY_NO_EFFORT:
+        body["reasoning_effort"] = effort
+    if streaming:
+        body["stream"] = True
+    payload = json.dumps(body).encode("utf-8")
     raw = final_url = sent_url = None
+    streamed = None
     for i, url in enumerate(urls):
         try_next_url = False
         for attempt in range(1, attempts + 1):
@@ -423,8 +509,12 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
                                          method="POST")
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    raw       = resp.read().decode("utf-8", "replace")
                     final_url = resp.geturl()
+                    if streaming:
+                        streamed = _sse_content(resp)
+                        raw = ""
+                    else:
+                        raw = resp.read().decode("utf-8", "replace")
                 sent_url = url
                 break
             except urllib.error.HTTPError as e:
@@ -439,6 +529,14 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
                 if e.code in (404, 405) and i + 1 < len(urls):
                     try_next_url = True
                     break
+                if e.code == 400 and "reasoning_effort" in body:
+                    # This gateway does not know the speed hint. Stop
+                    # sending it for the rest of the run and retry at once.
+                    _GATEWAY_NO_EFFORT = True
+                    _llm_log("this gateway does not accept the "
+                             "reasoning_effort hint — retrying without it")
+                    return _openai_chat(prompt, model, timeout, attempts,
+                                        effort=None)
                 if e.code == 403 and "1010" in body:
                     raise RuntimeError(
                         f'LLM endpoint {url} returned HTTP 403 with Cloudflare "error '
@@ -480,6 +578,10 @@ def _openai_chat(prompt: str, model: str, timeout: float = 900.0,
         if not try_next_url:
             break
     url = sent_url or urls[-1]
+    if streaming:
+        if streamed:
+            return streamed
+        raise ValueError(f"{url} returned an empty streamed reply.")
     try:
         data = json.loads(raw)
     except ValueError:
@@ -684,7 +786,9 @@ def _llm_generate(prompt: str, model: str = GEMINI_DEFAULT_MODEL,
 
     if provider == LLM_PROVIDER_OPENAI:
         reply = _openai_chat((static_prefix or "") + prompt, eff_model,
-                             attempts=attempts)
+                             attempts=attempts,
+                             effort=(_LOW_EFFORT
+                                     if role in _LOW_EFFORT_ROLES else None))
     else:
         client = _make_genai_client()
         use_cache = s.get("prompt_caching", "1") == "1"
