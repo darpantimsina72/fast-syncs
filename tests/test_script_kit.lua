@@ -26,6 +26,26 @@ eq(M.soft_unwrap(w), "alpha beta gamma delta epsilon zeta", "wrap round trip")
 eq(tostring(M.next_break(nil, "alpha beta gamma", 80)), "11", "live break offset")
 eq(tostring(M.next_break(nil, "short", 80)), "nil", "no break needed")
 eq(tostring(M.next_break(nil, "averyveryverylongword", 80)), "nil", "long word kept whole")
+-- A line left by a soft break ends with its space ("word \n"). That space
+-- must not count: if it did, the line looked too long forever and every
+-- frame added an empty line (pasted script grew downward without end).
+eq(tostring(M.next_break(nil, "alpha beta \ngamma", 75)), "nil",
+   "trailing space after a soft break is not a reason to break again")
+-- Simulate the live box: apply each break the way the callback does, frame
+-- after frame, on a pasted paragraph. It must settle, with no empty lines.
+for _, width in ipairs({ 75, 76, 80, 100, 141 }) do
+  local txt, frames = "alpha beta gamma delta epsilon zeta eta theta iota kappa", 0
+  while frames < 200 do
+    local at = M.next_break(nil, txt, width)
+    if not at then break end
+    txt = txt:sub(1, at) .. "\n" .. txt:sub(at + 1)
+    frames = frames + 1
+  end
+  eq(tostring(frames < 200), "true", "paste settles at width " .. width)
+  eq(tostring(txt:find("\n\n") == nil), "true", "no empty lines at width " .. width)
+  eq(M.soft_unwrap(txt), "alpha beta gamma delta epsilon zeta eta theta iota kappa",
+     "paste round trip at width " .. width)
+end
 -- A tag pasted in the words-only view is kept, other tags stay put.
 eq(M.tags_merge("[warm] one two [slow] three", "one [pause] two three"),
    "[warm] one [pause] two [slow] three", "tag pasted in Script view")
