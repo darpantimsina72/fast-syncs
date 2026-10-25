@@ -416,14 +416,23 @@ end
 
 -- Byte offset (0-based, for the callback) just after the last space that
 -- still fits on the first too-long line of *txt*, or nil.
+--
+-- Trailing spaces are not measured. A soft break leaves its space at the end
+-- of the line ("word \n"), and that space can push the line one space-width
+-- past *width* even though every word fits. Measuring it made the line look
+-- too long forever: the only space left to break after was that trailing
+-- one, so every frame inserted another empty line and a pasted script grew
+-- downward without end (and gained blank lines that read as paragraph
+-- breaks).
 function M.next_break(ctx, txt, width)
   if not reaper.ImGui_CalcTextSize then return nil end
   local pos = 1
   for line in (txt .. "\n"):gmatch("(.-)\n") do
-    if reaper.ImGui_CalcTextSize(ctx, line) > width then
+    local body = line:match("^(.-)%s*$")
+    if reaper.ImGui_CalcTextSize(ctx, body) > width then
       local best
-      for k in line:gmatch("() ") do
-        if k > 1 and reaper.ImGui_CalcTextSize(ctx, line:sub(1, k - 1)) <= width then
+      for k in body:gmatch("() ") do
+        if k > 1 and reaper.ImGui_CalcTextSize(ctx, body:sub(1, k - 1)) <= width then
           best = k
         end
       end
