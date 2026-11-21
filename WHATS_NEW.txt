@@ -38,3 +38,4 @@
 0.15.17 | Big AI requests died at 100s with error 524 | Replies stream in, so long requests no longer time out
 0.15.17 | Auto Sync stuck at 75%, then "AI server took too long" | The AI is asked to answer straight away instead of thinking past the time limit
 0.15.18 | Pasted script kept growing downward with empty lines | Pasted script wraps once and stays put
+0.15.19 | Redo one line showed the whole script | Redo one line shows just that chunk's line

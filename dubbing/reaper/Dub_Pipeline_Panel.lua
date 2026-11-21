@@ -4307,7 +4307,7 @@ function V5.regen_merge_start(items)
   end)
   local texts, guids, seen = {}, {}, {}
   for _, it in ipairs(list) do
-    local txt = (V5.get_item_text(it) or ""):match("^%s*(.-)%s*$")
+    local txt = (V5.piece_text(it) or ""):match("^%s*(.-)%s*$")
     if txt ~= "" then
       -- Every selected item is replaced, but the same text is spoken once:
       -- items that carry identical text (a split item keeps its note on
@@ -5573,6 +5573,284 @@ function V5.item_is_split(item)
   return src_len and src_len > 0 and (len * rate) < (src_len - 0.25)
 end
 
+-- ── 0.15.19: the words of THIS piece, not the whole text stored on it ──────
+--
+-- Reported 2026-11-21: open a finished project again, select one chunk, and
+-- "Redo one line" shows the whole script of that audio instead of the
+-- chunk's own line. The text stored on an item is the text of the audio it
+-- was MADE with. When that audio was longer than the piece now on the
+-- timeline — a Text to Speech take cut into lines, a chunk split again, or a
+-- chunk from a run older than 0.15.9 that stored the whole script on every
+-- chunk — the stored text is the whole recording's, and a redo spoke all of
+-- it.
+--
+-- So when the stored text plainly belongs to the whole recording, the pane
+-- works out this piece's share:
+--   1. exactly, from the run's own files, when the piece is part of a dub
+--      run's speech (<name>_tts.wav): the timings file says which line sits
+--      where in that wav, and the texts file holds each line's words;
+--   2. otherwise estimated from timing: speech runs at a roughly even pace,
+--      so the piece's share of the recording's length is its share of the
+--      words, snapped to whole sentences when the cut fell between them.
+-- Text that already fits the piece is shown exactly as stored, as before.
+
+-- Speech pace used only to tell "the text of this piece" from "the text of
+-- the whole recording". Characters (not bytes) per second; generous on
+-- purpose — the two cases are usually tens of times apart.
+V5.SPEECH_CPS = 12
+
+-- (start, end, recording length) of the part of the recording this item
+-- plays, in seconds of that recording. nil when it cannot be read.
+function V5.piece_window(item)
+  if not item then return nil end
+  local take = reaper.GetActiveTake(item)
+  if not take or reaper.TakeIsMIDI(take) then return nil end
+  local src = reaper.GetMediaItemTake_Source(take)
+  if not src then return nil end
+  local src_len, is_qn = reaper.GetMediaSourceLength(src)
+  if is_qn or not src_len or src_len <= 0 then return nil end
+  local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
+  local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+  local rate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1
+  if rate <= 0 then rate = 1 end
+  local a = math.max(0, offs)
+  local b = math.min(src_len, offs + len * rate)
+  if b <= a then return nil end
+  return a, b, src_len
+end
+
+-- True when *text* reads as the words of the whole recording rather than of
+-- the piece: the piece plays less than 90% of the recording AND the text is
+-- nearer (as a ratio) to what the recording would hold than to what the
+-- piece would. A normal dub chunk (one line over a long run wav) stays
+-- false; a whole script on a two-second piece is true.
+function V5.text_is_for_source(text, piece_len, src_len)
+  if not text or not piece_len or not src_len then return false end
+  if piece_len <= 0 or src_len <= 0 then return false end
+  if piece_len >= 0.9 * src_len then return false end
+  local chars = V5._rg_chars(text)
+  if chars < 40 then return false end
+  return chars * chars > V5.SPEECH_CPS * V5.SPEECH_CPS * piece_len * src_len
+end
+
+-- 1. Exact: this piece's line(s) from the dub run its audio came from.
+-- Only for pieces of a run's speech wav (<name>_tts.wav). Looks for the
+-- run's timings + texts files next to that wav, in a tidy run's _work
+-- folder, and where the run's own engine_done.json says they are.
+function V5.run_line_for_piece(item, a, b)
+  local take = reaper.GetActiveTake(item)
+  local src = take and reaper.GetMediaItemTake_Source(take)
+  if not src then return nil end
+  -- The second argument is required; without it REAPER returns nothing.
+  local path = reaper.GetMediaSourceFileName(src, "") or ""
+  local dir, name = path:match("^(.*)[/\\]([^/\\]+)$")
+  local base = name and name:match("^(.*)_tts%.wav$")
+  if not base then return nil end
+
+  local pairs_ = {
+    { dir .. SEP .. base .. "_sync_timestamps.txt",
+      dir .. SEP .. base .. "_sync_texts.txt" },
+  }
+  local run = V5.out_dir_from_item(item)
+  if run and run ~= "" then
+    if V5.is_tidy(run) then
+      pairs_[#pairs_ + 1] = {
+        V5.layout_path(run, "work", base .. "_sync_timestamps.txt", false),
+        V5.layout_path(run, "work", base .. "_sync_texts.txt", false) }
+    end
+    pairs_[#pairs_ + 1] = {
+      run .. SEP .. base .. "_sync_timestamps.txt",
+      run .. SEP .. base .. "_sync_texts.txt" }
+    local m = load_manifest_json(run .. SEP .. "engine_done.json")
+    if m and (m.timestamps_txt or "") ~= "" and (m.sync_texts or "") ~= "" then
+      pairs_[#pairs_ + 1] = { m.timestamps_txt, m.sync_texts }
+    end
+  end
+
+  local entries, blocks
+  for _, p in ipairs(pairs_) do
+    if file_exists(p[1]) and file_exists(p[2]) then
+      entries = parse_timestamps_file(p[1])
+      blocks = V5.parse_texts_file(p[2])
+      if #entries > 0 and #blocks > 0 then break end
+      entries, blocks = nil, nil
+    end
+  end
+  if not entries then return nil end
+
+  -- Every line whose middle falls inside the piece; if none does (a short
+  -- cut inside one line), the line the piece's middle falls in.
+  local function line_text(e)
+    local t = blocks[e.index or 0] or ""
+    if t == "—" then t = "" end      -- the engine's empty-line placeholder
+    return t
+  end
+  local got = {}
+  for _, e in ipairs(entries) do
+    local mid = (e.orig_start + e.orig_end) / 2
+    if mid >= a and mid <= b then
+      local t = line_text(e)
+      if t:match("%S") then got[#got + 1] = t end
+    end
+  end
+  if #got == 0 then
+    local mid = (a + b) / 2
+    for _, e in ipairs(entries) do
+      if mid >= e.orig_start and mid <= e.orig_end then
+        local t = line_text(e)
+        if t:match("%S") then got[#got + 1] = t end
+        break
+      end
+    end
+  end
+  if #got == 0 then return nil end
+  return table.concat(got, " ")
+end
+
+-- 2. Estimate: the piece's share of *text*, assuming an even speaking pace
+-- across the recording [0, src_len]. Whole sentences when the piece holds
+-- at least half of the sentences it picks; otherwise single words.
+function V5.estimate_piece_text(text, a, b, src_len)
+  text = text or ""
+  if src_len <= 0 or b <= a then return nil end
+  -- Words with their position in characters, in one pass (a whole script
+  -- can be tens of thousands of characters).
+  local words, pos, cc = {}, 1, 0
+  for s, w, e in text:gmatch("()(%S+)()") do
+    cc = cc + V5._rg_chars(text:sub(pos, s - 1))
+    local c0 = cc
+    cc = cc + V5._rg_chars(w)
+    words[#words + 1] = { w = w, c0 = c0, c1 = cc }
+    pos = e
+  end
+  local total = cc + V5._rg_chars(text:sub(pos))
+  if #words == 0 or total <= 0 then return nil end
+  local k = src_len / total
+  local function inside(t0, t1)
+    local mid = (t0 + t1) / 2
+    return mid >= a and mid <= b
+  end
+
+  -- Sentences: a word ending in . ! ? । ॥ (closing quotes/brackets
+  -- allowed after it) ends one.
+  local sents, cur = {}, nil
+  for _, wd in ipairs(words) do
+    cur = cur or { c0 = wd.c0, list = {} }
+    cur.list[#cur.list + 1] = wd.w
+    cur.c1 = wd.c1
+    local bare = wd.w:gsub("[\"'%)%]”’»]+$", "")
+    if bare:match("[%.!%?]$") or bare:sub(-3) == "\224\165\164"
+       or bare:sub(-3) == "\224\165\165" or bare:sub(-3) == "\226\128\166" then
+      sents[#sents + 1] = cur
+      cur = nil
+    end
+  end
+  if cur then sents[#sents + 1] = cur end
+
+  local picked, lo, hi = {}, nil, nil
+  for _, s in ipairs(sents) do
+    if inside(s.c0 * k, s.c1 * k) then
+      picked[#picked + 1] = table.concat(s.list, " ")
+      lo = lo or s.c0 * k
+      hi = s.c1 * k
+    end
+  end
+  if #picked > 0 then
+    local overlap = math.min(hi, b) - math.max(lo, a)
+    if overlap >= 0.5 * (hi - lo) and overlap >= 0.5 * (b - a) then
+      return table.concat(picked, " ")
+    end
+  end
+
+  -- Words. If no word's middle is inside (a very short piece), the word
+  -- nearest the piece's middle.
+  local out = {}
+  for _, wd in ipairs(words) do
+    if inside(wd.c0 * k, wd.c1 * k) then out[#out + 1] = wd.w end
+  end
+  if #out == 0 then
+    local mid, best, bd = (a + b) / 2, nil, math.huge
+    for _, wd in ipairs(words) do
+      local d = math.abs((wd.c0 + wd.c1) / 2 * k - mid)
+      if d < bd then best, bd = wd.w, d end
+    end
+    out[1] = best
+  end
+  return table.concat(out, " ")
+end
+
+-- True when another item plays the SAME audio file and carries the SAME
+-- text — the mark of a cut: REAPER copies the text onto every piece. Dub
+-- chunks of one run share a file but each has its own line, so they are
+-- not caught; a run older than 0.15.9 that put the whole script on every
+-- chunk is.
+function V5.text_shared(item, stored)
+  local function src_path(it)
+    local take = reaper.GetActiveTake(it)
+    if not take or reaper.TakeIsMIDI(take) then return nil end
+    local src = reaper.GetMediaItemTake_Source(take)
+    return src and reaper.GetMediaSourceFileName(src, "") or nil
+  end
+  local mine = src_path(item)
+  if not mine or mine == "" then return false end
+  for i = 0, reaper.CountMediaItems(0) - 1 do
+    local it = reaper.GetMediaItem(0, i)
+    if it and it ~= item and src_path(it) == mine
+       and V5.get_item_text(it) == stored then
+      return true
+    end
+  end
+  return false
+end
+
+-- The text Redo should show and speak for *item*, plus how it was found:
+--   nil        — the text stored on the item, unchanged (the usual case)
+--   "run"      — the stored text was the whole recording's; this piece's
+--                line(s) came from the run's own files
+--   "estimate" — the same, but worked out from timing
+--   "whole"    — the stored text is the whole recording's and no share of
+--                it could be worked out
+-- Cached per item and only recomputed when its text, cut or audio changes,
+-- so the several-chunks view can call it every frame.
+V5.piece_cache = {}
+function V5.piece_text(item)
+  local stored = V5.get_item_text(item) or ""
+  local ok, a, b, src_len = pcall(V5.piece_window, item)
+  if not ok or not a then return stored, nil end
+  local g = _item_guid(item)
+  local key = table.concat({ #stored, stored:sub(1, 64), a, b, src_len }, "|")
+  local c = V5.piece_cache[g]
+  if c and c.key == key then return c.text, c.how end
+
+  local text, how = stored, nil
+  local empty = not stored:match("%S")
+  -- A shared text only counts when it is long enough to be the recording's
+  -- own words (2+ characters a second of it): two dub chunks that happen
+  -- to say the same short line are not a cut.
+  local okw, whole = pcall(function()
+    return not empty and (b - a) < 0.9 * src_len and
+           (V5.text_is_for_source(stored, b - a, src_len) or
+            (V5._rg_chars(stored) >= 2 * src_len and
+             V5.text_shared(item, stored)))
+  end)
+  whole = okw and whole
+  if empty or whole then
+    local ok2, exact = pcall(V5.run_line_for_piece, item, a, b)
+    if ok2 and exact and exact:match("%S") then
+      text, how = exact, "run"
+    elseif not empty then
+      local ok3, est = pcall(V5.estimate_piece_text, stored, a, b, src_len)
+      if ok3 and est and est:match("%S") then
+        text, how = est, "estimate"
+      else
+        how = "whole"
+      end
+    end
+  end
+  V5.piece_cache[g] = { key = key, text = text, how = how }
+  return text, how
+end
+
 
 -- v0.15.9: where a redo writes, worked out from the item you selected.
 --
@@ -5789,7 +6067,7 @@ function V5.ui_regen_multi(ctx, sel)
       goto next_row
     end
     local g    = _item_guid(it)
-    local txt  = V5.get_item_text(it) or ''
+    local txt  = V5.piece_text(it) or ''
     local vo   = V5.regen_voice_of[g] or ''
     local slot = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
     local idx  = V5._rg_index(it)
@@ -5880,7 +6158,7 @@ function V5.ui_regen_multi(ctx, sel)
                          230, 30) and can then
     local entries = {}
     for _, it in ipairs(sel) do
-      local txt = V5.get_item_text(it) or ''
+      local txt = V5.piece_text(it) or ''
       if txt:match('%S') then
         entries[#entries + 1] = { guid  = _item_guid(it),
                                   text  = txt,
@@ -6019,7 +6297,8 @@ local function ui_regen_section(ctx, default_open)
     local guid = _item_guid(item)
     if guid ~= _regen_sel_guid then
       _regen_sel_guid = guid
-      _regen_text = V5.get_item_text(item)
+      -- 0.15.19: this piece's own line, not the whole recording's text.
+      _regen_text = V5.piece_text(item)
     end
 
     local tr = reaper.GetMediaItem_Track(item)
@@ -6045,16 +6324,32 @@ local function ui_regen_section(ctx, default_open)
     if pushed then _pop_font(ctx) end
     if rv then _regen_text = txt end
 
-    -- Splitting copies the whole take's text onto every piece, so the box
-    -- above holds the ENTIRE original chunk rather than this slice of it.
-    -- Nothing can tell which words belong to which slice, so say so and let
-    -- the reader trim the box before spending credits.
-    if V5.item_is_split(item) then
+    -- 0.15.19: say where the words came from when they are not simply the
+    -- text stored on the item. (Before, every chunk of a run — each one a
+    -- window into the run's single speech wav — was flagged as "a piece of
+    -- a longer chunk", and a real piece showed the whole recording's text.)
+    -- Read again each frame (cached, cheap) so the note goes away once a
+    -- redo has replaced the piece with its own audio and text.
+    local _, how = V5.piece_text(item)
+    if how == "run" then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x88CC88FF)
+      reaper.ImGui_TextWrapped(ctx,
+        'Showing this chunk\'s own line, taken from the run\'s script. ' ..
+        '(The item carried the text of the whole recording.)')
+      reaper.ImGui_PopStyleColor(ctx)
+    elseif how == "estimate" then
       reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
       reaper.ImGui_TextWrapped(ctx,
-        'This item is a piece of a longer chunk. The text above is the ' ..
-        'WHOLE chunk, not just this piece — redoing it as-is speaks all of ' ..
-        'it. Delete the parts you do not want before pressing Regenerate.')
+        'This item is a piece of a longer recording. The text above is ' ..
+        'this piece\'s share, worked out from its timing — check the first ' ..
+        'and last words before pressing Regenerate.')
+      reaper.ImGui_PopStyleColor(ctx)
+    elseif how == "whole" then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFAA55FF)
+      reaper.ImGui_TextWrapped(ctx,
+        'This item is a piece of a longer recording. The text above is the ' ..
+        'WHOLE recording, not just this piece — redoing it as-is speaks all ' ..
+        'of it. Delete the parts you do not want before pressing Regenerate.')
       reaper.ImGui_PopStyleColor(ctx)
     end
 
