@@ -39,3 +39,5 @@
 0.15.17 | Auto Sync stuck at 75%, then "AI server took too long" | The AI is asked to answer straight away instead of thinking past the time limit
 0.15.18 | Pasted script kept growing downward with empty lines | Pasted script wraps once and stays put
 0.15.19 | Redo one line showed the whole script | Redo one line shows just that chunk's line
+0.15.20 | Bangla letters broken in Auto Sync script box | Letters joined correctly
+0.15.20 | Auto Sync kept the launch language's font | Font follows the chosen language

@@ -235,6 +235,22 @@ end
 -- ── Joined-letter pictures (needs js_ReaScriptAPI) ────────────────────────
 -- The panel sets M.joined_font to the OS font family for the language.
 M.joined_font = nil
+
+-- 0.15.20: the OS font family for joined letters, per Unicode script.
+-- Windows: Nirmala UI covers every Indic script here (8.1+). macOS: the
+-- system Sangam MN family of that script. Shared by the dub panel and Auto
+-- Sync so both windows join letters the same way.
+M.JOINED_FONTS_MAC = {
+  Devanagari = "Devanagari Sangam MN", Bengali = "Bangla Sangam MN",
+  Tamil = "Tamil Sangam MN", Telugu = "Telugu Sangam MN",
+  Kannada = "Kannada Sangam MN", Malayalam = "Malayalam Sangam MN",
+  Gujarati = "Gujarati Sangam MN", Oriya = "Oriya Sangam MN",
+  Gurmukhi = "Gurmukhi Sangam MN",
+}
+function M.joined_font_for(script)
+  if reaper.GetOS():match("Win") then return "Nirmala UI" end
+  return M.JOINED_FONTS_MAC[script or ""] or "Devanagari Sangam MN"
+end
 function M.can_draw_joined()
   return reaper.JS_LICE_CreateBitmap ~= nil and reaper.JS_GDI_DrawText ~= nil
      and reaper.ImGui_CreateImageFromLICE ~= nil and M.joined_font ~= nil
