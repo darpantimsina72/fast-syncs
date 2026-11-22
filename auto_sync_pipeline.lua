@@ -1,6 +1,6 @@
 -- @description Fast Syncs — AI dubbing sync for REAPER
 -- @author darpantimsina72
--- @version 0.15.19
+-- @version 0.15.20
 -- @about
 --   Transcribes your Dialogue VO and Dub tracks, asks Gemini which dubbed clip
 --   means the same thing as which English clip, and moves each dubbed clip to
@@ -446,9 +446,17 @@ local _LANG_TO_SCRIPT = {
 
 -- Attach a font that covers the configured DUB_LANGUAGE script so Indic log
 -- lines render with proper glyphs. Falls back to the default font.
-local function _attach_unicode_font(ctx)
-  if not reaper.ImGui_CreateFont then return nil end
-  local script = _LANG_TO_SCRIPT[DUB_LANGUAGE or ""] or "Devanagari"
+-- 0.15.20: *script* picks the font (default: the one for DUB_LANGUAGE), so
+-- the window can follow a language change instead of keeping the font of
+-- whatever language was set at launch (Bangla showed as boxes after
+-- switching from Nepali). Prefers CreateFontFromFile: since ReaImGui 0.10
+-- CreateFont takes a family name and a .ttf path there fails silently,
+-- leaving no Indic font at all.
+local function _attach_unicode_font(ctx, script)
+  if not (reaper.ImGui_CreateFontFromFile or reaper.ImGui_CreateFont) then
+    return nil
+  end
+  script = script or _LANG_TO_SCRIPT[DUB_LANGUAGE or ""] or "Devanagari"
   local paths = {}
   if reaper.GetOS():match("Win") then
     local local_fonts = (os.getenv("LOCALAPPDATA") or "")
@@ -467,12 +475,29 @@ local function _attach_unicode_font(ctx)
       '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
       '/Library/Fonts/Arial Unicode.ttf',
     }
+    -- The system font for this script (macOS ships one per script).
+    local sys = ({ Bengali = 'Bangla Sangam MN.ttc',
+                   Devanagari = 'Devanagari Sangam MN.ttc',
+                   Tamil = 'Tamil Sangam MN.ttc', Telugu = 'Telugu Sangam MN.ttc',
+                   Kannada = 'Kannada Sangam MN.ttc',
+                   Malayalam = 'Malayalam Sangam MN.ttc',
+                   Gujarati = 'Gujarati Sangam MN.ttc',
+                   Gurmukhi = 'Gurmukhi Sangam MN.ttc',
+                   Oriya = 'Oriya Sangam MN.ttc' })[script]
+    if sys then
+      table.insert(paths, 3, '/System/Library/Fonts/Supplemental/' .. sys)
+    end
   end
   for _, p in ipairs(paths) do
     local fh = io.open(p, 'rb')
     if fh then
       fh:close()
-      local ok, font = pcall(reaper.ImGui_CreateFont, p, 16)
+      local ok, font
+      if reaper.ImGui_CreateFontFromFile then
+        ok, font = pcall(reaper.ImGui_CreateFontFromFile, p, 0, 0)
+      else
+        ok, font = pcall(reaper.ImGui_CreateFont, p, 16)
+      end
       if ok and font then
         if pcall(reaper.ImGui_Attach, ctx, font) then
           log_append("[font] loaded " .. p)
@@ -1486,8 +1511,23 @@ local function ui_phase_setup(ctx, on_start, on_cancel)
         reaper.ImGui_SameLine(ctx)
         reaper.ImGui_TextDisabled(ctx, 'tags are ignored for matching')
       end
+      -- 0.15.20: joined letters here too. The dub panel turns them on for
+      -- its own boxes, but this window loads its own copy of the editor and
+      -- never named a font, so Bangla (and every Indic script) was drawn by
+      -- ImGui, which cannot join letters: vowel signs sat on the wrong side
+      -- and conjuncts fell apart.
+      if SK.joined_font_for then
+        SK.joined_font = SK.joined_font_for(
+          _LANG_TO_SCRIPT[DUB_LANGUAGE or ""] or "Devanagari")
+      end
       if reaper.ImGui_BeginChild(ctx, '##scriptwrap', -1, 140, SK.frame_flags()) then
+        -- Indic-capable font for the box itself (used when the joined
+        -- picture is unavailable, and for wrap widths).
+        local pushed = _ui_font and
+          (pcall(reaper.ImGui_PushFont, ctx, _ui_font, 16) or
+           pcall(reaper.ImGui_PushFont, ctx, _ui_font))
         local changed, txt = SK.script_box(ctx, '##script', SCRIPT_TEXT or '', view, 5)
+        if pushed then pcall(reaper.ImGui_PopFont, ctx) end
         if changed then SCRIPT_TEXT = txt end
         reaper.ImGui_EndChild(ctx)
       end
@@ -2365,7 +2405,19 @@ local function main()
 
   reaper.ClearConsole()
   _ui_ctx  = reaper.ImGui_CreateContext('Auto Sync Pipeline')
-  _ui_font = _attach_unicode_font(_ui_ctx)
+  -- 0.15.20: one font per script, made once each, swapped when the
+  -- language changes (see _attach_unicode_font).
+  local _fonts_by_script, _font_script = {}, nil
+  local function font_tick()
+    local script = _LANG_TO_SCRIPT[DUB_LANGUAGE or ""] or "Devanagari"
+    if script == _font_script then return end
+    _font_script = script
+    if _fonts_by_script[script] == nil then
+      _fonts_by_script[script] = _attach_unicode_font(_ui_ctx, script) or false
+    end
+    _ui_font = _fonts_by_script[script] or nil
+  end
+  font_tick()
 
   local function close_window() _ui_window_open = false end
 
@@ -2411,6 +2463,7 @@ local function main()
   end
 
   local function frame()
+    font_tick()
     if _pos_fix then
       reaper.ImGui_SetNextWindowPos(_ui_ctx, _pos_fix[1], _pos_fix[2])
       _pos_fix = nil

@@ -49,5 +49,12 @@ end
 -- A tag pasted in the words-only view is kept, other tags stay put.
 eq(M.tags_merge("[warm] one two [slow] three", "one [pause] two three"),
    "[warm] one [pause] two [slow] three", "tag pasted in Script view")
+-- 0.15.20: joined-letter font per script, shared by the panel and Auto Sync.
+reaper.GetOS = function() return "macOS-arm64" end
+eq(M.joined_font_for("Bengali"), "Bangla Sangam MN", "mac Bangla font")
+eq(M.joined_font_for("Tamil"), "Tamil Sangam MN", "mac Tamil font")
+eq(M.joined_font_for(nil), "Devanagari Sangam MN", "mac default font")
+reaper.GetOS = function() return "Win64" end
+eq(M.joined_font_for("Bengali"), "Nirmala UI", "Windows Bangla font")
 print(fails == 0 and "ALL PASS" or (fails .. " FAILED"))
 os.exit(fails == 0 and 0 or 1)
